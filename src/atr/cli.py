@@ -61,6 +61,21 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--save", help="write per-fold results to this CSV path")
 
     # ------------------------------------------------------------------
+    pf = sub.add_parser("portfolio", help="pull live portfolio from IIFL")
+    pf.add_argument(
+        "section", nargs="?", default="all",
+        choices=["all", "limits", "positions", "holdings", "orders", "trades"],
+    )
+    pf.add_argument("--limit", type=int, default=25, help="max rows printed per section")
+    pf.add_argument("--json", dest="json_path", help="write raw payload to this file")
+
+    # ------------------------------------------------------------------
+    qt = sub.add_parser("quote", help="live market quotes for symbols")
+    qt.add_argument("--symbols", required=True, help="comma-separated, e.g. RELIANCE-EQ,INFY-EQ")
+    qt.add_argument("--exchange", default="NSEEQ")
+    qt.add_argument("--json", dest="json_path", help="write raw payload to this file")
+
+    # ------------------------------------------------------------------
     login = sub.add_parser("login", help="complete the IIFL OAuth login")
     login.add_argument("--client-id", help="clientId returned to your redirect URL")
     login.add_argument("--auth-code", help="authCode returned to your redirect URL")
@@ -196,6 +211,152 @@ def _run_research(args) -> int:
         result.to_frame().to_csv(args.save, index=False)
         result.oos_equity.to_csv(args.save.replace(".csv", "_equity.csv"), header=True)
         logger.info("wrote per-fold results and OOS equity next to {}", args.save)
+    return 0
+
+
+def _rows(payload) -> list[dict]:
+    """IIFL wraps list responses in ``{"result": [...]}``; tolerate either."""
+    if isinstance(payload, dict):
+        for key in ("result", "data", "positions", "holdings", "orders", "trades", "limits"):
+            if key in payload:
+                value = payload[key]
+                if isinstance(value, list):
+                    return [v for v in value if isinstance(v, dict)]
+                if isinstance(value, dict):
+                    return [value]
+        return [payload]
+    return [v for v in (payload or []) if isinstance(v, dict)]
+
+
+def _print_table(rows: list[dict], limit: int) -> None:
+    """Print rows, skipping nested columns that would render unreadably."""
+    import pandas as pd
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        print("  (empty)")
+        return
+    flat = [
+        c for c in frame.columns
+        if not frame[c].map(lambda v: isinstance(v, (dict, list))).any()
+    ]
+    print(frame[flat].head(limit).to_string(index=False))
+    if len(frame) > limit:
+        print(f"  ... {len(frame) - limit} more (raise with --limit)")
+
+
+def _authenticated_client():
+    """Return a client with a live session, or None if we must log in first."""
+    from atr.brokers.iifl.client import IiflClient
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    client = IiflClient(app_key=settings.iifl_app_key, app_secret=settings.iifl_app_secret)
+    if not client.restore_session():
+        logger.error("no active session — run `atr login --print-url` and complete the login")
+        return None
+    return client
+
+
+def _run_portfolio(args) -> int:
+    import json as _json
+
+    client = _authenticated_client()
+    if client is None:
+        return 1
+
+    sections = (
+        ["limits", "positions", "holdings", "orders", "trades"]
+        if args.section == "all"
+        else [args.section]
+    )
+    fetchers = {
+        "limits": client.limits,
+        "positions": client.positions,
+        "holdings": client.holdings,
+        "orders": client.order_book,
+        "trades": client.trades,
+    }
+
+    raw: dict = {}
+    with client:
+        for name in sections:
+            try:
+                raw[name] = fetchers[name]()
+            except Exception as exc:  # noqa: BLE001 - one dead endpoint shouldn't abort
+                logger.error("{} failed: {}", name, exc)
+                raw[name] = None
+
+    for name in sections:
+        rows = _rows(raw[name])
+        print(f"\n=== {name} ===")
+        if not rows:
+            print("  (empty)")
+            continue
+        if name == "limits":
+            for key, value in rows[0].items():
+                print(f"  {str(key):32} {value}")
+        else:
+            _print_table(rows, args.limit)
+
+    if args.json_path:
+        with open(args.json_path, "w", encoding="utf-8") as fh:
+            _json.dump(raw, fh, indent=2, default=str)
+        logger.info("wrote raw payload to {}", args.json_path)
+    return 0
+
+
+def _run_quote(args) -> int:
+    import json as _json
+
+    from atr.brokers.iifl.contracts import InstrumentMaster
+    from atr.scanner import resolve_conid
+
+    client = _authenticated_client()
+    if client is None:
+        return 1
+
+    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    with client:
+        master = InstrumentMaster(client)
+        try:
+            master.load_cached([args.exchange])
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "no cached instrument master for {} — run `atr instruments sync --exchanges {}`",
+                args.exchange, args.exchange,
+            )
+            logger.debug("load_cached failed: {}", exc)
+            return 1
+
+        legs, resolved, failed = [], [], []
+        for symbol in symbols:
+            try:
+                legs.append((args.exchange, resolve_conid(master, symbol, args.exchange)))
+                resolved.append(symbol)
+            except Exception as exc:  # noqa: BLE001
+                failed.append((symbol, str(exc)[:120]))
+
+        for symbol, reason in failed:
+            logger.error("could not resolve {}: {}", symbol, reason)
+        if not legs:
+            return 1
+
+        try:
+            payload = client.market_quotes(legs)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("quote request failed: {}", exc)
+            return 1
+
+    quotes = _rows(payload)
+    for symbol, quote in zip(resolved, quotes, strict=False):
+        quote["symbol"] = symbol
+    _print_table(quotes, limit=len(quotes) or 1)
+
+    if args.json_path:
+        with open(args.json_path, "w", encoding="utf-8") as fh:
+            _json.dump(payload, fh, indent=2, default=str)
+        logger.info("wrote raw payload to {}", args.json_path)
     return 0
 
 
@@ -368,6 +529,8 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "backtest": _run_backtest,
         "research": _run_research,
+        "portfolio": _run_portfolio,
+        "quote": _run_quote,
         "login": _run_login,
         "instruments": _run_instruments,
         "history": _run_history,
