@@ -1,0 +1,306 @@
+"""Command line entrypoint.
+
+    uv run atr backtest --strategy sma_crossover --source synthetic
+    uv run atr login
+    uv run atr instruments sync --exchanges NSEEQ,NSEFO
+    uv run atr live --symbols NSEFO:NIFTY-I
+    uv run atr serve
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime
+
+from loguru import logger
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="atr", description="Algo trading backend")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # ------------------------------------------------------------------
+    bt = sub.add_parser("backtest", help="run a backtest")
+    bt.add_argument("--strategy", default="sma_crossover")
+    bt.add_argument("--source", default="synthetic", choices=["synthetic", "csv", "parquet"])
+    bt.add_argument("--path", help="directory or file for csv/parquet sources")
+    bt.add_argument("--symbols", default="AAPL,MSFT")
+    bt.add_argument("--cash", type=float, default=1_000_000.0)
+    bt.add_argument("--fast", type=int, default=20)
+    bt.add_argument("--slow", type=int, default=50)
+    bt.add_argument("--futures", action="store_true", help="model symbols as futures (margin)")
+    bt.add_argument("--square-off-eod", action="store_true")
+    bt.add_argument("--slippage-bps", type=float, default=5.0)
+    bt.add_argument(
+        "--max-daily-loss",
+        type=float,
+        default=None,
+        help="halt trading after this much loss in a day (default: 10% of starting cash)",
+    )
+    bt.add_argument("--save", help="write equity curve to this CSV path")
+
+    # ------------------------------------------------------------------
+    login = sub.add_parser("login", help="complete the IIFL OAuth login")
+    login.add_argument("--client-id", help="clientId returned to your redirect URL")
+    login.add_argument("--auth-code", help="authCode returned to your redirect URL")
+    login.add_argument("--print-url", action="store_true", help="only print the login URL")
+
+    # ------------------------------------------------------------------
+    inst = sub.add_parser("instruments", help="instrument master")
+    inst.add_argument("action", choices=["sync", "search"])
+    inst.add_argument("--exchanges", default="NSEEQ,NSEFO")
+    inst.add_argument("--query", default="NIFTY")
+    inst.add_argument("--limit", type=int, default=20)
+
+    # ------------------------------------------------------------------
+    live = sub.add_parser("live", help="stream ticks from the IIFL bridge")
+    live.add_argument("--topics", default="nseeq/2885", help="comma separated exchange/id")
+    live.add_argument("--seconds", type=float, default=10.0)
+
+    sub.add_parser("serve", help="start the FastAPI control plane")
+
+    # ------------------------------------------------------------------
+    hist = sub.add_parser("history", help="bulk history cache + full-market scan")
+    hist.add_argument("action", choices=["sync", "scan-all"])
+    hist.add_argument("--exchange", default="NSEEQ")
+    hist.add_argument("--interval", default="1d")
+    hist.add_argument("--from", dest="from_date", default=None)
+    hist.add_argument("--to", dest="to_date", default=None)
+    hist.add_argument("--workers", type=int, default=6)
+    hist.add_argument("--start", type=int, default=0)
+    hist.add_argument("--end", type=int, default=None)
+
+    # ------------------------------------------------------------------
+    al = sub.add_parser("alerts", help="evaluate price/indicator alert rules")
+    al.add_argument("action", choices=["check", "test", "list"])
+
+    # ------------------------------------------------------------------
+    br = sub.add_parser("brief", help="morning briefing (preview or Telegram it)")
+    br.add_argument("action", choices=["preview", "send"], nargs="?", default="preview")
+    return parser
+
+
+def _run_backtest(args) -> int:
+    from atr.backtest.costs import SlippageModel
+    from atr.backtest.engine import BacktestConfig, BacktestEngine
+    from atr.data.csv_feed import CsvFeed, ParquetFeed
+    from atr.data.synthetic import SyntheticConfig, SyntheticFeed
+    from atr.execution.risk import RiskLimits
+    from atr.strategy.strategies import STRATEGIES
+
+    symbols = tuple(s.strip().upper() for s in args.symbols.split(",") if s.strip())
+
+    if args.source == "synthetic":
+        feed = SyntheticFeed(
+            SyntheticConfig(symbols=symbols, start=datetime(2024, 1, 1, 9, 30),
+                            end=datetime(2024, 6, 28, 15, 59)),
+            futures=args.futures,
+        )
+    elif args.source == "csv":
+        feed = CsvFeed(directory=args.path) if not args.path.endswith(".csv") else CsvFeed(path=args.path)
+    else:
+        feed = ParquetFeed(directory=args.path)
+
+    strategy_cls = STRATEGIES.get(args.strategy)
+    if strategy_cls is None:
+        logger.error("unknown strategy {!r}; available: {}", args.strategy, list(STRATEGIES))
+        return 2
+    strategy = strategy_cls(fast=args.fast, slow=args.slow) if args.strategy == "sma_crossover" else strategy_cls()
+
+    config = BacktestConfig(
+        initial_cash=args.cash,
+        slippage=SlippageModel(bps=args.slippage_bps),
+        square_off_eod=args.square_off_eod,
+        risk=RiskLimits(max_daily_loss=args.max_daily_loss or args.cash * 0.10),
+    )
+    result = BacktestEngine(feed, strategy, config).run()
+    print(result.summary())
+    if args.save:
+        result.equity.to_csv(args.save, header=True)
+        logger.info("wrote equity curve to {}", args.save)
+    return 0
+
+
+def _run_login(args) -> int:
+    from atr.brokers.iifl.auth import login_url
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    if args.print_url or not (args.client_id and args.auth_code):
+        print(login_url(settings.iifl_app_key, settings.iifl_redirect_url))
+        print("\nOpen the URL, log in, then re-run with --client-id and --auth-code.")
+        return 0
+
+    from atr.brokers.iifl.client import IiflClient
+
+    client = IiflClient(app_key=settings.iifl_app_key, app_secret=settings.iifl_app_secret)
+    session = client.create_session(args.client_id, args.auth_code)
+    print(json.dumps({"client_id": session.client_id, "expires_at": session.expires_at.isoformat()}))
+    return 0
+
+
+def _run_instruments(args) -> int:
+    from atr.brokers.iifl.client import IiflClient
+    from atr.brokers.iifl.contracts import InstrumentMaster
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    client = IiflClient(app_key=settings.iifl_app_key, app_secret=settings.iifl_app_secret)
+    if not client.restore_session():
+        logger.error("no active session — run `atr login` first")
+        return 1
+    master = InstrumentMaster(client)
+    exchanges = [e.strip() for e in args.exchanges.split(",")]
+    master.sync(exchanges)
+    if args.action == "search":
+        print(master.search(args.query, limit=args.limit)[["symbol", "exchange", "conid", "expiry"]].to_string())
+    else:
+        print(f"synced {len(master.frame)} contracts")
+    return 0
+
+
+def _run_live(args) -> int:
+    import time
+
+    from atr.brokers.iifl.auth import SessionStore
+    from atr.brokers.iifl.bridge import BridgeClient
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    session = SessionStore(settings.iifl_session_cache).load()
+    if session is None:
+        logger.error("no active session — run `atr login` first")
+        return 1
+
+    bridge = BridgeClient(session)
+    bridge.on_feed = lambda topic, feed: print(
+        f"{topic} ltp={feed.ltp:.2f} bid={feed.best_bid_price:.2f} ask={feed.best_ask_price:.2f} vol={feed.traded_volume}"
+    )
+    bridge.on_error = lambda code, msg: logger.error("{}: {}", code, msg)
+    bridge.connect()
+    topics = [t.strip() for t in args.topics.split(",")]
+    bridge.subscribe_feed(topics)
+    logger.info("streaming {} for {}s ...", topics, args.seconds)
+    time.sleep(args.seconds)
+    bridge.disconnect()
+    return 0
+
+
+def _run_history(args) -> int:
+    from datetime import date
+
+    import pandas as pd
+
+    from atr.data.history import load_cached, sync_all
+    from atr.scanner import score_frame
+
+    if args.action == "sync":
+        sync_all(args.exchange, args.interval, args.from_date, args.to_date,
+                 workers=args.workers, start=args.start, end=args.end)
+        return 0
+
+    frames = load_cached(args.exchange)
+    rows = []
+    for symbol, df in frames.items():
+        try:
+            rows.append(score_frame(symbol, df))
+        except Exception:  # noqa: BLE001 — thin/odd histories just don't rank
+            continue
+    scan = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+    out = f"data/scans/scan_all_{date.today():%Y%m%d}.csv"
+    scan.to_csv(out, index=False)
+    up = int((scan["trend"] == "UP").sum())
+    print(f"scored {len(scan)}/{len(frames)} names -> {out}")
+    print(f"breadth: {up} UP / {len(scan) - up} not-UP")
+    print("\n--- top 10 ---\n" + scan.head(10).to_string(index=False))
+    print("\n--- bottom 10 ---\n" + scan.tail(10).to_string(index=False))
+    breakout = scan[scan["breakout"]]
+    if not breakout.empty:
+        print("\n--- breakouts ---\n" + breakout[["symbol", "last", "ret_1m", "vol_x"]].to_string(index=False))
+    return 0
+
+
+def _run_alerts(args) -> int:
+    from atr.alerts.channels import channels_from_settings
+    from atr.alerts.engine import check, market_open_now
+    from atr.alerts.store import AlertStore
+    from atr.brokers.iifl.client import IiflClient
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    store = AlertStore()
+    if args.action == "list":
+        for r in store.rules():
+            print(f"[{'ARMED' if r.armed else 'off'}] {r.id} {r.display} (cooldown {r.cooldown_min}m)")
+        return 0
+    if args.action == "test":
+        for ch in channels_from_settings(settings):
+            if ch.send("ATR test", "alerts are wired — you will get firing rules here."):
+                print(f"test message sent via {ch.name}")
+                return 0
+        print("nothing configured — message went nowhere; set TELEGRAM_BOT_TOKEN/CHAT_ID")
+        return 1
+    client = IiflClient(app_key=settings.iifl_app_key, app_secret=settings.iifl_app_secret)
+    if client.restore_session() is None:
+        print("no active session — run `atr login` first")
+        return 1
+    fired = check(store, client, channels_from_settings(settings))
+    print(f"market_open={market_open_now()} fired={len(fired)}")
+    for e in fired:
+        print(f"[{e.channel}] {e.rule} — {e.message}")
+    return 0
+
+
+def _run_brief(args) -> int:
+    from atr.alerts.channels import channels_from_settings
+    from atr.briefing import build_brief, load_config, record_sent
+    from atr.config.settings import get_settings
+
+    cfg = load_config()
+    message, stats = build_brief(cfg)
+    print(message)
+    if args.action == "send":
+        if not cfg.send_enabled:
+            print("(send disabled in config — preview only)")
+            return 0
+        for ch in channels_from_settings(get_settings()):
+            if ch.send("ATR morning brief", message):
+                record_sent(message, ch.name)
+                print(f"sent via {ch.name}")
+                return 0
+        print("nothing configured to send with")
+        return 1
+    return 0
+
+
+def _run_serve(args) -> int:
+    import uvicorn
+
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    uvicorn.run("atr.api.main:app", host=settings.api_host, port=settings.api_port, reload=False)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    logger.remove()
+    logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | {message}")
+    handlers = {
+        "backtest": _run_backtest,
+        "login": _run_login,
+        "instruments": _run_instruments,
+        "history": _run_history,
+        "alerts": _run_alerts,
+        "brief": _run_brief,
+        "live": _run_live,
+        "serve": _run_serve,
+    }
+    return handlers[args.command](args)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

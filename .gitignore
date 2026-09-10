@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.cache/
+data/
+.pytest_cache/
+uv.lock.bak
+
+# Logs
+*.log
+
+# Frontend build output and dependencies
+node_modules/
+web/dist/
