@@ -1,6 +1,7 @@
 """Command line entrypoint.
 
     uv run atr backtest --strategy sma_crossover --source synthetic
+    uv run atr research --strategy sma_crossover --train 5000 --test 1250
     uv run atr login
     uv run atr instruments sync --exchanges NSEEQ,NSEFO
     uv run atr live --symbols NSEFO:NIFTY-I
@@ -40,6 +41,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="halt trading after this much loss in a day (default: 10% of starting cash)",
     )
     bt.add_argument("--save", help="write equity curve to this CSV path")
+
+    # ------------------------------------------------------------------
+    rs = sub.add_parser(
+        "research", help="walk-forward validation — score a strategy out of sample"
+    )
+    rs.add_argument("--strategy", default="sma_crossover")
+    rs.add_argument("--source", default="synthetic", choices=["synthetic", "csv", "parquet"])
+    rs.add_argument("--path", help="directory or file for csv/parquet sources")
+    rs.add_argument("--symbols", default="AAPL")
+    rs.add_argument("--cash", type=float, default=1_000_000.0)
+    rs.add_argument("--train", type=int, default=5_000, help="bars used to pick parameters")
+    rs.add_argument("--test", type=int, default=1_250, help="unseen bars each fold is scored on")
+    rs.add_argument("--step", type=int, default=None, help="slide size (default: --test)")
+    rs.add_argument("--fast", default="10,20,30", help="comma-separated parameter grid")
+    rs.add_argument("--slow", default="50,100", help="comma-separated parameter grid")
+    rs.add_argument("--min-trades", type=int, default=100)
+    rs.add_argument("--confidence", type=float, default=0.95)
+    rs.add_argument("--save", help="write per-fold results to this CSV path")
 
     # ------------------------------------------------------------------
     login = sub.add_parser("login", help="complete the IIFL OAuth login")
@@ -120,6 +139,63 @@ def _run_backtest(args) -> int:
     if args.save:
         result.equity.to_csv(args.save, header=True)
         logger.info("wrote equity curve to {}", args.save)
+    return 0
+
+
+def _run_research(args) -> int:
+    """Walk a strategy forward and report only the out-of-sample evidence."""
+    from atr.backtest.costs import SlippageModel
+    from atr.backtest.engine import BacktestConfig
+    from atr.data.csv_feed import CsvFeed, ParquetFeed
+    from atr.data.synthetic import SyntheticConfig, SyntheticFeed
+    from atr.execution.risk import RiskLimits
+    from atr.research.validate import ValidationConfig, WalkForwardConfig, walk_forward
+    from atr.strategy.strategies import STRATEGIES
+
+    symbols = tuple(s.strip().upper() for s in args.symbols.split(",") if s.strip())
+
+    if args.source == "synthetic":
+        feed = SyntheticFeed(
+            SyntheticConfig(symbols=symbols, start=datetime(2024, 1, 1, 9, 30),
+                            end=datetime(2024, 6, 28, 15, 59))
+        )
+    elif args.source == "csv":
+        feed = CsvFeed(directory=args.path) if not args.path.endswith(".csv") else CsvFeed(path=args.path)
+    else:
+        feed = ParquetFeed(directory=args.path)
+
+    strategy_cls = STRATEGIES.get(args.strategy)
+    if strategy_cls is None:
+        logger.error("unknown strategy {!r}; available: {}", args.strategy, list(STRATEGIES))
+        return 2
+
+    def grid(text: str) -> list[int]:
+        return [int(x) for x in text.split(",") if x.strip()]
+
+    # Parameter grids are strategy-specific; only SMA crossover takes fast/slow.
+    param_grid = (
+        {"fast": grid(args.fast), "slow": grid(args.slow)}
+        if args.strategy == "sma_crossover"
+        else {}
+    )
+
+    result = walk_forward(
+        feed,
+        strategy_cls,
+        param_grid,
+        config=WalkForwardConfig(train_bars=args.train, test_bars=args.test, step_bars=args.step),
+        backtest=BacktestConfig(
+            initial_cash=args.cash,
+            slippage=SlippageModel(bps=5.0),
+            risk=RiskLimits(max_daily_loss=args.cash * 0.10),
+        ),
+        validation=ValidationConfig(min_trades=args.min_trades, min_confidence=args.confidence),
+    )
+    print(result.summary())
+    if args.save:
+        result.to_frame().to_csv(args.save, index=False)
+        result.oos_equity.to_csv(args.save.replace(".csv", "_equity.csv"), header=True)
+        logger.info("wrote per-fold results and OOS equity next to {}", args.save)
     return 0
 
 
@@ -291,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | {message}")
     handlers = {
         "backtest": _run_backtest,
+        "research": _run_research,
         "login": _run_login,
         "instruments": _run_instruments,
         "history": _run_history,

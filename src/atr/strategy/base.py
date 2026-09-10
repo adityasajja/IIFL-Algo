@@ -26,7 +26,6 @@ from atr.core.enums import OrderType, Side, TimeInForce
 from atr.core.models import Bar, Instrument, Order, Position
 from atr.data.aggregator import RollingWindow
 
-
 # --------------------------------------------------------------------------
 # Row access
 #

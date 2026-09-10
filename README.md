@@ -60,6 +60,10 @@ uv run atr backtest --strategy sma_crossover --symbols AAPL,MSFT
 # Model the same symbols as futures to exercise margin + lot sizing
 uv run atr backtest --strategy sma_crossover --futures --cash 1000000
 
+# Validate out of sample — parameters chosen only on data the test never saw
+uv run atr research --strategy sma_crossover --train 5000 --test 1250 \
+    --fast 5,10,20 --slow 30,50,100
+
 # Start the HTTP control plane
 uv run atr serve        # http://127.0.0.1:8000/docs
 
@@ -155,6 +159,42 @@ before you trade than after.
 
 ---
 
+## Validating a strategy
+
+A single backtest is not evidence. Fit enough parameter combinations to one
+price series and the best of them will look excellent by chance — that is the
+failure mode this section exists to block.
+
+```bash
+uv run atr research --strategy sma_crossover --train 5000 --test 1250 \
+    --fast 5,10,20 --slow 30,50,100
+```
+
+`atr research` walks forward fold by fold. Parameters are chosen **only** on
+the training window, then scored once on the window that follows it. The equity
+curve it reports is stitched from unseen windows only — nothing in it was used
+to pick a parameter.
+
+It then withholds a pass unless every one of these holds:
+
+* enough folds, and enough trades, for the result to mean anything
+* **deflated Sharpe** above your confidence threshold — the Sharpe corrected
+  for how many combinations you tried (Bailey & López de Prado). Picking the
+  best of 261 combos demands far stronger evidence than testing one idea, and
+  this is the number that says so.
+* a positive out-of-sample Sharpe that **beats buy-and-hold**
+* drawdown inside your limit
+
+Run against the synthetic feed, `sma_crossover` **fails** — and that is the
+correct answer. There is no signal in a random walk; a harness that flattered
+you here would be worthless. On that run the reason is visible in the numbers:
+the strategy turns over ~245 times in six months and pays roughly 12% of
+notional in slippage, so costs, not direction, are what sink it.
+
+Passing this is necessary, not sufficient. It means "not yet disproven".
+
+---
+
 ## Writing a strategy
 
 ```python
@@ -214,7 +254,6 @@ hypertables with compression enabled when the extension is present.
 
 ## Roadmap / not done yet
 
-* Backtest walk-forward + parameter sweep harness
 * Bracket/cover order support (`BO`/`CO`) beyond payload passthrough
 * Option greeks and an F&O strategy template
 * Reconciliation job (broker positions vs internal portfolio)
