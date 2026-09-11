@@ -35,23 +35,30 @@ def fetch_quotes(client: IiflClient, symbols: list[tuple[str, str]]) -> dict[str
     """{(symbol): {ltp, day_chg, open, high, low, prev_close}} via one call."""
     master = InstrumentMaster(client)
     master.load_cached(sorted({ex for _, ex in symbols}))
-    legs, keys = [], []
+    # Key the request by (exchange, instrumentId) rather than by position. Two
+    # rules on the same symbol produce two identical legs, and a positional
+    # lookup then maps both responses onto the first symbol.
+    pairs: list[tuple[str, tuple[str, str]]] = []
     for symbol, exchange in symbols:
         try:
             conid = getattr(master.find(symbol, exchange), "conid", None)
         except KeyError:
             continue
-        legs.append((exchange, str(conid)))
-        keys.append(symbol)
-    if not legs:
+        if conid is None:
+            continue
+        pairs.append((symbol, (exchange.upper(), str(conid))))
+    if not pairs:
         return {}
+    by_key = {key: symbol for symbol, key in pairs}
     out: dict[str, dict] = {}
-    raw = client.market_quotes(legs)
+    raw = client.market_quotes(list(dict.fromkeys(key for _, key in pairs)))
     rows = raw.get("result", []) if isinstance(raw, dict) else raw
     for row in rows:
         ltp = float(row.get("ltp") or 0)
         prev = float(row.get("close") or 0)
-        sym = keys[legs.index((row.get("exchange"), str(row.get("instrumentId"))))]
+        sym = by_key.get((str(row.get("exchange", "")).upper(), str(row.get("instrumentId", ""))))
+        if sym is None:
+            continue
         out[sym] = {
             "ltp": ltp,
             "prev_close": prev,

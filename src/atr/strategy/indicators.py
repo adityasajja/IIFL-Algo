@@ -24,7 +24,13 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     gain = delta.clip(lower=0).ewm(alpha=1 / window, adjust=False).mean()
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / window, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
-    return (100 - 100 / (1 + rs)).fillna(50)
+    out = 100 - 100 / (1 + rs)
+    # Zero average loss with gains present is the strongest possible uptrend:
+    # RSI is 100, not undefined. Dividing by the zero made it NaN, and the
+    # fillna(50) below then reported a relentlessly rising stock as perfectly
+    # neutral — which silently made it qualify as an RSI "pullback".
+    out = out.mask((loss <= 0) & (gain > 0), 100.0)
+    return out.fillna(50)
 
 
 def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:

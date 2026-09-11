@@ -50,17 +50,19 @@ means **overfitting and cherry-picking**. Practical consequences:
   `marketquotes`** — they return `{exchange: "Z", instrumentId: 0}`.
 - Gotcha: `value not in (None, "")` is NOT a null check — `nan not in (None, "")`
   is True. Use `contracts._missing()` for anything coming out of a DataFrame.
-- `/limits`, `/positions`, `/holdings`, `/orders` return
-  `EC500 IP address not authorized for trading`. This is a **SEBI mandate**, not
-  an IIFL policy: the algo framework (circular Feb 2025) became fully mandatory
-  on **2026-04-01** and requires a whitelisted **static** IP for API access.
-  IIFL confirmed on their own repo (issue #191) that it applies to *all* APIs,
-  read-only included: "ensure that all API requests are made using the IP
-  address registered for the clientid on our developer portal."
-  Fix = set the app's **"Primary Static IP"** at developers.iiflcapital.com
-  (My Apps → ⋮ → View All Details) to the outbound IP. Home broadband is
-  dynamic, so a fixed IP / VPS is the durable answer. A support ticket will not
-  waive it.
+- **API egress MUST be IPv4.** `api.iiflcapital.com` has A *and* AAAA records
+  and this host is dual-stack, so httpx silently connected over IPv6 — an
+  address never whitelisted — and every gated endpoint returned
+  `EC500 IP address not authorized for trading` even though the registered IPv4
+  was correct. `IiflClient` now pins egress with
+  `httpx.HTTPTransport(local_address="0.0.0.0")` (`force_ipv4` / `IIFL_FORCE_IPV4`).
+  Diagnosing this needs a **multi-service** IP check: `api.ipify.org` is
+  IPv4-only and hid the problem.
+- The IP whitelist itself is a **SEBI mandate** (algo framework, circular Feb
+  2025, fully mandatory 2026-04-01), not an IIFL policy — a support ticket will
+  not waive it. Registered as "Primary Static IP" at
+  developers.iiflcapital.com (My Apps → ⋮ → View All Details). IIFL confirmed on
+  their own repo (issue #191) it applies to all APIs, read-only included.
 - SEBI also requires a **non-zero market-protection value** on API market
   orders (zero/absent is rejected). `IiflBroker` now defaults it to 0.5% for
   MARKET orders; configure via `IIFL_MARKET_PROTECTION_PERCENT`.

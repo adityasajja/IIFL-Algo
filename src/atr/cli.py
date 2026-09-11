@@ -14,6 +14,7 @@ import argparse
 import json
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from loguru import logger
 
@@ -75,6 +76,18 @@ def _build_parser() -> argparse.ArgumentParser:
     qt.add_argument("--symbols", required=True, help="comma-separated, e.g. RELIANCE-EQ,INFY-EQ")
     qt.add_argument("--exchange", default="NSEEQ")
     qt.add_argument("--json", dest="json_path", help="write raw payload to this file")
+
+    # ------------------------------------------------------------------
+    sg = sub.add_parser("signals", help="buy/sell signals for your book and a watchlist")
+    sg.add_argument(
+        "action", nargs="?", default="scan",
+        choices=["scan", "buy", "sell", "validate", "init-config"],
+    )
+    sg.add_argument("--symbols", help="watchlist for the buy scan (comma-separated)")
+    sg.add_argument("--telegram", action="store_true", help="push the report to Telegram")
+    sg.add_argument("--json", dest="json_path", help="write signals to this JSON file")
+    sg.add_argument("--train", type=int, default=300, help="walk-forward train bars (daily)")
+    sg.add_argument("--test", type=int, default=200, help="walk-forward test bars (daily)")
 
     # ------------------------------------------------------------------
     login = sub.add_parser("login", help="complete the IIFL OAuth login")
@@ -379,6 +392,177 @@ def _run_quote(args) -> int:
     return 0
 
 
+def _run_signals(args) -> int:
+    import contextlib
+    import dataclasses
+    import json as _json
+
+    import pandas as pd
+
+    from atr.signals.engine import format_report, scan_holdings, scan_universe
+    from atr.signals.models import DEFAULT_CONFIG_PATH, ScanResult, SignalConfig
+
+    cfg = SignalConfig.load()
+
+    if args.action == "init-config":
+        cfg.save(DEFAULT_CONFIG_PATH)
+        print(f"wrote default thresholds to {DEFAULT_CONFIG_PATH}")
+        print("These are starting points, not findings. Validate before trusting them.")
+        return 0
+
+    if args.action == "validate":
+        from atr.backtest.engine import BacktestConfig
+        from atr.core.enums import Timeframe
+        from atr.core.models import Instrument
+        from atr.data.base import ListFeed, pivot_to_snapshots
+        from atr.research.validate import ValidationConfig, WalkForwardConfig, walk_forward
+        from atr.scanner import UNIVERSE
+        from atr.signals.strategy import SignalEntryStrategy
+
+        symbols = cfg.universe or UNIVERSE
+        # Fetch real history rather than reading the cache: the local cache
+        # holds about a year, which is too short to carve into folds that also
+        # leave room for indicator warmup.
+        client = _authenticated_client()
+        if client is None:
+            return 1
+        from atr.signals.engine import load_daily
+
+        master = None
+        frames = []
+        with client:
+            from atr.brokers.iifl.contracts import InstrumentMaster
+
+            master = InstrumentMaster(client)
+            master.load_cached([cfg.exchange])
+            for symbol in symbols:
+                conid = None
+                with contextlib.suppress(KeyError):
+                    conid = master.find(symbol, cfg.exchange).conid
+                frame = load_daily(
+                    symbol, cfg.exchange, client, conid, lookback_days=2200
+                )
+                if frame.empty:
+                    continue
+                frame = frame.copy()
+                frame["symbol"] = symbol
+                frames.append(frame)
+                logger.info("{}: {} daily bars", symbol, len(frame))
+        if not frames:
+            logger.error("no daily history available")
+            return 1
+
+        combined = pd.concat(frames, ignore_index=True)
+        snapshots = pivot_to_snapshots(combined, Timeframe.DAY_1)
+        instruments = {s: Instrument(symbol=s, exchange=cfg.exchange) for s in symbols}
+        feed = ListFeed(snapshots, instruments)
+
+        params = {
+            **dataclasses.asdict(cfg.entries),
+            **dataclasses.asdict(cfg.exits),
+            "allocation": 0.10,
+        }
+        result = walk_forward(
+            feed,
+            SignalEntryStrategy,
+            {k: [v] for k, v in params.items()},
+            config=WalkForwardConfig(train_bars=args.train, test_bars=args.test),
+            backtest=BacktestConfig(initial_cash=1_000_000.0),
+            validation=ValidationConfig(min_folds=2, min_trades=5),
+        )
+        print(result.summary())
+        out = Path("data/signals/validation.json")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            _json.dumps(
+                {
+                    "passed": result.verdict.passed,
+                    "oos_sharpe": result.oos_metrics.sharpe,
+                    "deflated_sharpe": result.deflated_sharpe,
+                    "folds": len(result.folds),
+                    "trades": result.oos_metrics.num_trades,
+                    "checks": [
+                        {"name": n, "ok": ok, "detail": d}
+                        for n, ok, d in result.verdict.checks
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        logger.info("wrote {}", out)
+        return 0 if result.verdict.passed else 1
+
+    # Whether the entry rules have actually passed out-of-sample validation.
+    # Read from disk rather than assumed, so the report can never quietly
+    # present an unproven rule as though it were established.
+    validated = False
+    validation_path = Path("data/signals/validation.json")
+    if validation_path.exists():
+        try:
+            validated = bool(_json.loads(validation_path.read_text(encoding="utf-8")).get("passed"))
+        except Exception:  # noqa: BLE001 - a corrupt file just means "not validated"
+            validated = False
+
+    client = _authenticated_client()
+    if client is None:
+        return 1
+
+    result = ScanResult()
+    with client:
+        if args.action in ("scan", "sell"):
+            sells, errors = scan_holdings(client, cfg)
+            result.sells = sells
+            result.errors.extend(errors)
+        if args.action in ("scan", "buy"):
+            symbols = args.symbols or ",".join(cfg.universe)
+            from atr.scanner import UNIVERSE as SCAN_UNIVERSE
+
+            watchlist = [
+                s.strip().upper()
+                for s in (symbols.split(",") if symbols else SCAN_UNIVERSE)
+                if s.strip()
+            ]
+            buys, errors = scan_universe(client, watchlist, cfg)
+            result.buys = buys
+            result.errors.extend(errors)
+
+    title, body = format_report(result, validated=validated)
+    print(title)
+    print(body)
+    for error in result.errors[:10]:
+        logger.warning(error)
+
+    if args.json_path:
+        Path(args.json_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json_path).write_text(
+            _json.dumps(
+                {
+                    "buys": [dataclasses.asdict(s) for s in result.buys],
+                    "sells": [dataclasses.asdict(s) for s in result.sells],
+                    "errors": result.errors,
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+        logger.info("wrote signals to {}", args.json_path)
+
+    if args.telegram:
+        from atr.alerts.channels import TelegramChannel
+        from atr.config.settings import get_settings
+
+        settings = get_settings()
+        channel = TelegramChannel(settings.telegram_bot_token, settings.telegram_chat_id)
+        if channel.send(title, body):
+            logger.info("pushed to telegram")
+        else:
+            logger.error("telegram send failed — check TELEGRAM_BOT_TOKEN / CHAT_ID")
+            return 1
+    return 0
+
+
 def _run_login(args) -> int:
     from atr.brokers.iifl.auth import login_url
     from atr.config.settings import get_settings
@@ -550,6 +734,7 @@ def main(argv: list[str] | None = None) -> int:
         "research": _run_research,
         "portfolio": _run_portfolio,
         "quote": _run_quote,
+        "signals": _run_signals,
         "login": _run_login,
         "instruments": _run_instruments,
         "history": _run_history,
