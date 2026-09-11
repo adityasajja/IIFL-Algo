@@ -44,6 +44,12 @@ means **overfitting and cherry-picking**. Practical consequences:
   against live ticks (tick + 10-level depth, no decode errors).
 - REST coverage is complete: all 18 endpoints in IIFL's official Postman
   collection are implemented in `IiflClient`.
+- Instrument master: all 9 segments cached in `.cache/contracts/` (207,942
+  contracts). Live quotes work for NSEEQ, BSEEQ, NSEFO, BSEFO, NSECURR.
+  NSECOMM responds but is untraded; **BSECURR and MCXCOMM are not served by
+  `marketquotes`** — they return `{exchange: "Z", instrumentId: 0}`.
+- Gotcha: `value not in (None, "")` is NOT a null check — `nan not in (None, "")`
+  is True. Use `contracts._missing()` for anything coming out of a DataFrame.
 - `/limits`, `/positions`, `/holdings`, `/orders` return
   `EC500 IP address not authorized for trading` — the API key is IP-whitelisted.
   Whitelisting the current public IP (was `122.177.247.238` on 2026-09-10, but

@@ -40,6 +40,52 @@ def bridge_topic(instrument: Instrument) -> str:
     return f"{exchange_topic(instrument.exchange)}/{instrument.conid}"
 
 
+#: Column order IIFL uses when candles come back as positional arrays.
+_CANDLE_FIELDS = ("ts", "open", "high", "low", "close", "volume")
+
+
+def _candles(payload) -> list:
+    """Pull the candle rows out of a historical-data response.
+
+    The API wraps them as ``{"result": [{"candles": [...]}]}``. Iterating the
+    response body directly yields the string ``"result"``, which is how this
+    previously failed with ``'str' object has no attribute 'get'``.
+    """
+    if isinstance(payload, dict):
+        result = payload.get("result")
+        if isinstance(result, dict) and isinstance(result.get("candles"), list):
+            return result["candles"]
+        if isinstance(result, list):
+            if result and isinstance(result[0], dict) and isinstance(result[0].get("candles"), list):
+                return result[0]["candles"]
+            return result
+        return []
+    return list(payload or [])
+
+
+def _candle_row(row) -> dict | None:
+    """Normalise one candle to a dict.
+
+    Candles arrive as positional arrays ``[ts, open, high, low, close, volume]``
+    rather than objects, so dict access alone is not enough.
+    """
+    if isinstance(row, dict):
+        ts = row.get("initialTimestamp") or row.get("timestamp") or row.get("ts")
+        if ts is None:
+            return None
+        return {
+            "ts": ts,
+            "open": row.get("open"),
+            "high": row.get("high"),
+            "low": row.get("low"),
+            "close": row.get("close"),
+            "volume": row.get("volume"),
+        }
+    if isinstance(row, (list, tuple)) and len(row) >= len(_CANDLE_FIELDS):
+        return dict(zip(_CANDLE_FIELDS, row, strict=False))
+    return None
+
+
 class IiflHistoricalFeed(DataFeed):
     """Loads candles via POST /marketdata/historicaldata for backtests.
 
@@ -69,28 +115,35 @@ class IiflHistoricalFeed(DataFeed):
         return self.instruments_map
 
     def fetch(self) -> pd.DataFrame:
+        columns = ["ts", "symbol", "open", "high", "low", "close", "volume"]
         frames = []
         for symbol, inst in self.instruments_map.items():
-            logger.info("fetching {} {} candles for {}", len([symbol]), self.interval, symbol)
-            rows = self.client.historical_data(
+            payload = self.client.historical_data(
                 exchange=inst.exchange,
                 instrument_id=str(inst.conid),
                 interval=self.interval,
                 from_date=self.from_date,
                 to_date=self.to_date,
             )
-            for row in rows:
+            rows = _candles(payload)
+            logger.info("fetched {} {} candles for {}", len(rows), self.interval, symbol)
+            for raw in rows:
+                row = _candle_row(raw)
+                if row is None:
+                    continue
                 frames.append(
                     {
-                        "ts": pd.to_datetime(row.get("initialTimestamp")),
+                        "ts": pd.to_datetime(row["ts"]),
                         "symbol": symbol,
-                        "open": float(row.get("open", 0)),
-                        "high": float(row.get("high", 0)),
-                        "low": float(row.get("low", 0)),
-                        "close": float(row.get("close", 0)),
-                        "volume": float(row.get("volume", 0) or 0),
+                        "open": float(row["open"] or 0),
+                        "high": float(row["high"] or 0),
+                        "low": float(row["low"] or 0),
+                        "close": float(row["close"] or 0),
+                        "volume": float(row["volume"] or 0),
                     }
                 )
+        if not frames:
+            return pd.DataFrame(columns=columns)
         return pd.DataFrame(frames).sort_values(["ts", "symbol"]).reset_index(drop=True)
 
     def load(self) -> list[MarketSnapshot]:
