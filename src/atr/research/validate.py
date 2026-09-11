@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from statistics import NormalDist
 
 import numpy as np
@@ -194,6 +194,10 @@ class WalkForwardConfig:
     #: Keep the training window's start fixed so it grows (anchored), instead
     #: of sliding with a fixed length.
     anchored: bool = False
+    #: Bars prepended before each test window purely so indicators can warm up.
+    #: They are run but never scored, and no trading is allowed during them.
+    #: Set this to at least the strategy's longest indicator lookback.
+    warmup_bars: int = 0
     #: Metric used to pick parameters on the training window only.
     selection_metric: str = "sharpe"
 
@@ -348,10 +352,21 @@ def walk_forward(
     folds: list[FoldResult] = []
     start = 0
     fold_index = 0
+    warmup = max(int(cfg.warmup_bars), 0)
     while start + cfg.train_bars + cfg.test_bars <= total:
         train_start = 0 if cfg.anchored else start
         train = snapshots[train_start : start + cfg.train_bars]
-        test = snapshots[start + cfg.train_bars : start + cfg.train_bars + cfg.test_bars]
+        test_index = start + cfg.train_bars
+        test_end_index = test_index + cfg.test_bars
+        test = snapshots[test_index:test_end_index]
+
+        # Prepend a warmup prefix that is run but not scored, so the strategy
+        # has indicator history from the first scored bar. Without it, every
+        # test window opens with NaN indicators and the strategy is handicapped
+        # precisely where it is being measured.
+        warm_start = max(test_index - warmup, 0)
+        window = snapshots[warm_start:test_end_index]
+        bt_window = replace(bt, warmup_bars=test_index - warm_start)
 
         # --- search on train only -------------------------------------
         trial_sharpes: list[float] = []
@@ -366,22 +381,35 @@ def walk_forward(
                 best_score, best_params, best_result = score, params, result
 
         # --- score once on the unseen window --------------------------
-        test_result = _run(test, instruments, strategy_cls, best_params, bt)
+        raw = _run(window, instruments, strategy_cls, best_params, bt_window)
+        score_from = test[0].ts
+        test_equity = raw.equity[raw.equity.index >= score_from]
+        if test_equity.empty:
+            raise ValueError(f"fold {fold_index}: no equity inside the test window")
+        # warmup_bars blocks on_bar, so nothing was traded before the window.
+        test_metrics = compute_metrics(
+            test_equity,
+            raw.trades,
+            risk_free_rate=bt.risk_free_rate,
+            total_commission=float(raw.metrics.total_commission),
+            total_slippage=float(raw.metrics.total_slippage),
+            final_positions=raw.metrics.final_positions,
+        )
 
         folds.append(
             FoldResult(
                 fold=fold_index,
                 params=best_params,
                 train_bars=len(train),
-                test_bars=len(test),
+                test_bars=len(test_equity),
                 train_start=train[0].ts,
                 train_end=train[-1].ts,
                 test_start=test[0].ts,
                 test_end=test[-1].ts,
                 train_metrics=best_result.metrics,
-                test_metrics=test_result.metrics,
-                test_equity=test_result.equity,
-                test_trades=test_result.trades,
+                test_metrics=test_metrics,
+                test_equity=test_equity,
+                test_trades=raw.trades,
                 trial_sharpes=trial_sharpes,
             )
         )

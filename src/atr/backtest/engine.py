@@ -43,6 +43,12 @@ class BacktestConfig:
     square_off_eod: bool = False
     risk: RiskLimits | None = None
     assert_invariants: bool = True
+    #: Bars to run without letting the strategy act, so indicators can warm up
+    #: before scoring begins. Frames and portfolio marks are still built, so a
+    #: strategy that needs 200 bars of history can be evaluated over a test
+    #: window shorter than that — otherwise it simply never trades, and "no
+    #: trades" is indistinguishable from "no edge".
+    warmup_bars: int = 0
 
 
 @dataclass
@@ -171,7 +177,7 @@ class BacktestEngine:
             ctx.bars = snap.bars
             for symbol, bar in snap.bars.items():
                 ctx.windows[symbol].push(bar)
-            if self._killed:
+            if self._killed or i < self.config.warmup_bars:
                 continue
             self.strategy.on_bar(ctx)
 

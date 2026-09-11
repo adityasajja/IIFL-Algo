@@ -69,6 +69,22 @@ means **overfitting and cherry-picking**. Practical consequences:
 - developers.iiflcapital.com blocks automated access (Akamai) and its docs are
   a JS SPA — WebFetch cannot read them.
 
+## Signals (buy/sell) — `src/atr/signals/`
+
+- Sell rules = risk management (stop loss, trailing stop, confirmed trend
+  break, take profit). No edge needed; they are facts about the book.
+- Buy rules = predictions, so they are validated by `atr signals validate`
+  via `SignalEntryStrategy`. **They currently FAIL** (-5.05% OOS vs buy-and-hold
+  +57.39%, deflated Sharpe 0.926 < 0.95). Buy signals are labelled unvalidated
+  and must never be presented as actionable.
+- The live scanner and the backtest strategy must call the same rule
+  functions. If they diverge, a validation pass means nothing.
+- `min_history_bars` must be well below the walk-forward test window, or the
+  strategy trades zero times and "no trades" is mistaken for "no edge".
+- Before trusting any new rule, check how many positions it flags in one day.
+  A single close below SMA50 flagged 10 of 17 holdings — that is fatigue, not
+  information.
+
 ## Known gaps (verified, not speculation)
 
 - `LiveRunner` is **fixed and tested** (2026-09-11) but still has no CLI

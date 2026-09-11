@@ -235,6 +235,53 @@ def test_verdict_can_pass_on_strong_evidence():
     assert "PASS" in verdict.summary()
 
 
+def test_warmup_lets_a_slow_strategy_trade_in_a_short_window():
+    """Without a warmup prefix, a strategy needing history never trades at all.
+
+    That failure is silent and looks identical to "the strategy has no edge",
+    which makes it the most dangerous kind of bug in a validation harness.
+    """
+    from atr.signals.strategy import SignalEntryStrategy
+
+    feed = _feed(days=7)
+    strategy_kwargs = {"min_history_bars": 110, "lookback": 120, "allocation": 0.2}
+    common = dict(
+        config=WalkForwardConfig(train_bars=400, test_bars=60, step_bars=60),
+        backtest=BacktestConfig(initial_cash=1_000_000.0),
+        validation=ValidationConfig(min_folds=1, min_trades=0),
+    )
+
+    grid = {k: [v] for k, v in strategy_kwargs.items()}
+    cold = walk_forward(feed, SignalEntryStrategy, grid, **common)
+    warm = walk_forward(
+        feed,
+        SignalEntryStrategy,
+        grid,
+        config=WalkForwardConfig(train_bars=400, test_bars=60, step_bars=60, warmup_bars=300),
+        backtest=common["backtest"],
+        validation=common["validation"],
+    )
+
+    assert sum(f.test_metrics.num_trades for f in cold.folds) == 0
+    assert sum(f.test_metrics.num_trades for f in warm.folds) > 0
+
+
+def test_warmup_bars_are_not_scored():
+    """Scored bars must be exactly the test window, warmup excluded."""
+    feed = _feed(days=7)
+    result = walk_forward(
+        feed,
+        SmaCrossover,
+        {"fast": [5], "slow": [20]},
+        config=WalkForwardConfig(train_bars=400, test_bars=60, step_bars=60, warmup_bars=200),
+        validation=ValidationConfig(min_folds=1, min_trades=0),
+    )
+    for fold in result.folds:
+        assert fold.test_bars == 60
+        assert fold.test_equity.index[0] >= fold.test_start
+        assert fold.test_equity.index[-1] <= fold.test_end
+
+
 def test_to_frame_has_one_row_per_fold():
     feed = _feed(days=7)
     result = walk_forward(

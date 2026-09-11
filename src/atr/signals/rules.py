@@ -55,6 +55,75 @@ def _last(series: pd.Series):
     return series.iloc[-1] if len(series) else float("nan")
 
 
+# --------------------------------------------------------------------------
+# Indicator access
+#
+# A rolling indicator costs ~0.35ms in pandas almost regardless of how much
+# data it covers, so recomputing four of them per bar per symbol dominated a
+# walk-forward run (~3ms per symbol-bar, and a 200-combination sweep would have
+# taken hours). If the caller has precomputed a column — as the backtest
+# strategy does in prepare() — these read it instead.
+#
+# The fallback computes the identical quantity, so the live scanner and the
+# backtest cannot disagree about what a rule means.
+# --------------------------------------------------------------------------
+
+_PRE_SMA = "_sma{}"
+_PRE_RSI = "_rsi"
+_PRE_PRIOR_HIGH = "_priorhigh{}"
+_PRE_PRIOR_VOLUME = "_priorvol{}"
+
+
+def _sma_series(frame: pd.DataFrame, window: int) -> pd.Series:
+    key = _PRE_SMA.format(window)
+    return frame[key] if key in frame.columns else sma(frame["close"], window)
+
+
+def _rsi_series(frame: pd.DataFrame) -> pd.Series:
+    return frame[_PRE_RSI] if _PRE_RSI in frame.columns else rsi(frame["close"])
+
+
+def _prior_high(frame: pd.DataFrame, lookback: int) -> pd.Series:
+    """Highest high over the ``lookback`` bars *before* the current one."""
+    key = _PRE_PRIOR_HIGH.format(lookback)
+    if key in frame.columns:
+        return frame[key]
+    return frame["high"].shift(1).rolling(lookback).max()
+
+
+def _prior_volume(frame: pd.DataFrame, window: int) -> pd.Series:
+    """Average volume over the ``window`` bars *before* the current one."""
+    key = _PRE_PRIOR_VOLUME.format(window)
+    if key in frame.columns:
+        return frame[key]
+    return frame["volume"].shift(1).rolling(window).mean()
+
+
+def precompute_indicators(frame: pd.DataFrame, entries: EntryRules, exits: ExitRules) -> None:
+    """Add the columns the rules look for, in place.
+
+    Called once by the backtest strategy's ``prepare()``. The live scanner skips
+    it and computes on demand — one frame per symbol, so the cost is irrelevant
+    there.
+    """
+    windows = {
+        entries.trend_fast_sma,
+        entries.trend_slow_sma,
+        entries.long_sma,
+        exits.trend_sma,
+    }
+    for window in windows:
+        if window and window > 0:
+            frame[_PRE_SMA.format(window)] = sma(frame["close"], window)
+    frame[_PRE_RSI] = rsi(frame["close"])
+    frame[_PRE_PRIOR_HIGH.format(entries.breakout_lookback)] = _prior_high(
+        frame, entries.breakout_lookback
+    )
+    frame[_PRE_PRIOR_VOLUME.format(entries.volume_lookback)] = _prior_volume(
+        frame, entries.volume_lookback
+    )
+
+
 def eval_exit(
     symbol: str,
     frame: pd.DataFrame,
@@ -123,7 +192,7 @@ def eval_exit(
     # --- trend break ---------------------------------------------------
     confirm = max(int(rules.trend_confirm_bars), 1)
     if rules.trend_sma and len(frame) >= rules.trend_sma + confirm:
-        line = sma(frame["close"], rules.trend_sma)
+        line = _sma_series(frame, rules.trend_sma)
         closes = frame["close"].iloc[-confirm:]
         lines = line.iloc[-confirm:]
         if bool((closes < lines).all()):
@@ -138,7 +207,7 @@ def eval_exit(
 
     # --- overbought ----------------------------------------------------
     if rules.rsi_overbought is not None and len(frame) >= 30:
-        value = _last(rsi(frame["close"]))
+        value = _last(_rsi_series(frame))
         if _finite(value) and float(value) >= rules.rsi_overbought:
             add(
                 "rsi_overbought",
@@ -172,13 +241,11 @@ def eval_entry(symbol: str, frame: pd.DataFrame, rules: EntryRules) -> list[Sign
             )
         )
 
-    close = frame["close"]
-
     # --- 1. uptrend, bought on a pullback ------------------------------
     fast_n, slow_n = rules.trend_fast_sma, rules.trend_slow_sma
     if len(frame) >= max(slow_n, 30):
-        fast, slow = _last(sma(close, fast_n)), _last(sma(close, slow_n))
-        value = _last(rsi(close))
+        fast, slow = _last(_sma_series(frame, fast_n)), _last(_sma_series(frame, slow_n))
+        value = _last(_rsi_series(frame))
         if _finite(fast) and _finite(slow) and _finite(value):
             uptrend = price > float(slow) and float(fast) > float(slow)
             pulled_back = rules.pullback_rsi_low <= float(value) <= rules.pullback_rsi_high
@@ -195,8 +262,8 @@ def eval_entry(symbol: str, frame: pd.DataFrame, rules: EntryRules) -> list[Sign
     # --- 2. breakout to new highs on volume ----------------------------
     lookback = rules.breakout_lookback
     if len(frame) >= max(lookback, rules.volume_lookback) + 1:
-        prior_high = float(frame["high"].iloc[-(lookback + 1) : -1].max())
-        avg_volume = float(frame["volume"].iloc[-(rules.volume_lookback + 1) : -1].mean())
+        prior_high = float(_prior_high(frame, lookback).iloc[-1])
+        avg_volume = float(_prior_volume(frame, rules.volume_lookback).iloc[-1])
         volume = float(frame["volume"].iloc[-1])
         if _finite(prior_high) and prior_high > 0 and _finite(avg_volume) and avg_volume > 0:
             near_high = price >= prior_high * (1 - rules.breakout_proximity_pct / 100.0)
@@ -212,8 +279,8 @@ def eval_entry(symbol: str, frame: pd.DataFrame, rules: EntryRules) -> list[Sign
 
     # --- 3. oversold within a longer-term uptrend ----------------------
     if len(frame) >= rules.long_sma:
-        long_ma = _last(sma(close, rules.long_sma))
-        value = _last(rsi(close))
+        long_ma = _last(_sma_series(frame, rules.long_sma))
+        value = _last(_rsi_series(frame))
         if (
             _finite(long_ma)
             and _finite(value)

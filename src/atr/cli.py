@@ -88,6 +88,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sg.add_argument("--json", dest="json_path", help="write signals to this JSON file")
     sg.add_argument("--train", type=int, default=300, help="walk-forward train bars (daily)")
     sg.add_argument("--test", type=int, default=200, help="walk-forward test bars (daily)")
+    sg.add_argument(
+        "--search", action="store_true",
+        help="sweep a parameter grid instead of testing one config (validate only)",
+    )
 
     # ------------------------------------------------------------------
     login = sub.add_parser("login", help="complete the IIFL OAuth login")
@@ -462,11 +466,29 @@ def _run_signals(args) -> int:
             **dataclasses.asdict(cfg.exits),
             "allocation": 0.10,
         }
+        # One combination = a single test. A grid = a search, and the deflated
+        # Sharpe then has to clear a hurdle scaled to how many were tried.
+        grid = {k: [v] for k, v in params.items()}
+        if args.search:
+            from atr.signals.models import SEARCH_GRID
+
+            grid.update(SEARCH_GRID)
+            combos = 1
+            for values in grid.values():
+                combos *= len(values)
+            logger.info("sweeping {} parameter combinations", combos)
+
         result = walk_forward(
             feed,
             SignalEntryStrategy,
-            {k: [v] for k, v in params.items()},
-            config=WalkForwardConfig(train_bars=args.train, test_bars=args.test),
+            grid,
+            config=WalkForwardConfig(
+                train_bars=args.train,
+                test_bars=args.test,
+                # Enough history for the longest indicator to be valid before
+                # the first scored bar, or the strategy never trades at all.
+                warmup_bars=cfg.entries.min_history_bars + 60,
+            ),
             backtest=BacktestConfig(initial_cash=1_000_000.0),
             validation=ValidationConfig(min_folds=2, min_trades=5),
         )

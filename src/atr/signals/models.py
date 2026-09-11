@@ -109,6 +109,20 @@ class SignalConfig:
         path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
 
 
+#: Candidate values for ``atr signals validate --search``.
+#:
+#: Deliberately coarse. Fine-grained tuning of a hypothesis that does not work
+#: mostly finds noise, and every extra combination raises the deflated-Sharpe
+#: bar the winner has to clear — so a bigger grid makes the test stricter, not
+#: the result better.
+SEARCH_GRID: dict[str, list] = {
+    "trend_fast_sma": [10, 20],
+    "trend_slow_sma": [50, 100],
+    "pullback_rsi_low": [35.0, 45.0],
+    "pullback_rsi_high": [55.0, 70.0],
+}
+
+
 @dataclass
 class Signal:
     symbol: str
