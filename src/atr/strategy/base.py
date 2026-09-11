@@ -77,6 +77,12 @@ class _RowOps(tuple):
 
 
 def _safe_field(name: str, position: int) -> str:
+    """A field name ``namedtuple`` will accept.
+
+    It rejects any name beginning with an underscore, so the fallback must not
+    use one — a column called ``_mom`` would otherwise raise at row-lookup time
+    and break every strategy that used it.
+    """
     if (
         name.isidentifier()
         and not iskeyword(name)
@@ -84,7 +90,7 @@ def _safe_field(name: str, position: int) -> str:
         and name not in _ROW_RESERVED
     ):
         return name
-    return f"_{position}"
+    return f"c{position}"
 
 
 def _row_class(columns: tuple[str, ...]) -> type:
@@ -98,8 +104,10 @@ def _row_class(columns: tuple[str, ...]) -> type:
     used: set[str] = set()
     for position, column in enumerate(columns):
         field = _safe_field(column, position)
-        if field in used:
-            field = f"_{position}"
+        suffix = 0
+        while field in used:
+            suffix += 1
+            field = f"{_safe_field(column, position)}_{suffix}"
         used.add(field)
         fields.append(field)
         mapping[column] = field

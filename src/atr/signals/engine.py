@@ -25,6 +25,38 @@ OHLCV = ["open", "high", "low", "close", "volume"]
 _LOOKBACK_DAYS = 420
 
 
+def liquid_universe(
+    exchange: str = "NSEEQ",
+    limit: int = 120,
+    min_bars: int = 150,
+) -> list[str]:
+    """Liquidity-screened sample of the cached universe, by median turnover.
+
+    Screening on turnover is a practical necessity — illiquid names have
+    unreliable prices and unrepresentative fills — but be clear that it is
+    **look-ahead**: names are selected using *today's* liquidity and tested over
+    the past. Both the strategy and the benchmark inherit that optimism, so the
+    comparison between them is more meaningful than either absolute number.
+    """
+    import numpy as np
+
+    root = CACHE_ROOT / exchange.upper()
+    scored: list[tuple[float, str]] = []
+    for path in sorted(root.glob("*.parquet")):
+        try:
+            frame = pd.read_parquet(path, columns=["close", "volume"])
+        except Exception:  # noqa: BLE001 - a bad file must not kill the screen
+            continue
+        if len(frame) < min_bars:
+            continue
+        turnover = float(np.nanmedian(frame["close"].to_numpy() * frame["volume"].to_numpy()))
+        if not pd.notna(turnover) or turnover <= 0:
+            continue
+        scored.append((turnover, path.stem.upper()))
+    scored.sort(reverse=True)
+    return [symbol for _, symbol in scored[:limit]]
+
+
 def _rows(payload) -> list[dict]:
     if isinstance(payload, dict):
         result = payload.get("result")

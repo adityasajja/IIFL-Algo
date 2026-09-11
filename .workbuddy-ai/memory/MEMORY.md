@@ -81,6 +81,17 @@ means **overfitting and cherry-picking**. Practical consequences:
   functions. If they diverge, a validation pass means nothing.
 - `min_history_bars` must be well below the walk-forward test window, or the
   strategy trades zero times and "no trades" is mistaken for "no edge".
+  `WalkForwardConfig.warmup_bars` now prepends an unscored, untraded prefix so
+  a slow strategy is not handicapped by the fold boundary — always set it.
+- Sweeps: `atr signals validate --search`. Coarse grids only. A bigger grid
+  raises the deflated-Sharpe hurdle, so searching harder makes the test
+  stricter, not the result better (observed: OOS +5.91% vs deflated 0.270).
+- Rule indicators must be precomputed via `precompute_indicators()` in the
+  strategy's `prepare()`. Recomputing per bar is ~15x slower — a pandas rolling
+  op costs ~0.35ms regardless of data length.
+- **Buy-and-hold on the 19 large-cap universe returned +57% at Sharpe 0.85**
+  (2020-2026). That is the bar. Any long/flat timing overlay starts structurally
+  behind it. Tuning these entry rules is unlikely to be the answer.
 - Before trusting any new rule, check how many positions it flags in one day.
   A single close below SMA50 flagged 10 of 17 holdings — that is fatigue, not
   information.

@@ -189,6 +189,60 @@ def test_report_with_no_signals():
     assert body == "No signals."
 
 
+def test_row_access_survives_hostile_column_names():
+    """Row lookup must cope with columns namedtuple cannot use directly.
+
+    namedtuple rejects field names starting with an underscore, so a frame
+    carrying a precomputed ``_mom`` column would raise on every lookup. Keyword
+    names and names shadowing tuple methods are also invalid or destructive.
+    """
+    from atr.strategy.base import StrategyContext
+
+    frame = pd.DataFrame(
+        {
+            "open": [1.0, 2.0],
+            "high": [1.0, 2.0],
+            "low": [1.0, 2.0],
+            "close": [1.0, 2.0],
+            "volume": [1.0, 2.0],
+            "_mom126_skip21": [0.5, 0.75],
+            "class": [7.0, 8.0],
+            "count": [9.0, 10.0],
+        }
+    )
+    ctx = StrategyContext(
+        instruments={}, frames={"X": frame}, submit=lambda o: o, portfolio_getter=lambda: None
+    )
+    ctx.index = 1
+    row = ctx.row("X")
+    assert float(row["_mom126_skip21"]) == 0.75
+    assert float(row["class"]) == 8.0
+    assert float(row["count"]) == 10.0
+    assert float(row["close"]) == 2.0
+
+
+def test_cross_sectional_momentum_runs_in_the_backtest_engine():
+    from datetime import datetime
+
+    from atr.backtest.engine import BacktestConfig, BacktestEngine
+    from atr.data.synthetic import SyntheticConfig, SyntheticFeed
+    from atr.signals.cross_sectional import CrossSectionalMomentum
+
+    feed = SyntheticFeed(
+        SyntheticConfig(symbols=("AAPL", "MSFT", "GOOG"),
+                        start=datetime(2024, 1, 1, 9, 30), end=datetime(2024, 4, 1, 15, 59))
+    )
+    result = BacktestEngine(
+        feed,
+        CrossSectionalMomentum(lookback=100, skip=20, top_n=2, rebalance_days=50),
+        BacktestConfig(initial_cash=1_000_000.0),
+    ).run()
+    assert len(result.equity) > 100
+    assert not result.equity.isna().any()
+    # A ranking strategy should actually put capital to work.
+    assert result.metrics.num_trades > 0
+
+
 def test_signal_config_round_trips(tmp_path):
     from atr.signals.models import SignalConfig
 
