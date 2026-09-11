@@ -35,6 +35,15 @@ means **overfitting and cherry-picking**. Practical consequences:
 - `ENV=dev` in `.env` is fine for read-only calls; order placement needs
   `paper` or `live`.
 - Market data (`/marketdata/marketquotes`, historical) and `/profile` work.
+- MQTT bridge auth (verified against IIFL's official BridgePy, 2026-09-11):
+  MQTT **3.1.1** + `clean_session=True`, keepalive **20**,
+  username = JWT `preferred_username`, password = `"OPENID~~" + <raw token> + "~"`.
+  Connecting anonymously over MQTTv5 does not work.
+- The bridge hands raw bytes to callbacks — the official SDK does NOT decode
+  payloads, so `codec.py` is ours to maintain. It is now verified correct
+  against live ticks (tick + 10-level depth, no decode errors).
+- REST coverage is complete: all 18 endpoints in IIFL's official Postman
+  collection are implemented in `IiflClient`.
 - `/limits`, `/positions`, `/holdings`, `/orders` return
   `EC500 IP address not authorized for trading` — the API key is IP-whitelisted.
   Whitelisting the current public IP (was `122.177.247.238` on 2026-09-10, but

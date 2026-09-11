@@ -23,15 +23,33 @@ from atr.core.models import Instrument
 CACHE_DIR = Path(".cache/contracts")
 
 
+def _missing(value) -> bool:
+    """True for None, empty string, NaN and NaT.
+
+    Contract files leave absent fields empty, and pandas round-trips missing
+    values back as NaN/NaT. The naive ``value not in (None, "")`` check misses
+    both, because ``nan not in (None, "")`` is True — which silently turned
+    absent strikes into NaN and absent underlyings into the string "NAN".
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def _pick(row: dict, *keys: str, default=None):
     for key in keys:
-        if key in row and row[key] not in (None, ""):
+        if key in row and not _missing(row[key]):
             return row[key]
     return default
 
 
 def _parse_expiry(value) -> date | None:
-    if value in (None, "", "NA", 0):
+    if _missing(value) or value == "NA" or value == 0:
         return None
     if isinstance(value, date):
         return value
@@ -183,7 +201,10 @@ class InstrumentMaster:
         hits = df[mask]
         if hits.empty:
             raise KeyError(f"no contract matching symbol={symbol} exchange={exchange}")
-        return Instrument(**hits.iloc[0].to_dict())
+        # Going back through the DataFrame converts absent values to NaN/NaT,
+        # and pydantic rejects a float for the OptionType enum.
+        row = {k: (None if _missing(v) else v) for k, v in hits.iloc[0].to_dict().items()}
+        return Instrument(**row)
 
     def search(self, text: str, exchange: str | None = None, limit: int = 25) -> pd.DataFrame:
         df = self.frame

@@ -68,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pf.add_argument("--limit", type=int, default=25, help="max rows printed per section")
     pf.add_argument("--json", dest="json_path", help="write raw payload to this file")
+    pf.add_argument("--save", dest="save_dir", help="write one CSV per section into this directory")
 
     # ------------------------------------------------------------------
     qt = sub.add_parser("quote", help="live market quotes for symbols")
@@ -303,6 +304,24 @@ def _run_portfolio(args) -> int:
         with open(args.json_path, "w", encoding="utf-8") as fh:
             _json.dump(raw, fh, indent=2, default=str)
         logger.info("wrote raw payload to {}", args.json_path)
+
+    if args.save_dir:
+        import os
+
+        import pandas as pd
+
+        os.makedirs(args.save_dir, exist_ok=True)
+        written = 0
+        for name in sections:
+            rows = _rows(raw[name])
+            if not rows:
+                continue
+            path = os.path.join(args.save_dir, f"{name}.csv")
+            pd.DataFrame(rows).to_csv(path, index=False)
+            written += 1
+            logger.info("wrote {}", path)
+        if not written:
+            logger.warning("nothing to save — every section came back empty or errored")
     return 0
 
 
