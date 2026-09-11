@@ -3,6 +3,9 @@
 Host: bridge.iiflcapital.com
 Auth: the ``userSession`` JWT; the MQTT client id is the token's
 ``preferred_username`` claim, which is also the topic for order/trade updates.
+The broker is **not** anonymous: it expects username = ``preferred_username``
+and password = ``"OPENID~~" + <raw token> + "~"``, over MQTT 3.1.1 with a
+20-second keepalive. Verified against IIFL's official ``BridgePy`` connector.
 
 Topic prefixes (from the official bridge implementation)::
 
@@ -85,8 +88,19 @@ class BridgeClient:
         self.on_ack: Callable[[dict], None] | None = None
         self.on_error: Callable[[int, str], None] | None = None
 
+        # MQTT 3.1.1, matching the official connector — it sets clean_session,
+        # which only exists in v3, and the bridge rejects v5 clients.
         self._client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, client_id=self.client_id, protocol=mqtt.MQTTv5
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=self.client_id,
+            clean_session=True,
+            protocol=mqtt.MQTTv311,
+        )
+        # Authenticate with the session JWT. Connecting anonymously (as this
+        # previously did) never succeeds against the live bridge.
+        self._client.username_pw_set(
+            username=self.client_id,
+            password=f"OPENID~~{session.user_session}~",
         )
         self._client.on_connect = self._handle_connect
         self._client.on_message = self._handle_message
@@ -99,7 +113,7 @@ class BridgeClient:
 
     # ------------------------------------------------------------------
     def connect(self, timeout: float = 15.0) -> None:
-        self._client.connect(HOST, PORT, keepalive=60)
+        self._client.connect(HOST, PORT, keepalive=20)
         self._client.loop_start()
         if not self._connected.wait(timeout):
             raise TimeoutError("timed out waiting for bridge CONNACK")
@@ -163,13 +177,18 @@ class BridgeClient:
 
     # ------------------------------------------------------------------
     def _handle_connect(self, client, userdata, flags, rc, properties=None) -> None:
-        if rc == 0:
+        # paho 2.x passes a ReasonCode here, not an int. It compares equal to 0
+        # but cannot be cast, and raising inside this callback kills the network
+        # thread outright — the client then reports "connected" while receiving
+        # nothing at all.
+        status = int(getattr(rc, "value", rc))
+        if status == 0:
             self._connected.set()
             logger.info("bridge connected as {}", self.client_id)
         else:
-            logger.error("bridge connect failed: {}", rc)
+            logger.error("bridge connect failed: {} (code {})", rc, status)
         if self.on_ack:
-            self.on_ack({"packetType": 2, "packetName": "CONNACK", "status": int(rc)})
+            self.on_ack({"packetType": 2, "packetName": "CONNACK", "status": status})
 
     def _handle_disconnect(self, client, userdata, flags, rc=0, properties=None) -> None:
         self._connected.clear()

@@ -27,6 +27,19 @@ means **overfitting and cherry-picking**. Practical consequences:
 - Python 3.12, managed with `uv`. Use `./.venv/Scripts/python.exe`.
 - No scipy in dependencies — use `statistics.NormalDist` for normal CDF/inverse.
 
+## Broker access facts (verified live)
+
+- IIFL session is created by `atr login --client-id <ID> --auth-code <CODE>`;
+  the auth code is single-use and the JWT dies at **midnight IST**, so this is
+  a daily step. Cached at `.cache/iifl_session.json` (gitignored).
+- `ENV=dev` in `.env` is fine for read-only calls; order placement needs
+  `paper` or `live`.
+- Market data (`/marketdata/marketquotes`, historical) and `/profile` work.
+- `/limits`, `/positions`, `/holdings`, `/orders` return
+  `EC500 IP address not authorized for trading` — the API key is IP-whitelisted.
+  Whitelisting the current public IP (was `122.177.247.238` on 2026-09-10, but
+  home broadband is usually dynamic) is required before portfolio data works.
+
 ## Known gaps (verified, not speculation)
 
 - `LiveRunner` is never instantiated anywhere; the live strategy loop is
