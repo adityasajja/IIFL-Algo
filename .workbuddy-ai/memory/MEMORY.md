@@ -57,10 +57,14 @@ means **overfitting and cherry-picking**. Practical consequences:
 
 ## Known gaps (verified, not speculation)
 
-- `LiveRunner` is never instantiated anywhere; the live strategy loop is
-  unwired. `_ensure_frames()` calls `strategy.prepare()` on **empty** frames and
-  `LiveConfig.warmup_bars` is declared but never used, so indicators stay NaN
-  and a live strategy would never trade. Fix before any real trading.
+- `LiveRunner` is **fixed and tested** (2026-09-11) but still has no CLI
+  entrypoint — nothing constructs it yet. Its strategy loop was previously
+  incapable of trading at all (prepare() ran once on static frames, so every
+  live bar had NaN indicators). See tests/test_live_runner.py.
+- `prepare()` must be re-run as live bars arrive. It is a one-shot vectorised
+  pass in backtests; in live it is the caller's job to refresh it.
+- `IiflHistoricalFeed` returns candles as **positional arrays**
+  `[ts, o, h, l, c, v]`, wrapped as `{"result": [{"candles": [...]}]}`.
 - `scanner.py` `score_frame()` uses an unvalidated `score = ret_1m + vs_high`
   heuristic, and `scan_symbol()` has a hardcoded `to_date` fallback
   (`"08-Sep-2026"`) that will silently go stale.

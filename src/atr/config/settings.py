@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     iifl_session_cache: str = ".cache/iifl_session.json"
     iifl_default_product: str = "INTRADAY"
     iifl_api_order_source: str = "atr"
+    #: Market-protection band applied to MARKET orders. SEBI requires a
+    #: non-zero value on API market orders since 2026-04-01.
+    iifl_market_protection_percent: float = 0.5
 
     # Market data bridge (MQTT)
     bridge_host: str = "bridge.iiflcapital.com"

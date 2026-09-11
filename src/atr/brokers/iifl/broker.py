@@ -62,12 +62,14 @@ class IiflBroker(Broker):
         default_product: str = PRODUCT_INTRADAY,
         api_order_source: str = "atr",
         algo_id: str | None = None,
+        market_protection_percent: float = 0.5,
     ) -> None:
         self.client = client
         self.master = master
         self.default_product = default_product
         self.api_order_source = api_order_source
         self.algo_id = algo_id
+        self.market_protection_percent = market_protection_percent
 
     # ------------------------------------------------------------------
     def build_payload(self, order: Order) -> dict[str, Any]:
@@ -102,8 +104,15 @@ class IiflBroker(Broker):
             payload["targetLegPrice"] = params["targetLegPrice"]
         if params.get("disclosedQuantity"):
             payload["disclosedQuantity"] = int(params["disclosedQuantity"])
-        if params.get("marketProtectionPercent"):
-            payload["marketProtectionPercent"] = float(params["marketProtectionPercent"])
+        # SEBI's algo framework (fully mandatory since 2026-04-01) requires
+        # market orders sent through an API to carry a non-zero market
+        # protection value; a zero or absent value is rejected. Send a default
+        # for MARKET orders, and let an explicit broker_param override it.
+        protection = params.get("marketProtectionPercent")
+        if protection is None and order.order_type is OrderType.MARKET:
+            protection = self.market_protection_percent
+        if protection is not None:
+            payload["marketProtectionPercent"] = float(protection)
 
         payload["apiOrderSource"] = params.get("apiOrderSource", self.api_order_source)
         if self.algo_id or params.get("algoId"):
