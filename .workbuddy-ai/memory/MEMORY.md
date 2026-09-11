@@ -51,9 +51,21 @@ means **overfitting and cherry-picking**. Practical consequences:
 - Gotcha: `value not in (None, "")` is NOT a null check — `nan not in (None, "")`
   is True. Use `contracts._missing()` for anything coming out of a DataFrame.
 - `/limits`, `/positions`, `/holdings`, `/orders` return
-  `EC500 IP address not authorized for trading` — the API key is IP-whitelisted.
-  Whitelisting the current public IP (was `122.177.247.238` on 2026-09-10, but
-  home broadband is usually dynamic) is required before portfolio data works.
+  `EC500 IP address not authorized for trading`. This is a **SEBI mandate**, not
+  an IIFL policy: the algo framework (circular Feb 2025) became fully mandatory
+  on **2026-04-01** and requires a whitelisted **static** IP for API access.
+  IIFL confirmed on their own repo (issue #191) that it applies to *all* APIs,
+  read-only included: "ensure that all API requests are made using the IP
+  address registered for the clientid on our developer portal."
+  Fix = set the app's **"Primary Static IP"** at developers.iiflcapital.com
+  (My Apps → ⋮ → View All Details) to the outbound IP. Home broadband is
+  dynamic, so a fixed IP / VPS is the durable answer. A support ticket will not
+  waive it.
+- SEBI also requires a **non-zero market-protection value** on API market
+  orders (zero/absent is rejected). `IiflBroker` now defaults it to 0.5% for
+  MARKET orders; configure via `IIFL_MARKET_PROTECTION_PERCENT`.
+- developers.iiflcapital.com blocks automated access (Akamai) and its docs are
+  a JS SPA — WebFetch cannot read them.
 
 ## Known gaps (verified, not speculation)
 

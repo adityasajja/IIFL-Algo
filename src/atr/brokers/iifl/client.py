@@ -56,6 +56,24 @@ class IiflApiError(RuntimeError):
         self.payload = payload
 
 
+def _transport(force_ipv4: bool) -> httpx.HTTPTransport | None:
+    """Pin egress to IPv4 when requested.
+
+    IIFL whitelists a single IPv4 address per app. ``api.iiflcapital.com``
+    publishes both A and AAAA records (Akamai), so on a dual-stack connection
+    the request leaves over IPv6 — which is not whitelisted. Every gated
+    endpoint then returns ``EC500 IP address not authorized for trading`` even
+    though the registered IP is correct, because the registered address is
+    never actually the one being used.
+
+    Binding the local socket to the IPv4 wildcard forces the source address to
+    be the one that was registered.
+    """
+    if not force_ipv4:
+        return None
+    return httpx.HTTPTransport(local_address="0.0.0.0")
+
+
 class IiflClient:
     """HTTP transport + session lifecycle.
 
@@ -75,13 +93,18 @@ class IiflClient:
         base_url: str = BASE_URL,
         timeout: float = 15.0,
         session_store: SessionStore | None = None,
+        force_ipv4: bool = True,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
         self.base_url = base_url.rstrip("/")
         self.session: Session | None = None
         self._store = session_store or SessionStore()
-        self._http = httpx.Client(base_url=self.base_url, timeout=timeout)
+        self._http = httpx.Client(
+            base_url=self.base_url,
+            timeout=timeout,
+            transport=_transport(force_ipv4),
+        )
 
     # ------------------------------------------------------------------
     # Session lifecycle

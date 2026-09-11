@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     iifl_session_cache: str = ".cache/iifl_session.json"
     iifl_default_product: str = "INTRADAY"
     iifl_api_order_source: str = "atr"
+    #: Pin API egress to IPv4. IIFL whitelists an IPv4 address; on a dual-stack
+    #: connection requests otherwise leave over IPv6 and are rejected with
+    #: EC500 "IP address not authorized for trading".
+    iifl_force_ipv4: bool = True
     #: Market-protection band applied to MARKET orders. SEBI requires a
     #: non-zero value on API market orders since 2026-04-01.
     iifl_market_protection_percent: float = 0.5
