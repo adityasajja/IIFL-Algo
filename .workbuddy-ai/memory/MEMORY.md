@@ -27,6 +27,35 @@ means **overfitting and cherry-picking**. Practical consequences:
 - Python 3.12, managed with `uv`. Use `./.venv/Scripts/python.exe`.
 - No scipy in dependencies — use `statistics.NormalDist` for normal CDF/inverse.
 
+## Dashboard — `web/` and the API behind it (2026-09-12)
+
+`atr serve` builds the SPA and serves API + UI on one port; `atr dev` runs
+FastAPI with reload alongside Vite. React 18 + Vite 5 + Tailwind 4, motion
+components vendored from **beui.dev** via `shadcn add @beui/<name>`.
+
+Panels: Overview, Scanner, Charts, Signals, Alerts, Briefing, **Research**,
+Backtest, Portfolio, Risk, Caches & session. Ctrl+K palette reaches all of them.
+
+- **Research is the panel that matters.** `/backtest` is in-sample by
+  construction — one config, one dataset, parameters the user already saw the
+  answer for. `/research` picks parameters on the training window, scores once
+  on the next unseen window, and reports the deflated Sharpe against the hurdle
+  implied by the trial count. Always prefer it; the Backtest tab says so in the
+  UI.
+- New endpoints: `/research`, `/signals/config`, `/signals/scan`, `/portfolio`
+  (all five sections), `/quote`, `/history/status`, `/instruments/status`,
+  `/strategies`. `/backtest` takes `source=history`.
+- **Walk-forward on the daily cache is structurally limited.** The cache holds
+  **249 trading days**, and `pivot_to_snapshots` groups by timestamp, so
+  `total` is timeline bars, *not* bars × symbols — adding symbols does not
+  lengthen the window. Auto-sized windows give train=63/test=62. `signals_entry`
+  needs ~110 bars to warm up, so it cannot trade meaningfully inside a fold;
+  `/research` returns a `warnings` array saying exactly that, and the UI renders
+  it above the numbers. Use `source=fetch` (~2200 days/symbol) for a real test.
+- Verified by walking every panel in a real browser: 0 console errors.
+  `agent-browser` is not installed and global npm installs are off-limits, so
+  drive the installed Edge headlessly over CDP instead — no downloads.
+
 ## Broker access facts (verified live)
 
 - IIFL session is created by `atr login --client-id <ID> --auth-code <CODE>`;
@@ -113,6 +142,17 @@ means **overfitting and cherry-picking**. Practical consequences:
 
 ## Known gaps (verified, not speculation)
 
+- **`load_cached(exchange)` with no `symbols` reads every parquet file in the
+  cache** (2,654 of them). Always pass the symbols you actually need — reading
+  all of them cost 56s per validation run. `/scan-all` is the one caller that
+  legitimately wants the whole thing.
+- **`/health` must never probe Postgres inline.** `localhost` resolves to both
+  `::1` and `127.0.0.1`, so with no DB running the connect timeout is paid
+  twice (~4s), and the dashboard polls this every 15s. It now probes on a
+  daemon thread and returns the last known answer.
+- `load_daily()`'s cache fallback must keep the `ts` column — dropping it makes
+  `pivot_to_snapshots` raise and loses the whole feed, precisely when the
+  fallback is supposed to be saving you.
 - `LiveRunner` is **fixed and tested** (2026-09-11) but still has no CLI
   entrypoint — nothing constructs it yet. Its strategy loop was previously
   incapable of trading at all (prepare() ran once on static frames, so every
@@ -124,6 +164,8 @@ means **overfitting and cherry-picking**. Practical consequences:
 - `scanner.py` `score_frame()` uses an unvalidated `score = ret_1m + vs_high`
   heuristic, and `scan_symbol()` has a hardcoded `to_date` fallback
   (`"08-Sep-2026"`) that will silently go stale.
+- `/signals/scan` does one quote plus one daily fetch per symbol; on the default
+  19-name universe that is slow enough to be worth batching.
 - `data/` is gitignored wholesale, so `data/alerts/rules.json` config and
   `data/scans/` output are not versioned.
 - Pre-existing ruff errors in `alerts/store.py`, `api/main.py`, `briefing.py`,
