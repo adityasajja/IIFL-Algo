@@ -1221,13 +1221,43 @@ _LOGIN_CALLBACK_HTML = """<!doctype html>
 
 @app.get("/login/callback")
 def login_callback(
-    client_id: str = Query(...),
-    auth_code: str = Query(...),
+    # IIFL actually sends lowercase, unseparated names:
+    #   /login/callback?authcode=...&clientid=...
+    # The camelCase spellings are what the README claimed and what the docs
+    # suggest, and the snake_case ones are ours. Accepting all of them costs
+    # nothing and stops a documentation guess from breaking the only path the
+    # broker controls.
+    authcode: str | None = Query(None),
+    clientid: str | None = Query(None),
+    authCode: str | None = Query(None),  # noqa: N803 - IIFL's documented casing
+    clientId: str | None = Query(None),  # noqa: N803 - IIFL's documented casing
+    auth_code: str | None = Query(None),
+    client_id: str | None = Query(None),
 ) -> HTMLResponse:
-    """Landing page for the IIFL redirect. Exchanges the code for a session."""
+    """Landing page for the IIFL redirect. Exchanges the code for a session.
+
+    Declaring these as required `client_id`/`auth_code` meant every real
+    redirect came back 422 "Field required" as raw JSON, and no session was
+    ever created — the login could not complete by any route through the
+    browser.
+    """
+    auth = authcode or authCode or auth_code
+    cid = clientid or clientId or client_id
+
+    if not auth or not cid:
+        return HTMLResponse(
+            _LOGIN_CALLBACK_HTML
+            + '<div class="card"><h1>Login failed</h1>'
+            + '<p class="err">The redirect did not carry a client id and auth code.</p>'
+            + "<p>Expected <code>?authcode=...&amp;clientid=...</code>, which is what "
+            + "markets.iiflcapital.com sends. If you opened this URL by hand, check "
+            + "the parameter names.</p></div>",
+            status_code=400,
+        )
+
     client = _login_client()
     try:
-        session = client.create_session(client_id, auth_code)
+        session = client.create_session(cid, auth)
     except Exception as exc:  # noqa: BLE001
         return HTMLResponse(
             _LOGIN_CALLBACK_HTML

@@ -76,9 +76,13 @@ uv run pytest
 ```bash
 uv run atr login --print-url
 # open the URL, log in with your trading credentials + OTP
-# you land on your redirect URL with ?authCode=...&clientId=...
+# you land on your redirect URL with ?authcode=...&clientid=...
 uv run atr login --client-id <CLIENTID> --auth-code <AUTHCODE>
 ```
+
+Note the parameter casing: IIFL sends **lowercase** `authcode` and `clientid`.
+`/login/callback` accepts that plus the camelCase and snake_case spellings, so
+the browser flow works regardless.
 
 The session JWT is cached in `.cache/iifl_session.json`. It dies at **midnight
 IST** and the auth code is single-use, so you re-login once per trading day.
