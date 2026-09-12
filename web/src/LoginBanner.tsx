@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { loginSubmit, type LoginStatus } from "./api";
+import { getLoginStatus, loginSubmit, type LoginStatus } from "./api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { MorphingModal } from "./components/ui/modal";
@@ -17,6 +17,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
   const [authCode, setAuthCode] = useState("");
   const [loginState, setLoginState] = useState<ButtonState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
 
   async function manualLogin() {
     setLoginState("loading");
@@ -28,6 +29,38 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
     } catch (e) {
       setLoginState("error");
       setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /**
+   * Open the broker login.
+   *
+   * This must never be a dead end. If the status poll failed we have no
+   * `login_url` — so fetch it now instead of rendering a disabled button. The
+   * tab is opened synchronously (an empty one) and navigated afterwards,
+   * because a `window.open` after an `await` is no longer inside the user
+   * gesture and gets popup-blocked.
+   */
+  async function openLogin() {
+    setError(null);
+    if (status?.login_url) {
+      window.open(status.login_url, "_blank", "noopener");
+      return;
+    }
+    const tab = window.open("", "_blank");
+    setOpening(true);
+    try {
+      const fresh = await getLoginStatus();
+      if (tab && fresh.login_url) tab.location.href = fresh.login_url;
+      else {
+        tab?.close();
+        setError("The backend did not return a login URL — check IIFL_APP_KEY.");
+      }
+    } catch {
+      tab?.close();
+      setError("Can't reach the backend to build the login URL. Is `atr serve` running?");
+    } finally {
+      setOpening(false);
     }
   }
 
@@ -47,17 +80,25 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
             <Button
               size="lg"
               className="w-full"
-              disabled={!status?.login_url}
-              onClick={() => {
-                if (status?.login_url) window.open(status.login_url, "_blank", "noopener");
-              }}
+              disabled={opening}
+              onClick={() => void openLogin()}
             >
-              Log in with IIFL
+              {opening ? "Building the login URL…" : "Log in with IIFL"}
             </Button>
             <p className="text-xs leading-relaxed text-muted-foreground">
               Opens markets.iiflcapital.com in a new tab. After you sign in it
               redirects back and the session activates automatically.
             </p>
+            {error ? (
+              <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-left text-xs leading-relaxed text-destructive">
+                {error}
+              </p>
+            ) : !status ? (
+              <p className="text-left text-xs leading-relaxed text-muted-foreground">
+                Waiting on the backend for the login URL — the button still works,
+                it will fetch one when you click.
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={() => setView("manual")}

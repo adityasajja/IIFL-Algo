@@ -161,11 +161,16 @@ export default function App() {
     }
   }, []);
 
+  // A transient failure must NOT blank the session state. The login modal reads
+  // `login_url` off this object, so nulling it here left the user staring at a
+  // disabled "Log in with IIFL" button — at exactly the moment (backend down or
+  // restarting) they most needed it to work. Keep the last known answer; only
+  // "unknown" if we never got one.
   const refreshAuth = useCallback(async () => {
     try {
       setAuth(await getLoginStatus());
     } catch {
-      setAuth(null);
+      setAuth((prev) => prev);
     }
   }, []);
 
