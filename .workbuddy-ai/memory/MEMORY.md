@@ -88,6 +88,14 @@ Backtest, Portfolio, Risk, Caches & session. Ctrl+K palette reaches all of them.
 - IIFL session is created by `atr login --client-id <ID> --auth-code <CODE>`;
   the auth code is single-use and the JWT dies at **midnight IST**, so this is
   a daily step. Cached at `.cache/iifl_session.json` (gitignored).
+- **IIFL redirects with lowercase, unseparated parameter names:**
+  `/login/callback?authcode=...&clientid=...` — *not* the camelCase
+  `?authCode=&clientId=` that the README originally claimed. The handler
+  accepts lowercase, camelCase and snake_case. A 422 on the callback means the
+  auth code was **never consumed**, so it may still be usable via the manual
+  entry form — worth checking before sending the user back through IIFL.
+- The docs and README are not a specification. Where they disagree with
+  observed behaviour, the observation wins — and then the doc gets fixed.
 - `ENV=dev` in `.env` is fine for read-only calls; order placement needs
   `paper` or `live`.
 - Market data (`/marketdata/marketquotes`, historical) and `/profile` work.
