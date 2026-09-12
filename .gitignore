@@ -3,7 +3,10 @@ __pycache__/
 *.pyc
 .env
 .cache/
-data/
+# Anchored: an unanchored `data/` also matches src/atr/data/, which silently
+# kept the whole data layer (base, csv_feed, history, store, synthetic,
+# aggregator) out of every commit. Anchor it to the repo root.
+/data/
 .pytest_cache/
 uv.lock.bak
 
