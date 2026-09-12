@@ -46,9 +46,13 @@ means **overfitting and cherry-picking**. Practical consequences:
   `hash-object --stdin`. Python rewrites `\n` to `\r\n` and every object
   hashes wrong.
 - This sandbox silently drops writes to `.git/refs/remotes/`. `git update-ref`
-  reports success and writes nothing — read the ref back to confirm.
+  reports success and writes nothing — read the ref back to confirm. Workaround:
+  write the ref file directly (`9c21972...` + newline into
+  `.git/refs/remotes/origin/main`); that path does persist.
 - Probe local servers with Python's `urllib`, not curl: curl here returns exit
-  23 with an empty body against a healthy endpoint.
+  23 with an empty body against a healthy endpoint. And a dead port answers
+  `HTTPError 502` rather than a connection error — the sandbox proxy replies
+  on behalf of the closed port, so use a raw `socket.connect` to test liveness.
 
 ## Dashboard — `web/` and the API behind it (2026-09-12)
 
