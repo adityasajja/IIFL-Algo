@@ -552,6 +552,58 @@ def _broker_rows(payload: Any) -> list[dict[str, Any]]:
 #: "No Trade's are found for this user". Those are empty results, not failures.
 _EMPTY_STATES = ("no trade", "no holding", "no position", "no order", "no record")
 
+_EGRESS: dict[str, Any] = {"ip": None, "at": 0.0}
+
+
+def _egress_ip(ttl: float = 600.0) -> str | None:
+    """The public IPv4 this host egresses as, for diagnosing the IP whitelist.
+
+    Fetched lazily and cached — it only runs once IIFL has already rejected us
+    for an IP reason, so it costs nothing on the happy path.
+
+    Uses a **dual-stack** endpoint with the same IPv4 pinning as `IiflClient`.
+    An IPv4-only service would cheerfully report the IPv4 while the request
+    itself left over IPv6, which is the exact confusion that hid this bug the
+    first time round.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    if _EGRESS["ip"] and now - float(_EGRESS["at"]) < ttl:
+        return _EGRESS["ip"]
+    try:
+        import httpx
+
+        with httpx.Client(
+            transport=httpx.HTTPTransport(local_address="0.0.0.0"), timeout=8
+        ) as http:
+            ip = http.get("https://api64.ipify.org").text.strip()
+        if ip:
+            _EGRESS["ip"] = ip
+            _EGRESS["at"] = now
+    except Exception:  # noqa: BLE001 - a diagnostic must never mask the real error
+        pass
+    return _EGRESS["ip"]
+
+
+def _with_ip_hint(message: str) -> str:
+    """Turn IIFL's opaque IP rejection into something you can act on.
+
+    The whitelisted address is a SEBI requirement and the connection here is a
+    dynamic consumer line, so this recurs whenever the ISP re-leases. Saying
+    which address to register beats re-deriving it every time.
+    """
+    if "ip address not authorized" not in message.lower():
+        return message
+    ip = _egress_ip()
+    if not ip:
+        return message
+    return (
+        f"{message} This machine currently egresses as {ip} — register that "
+        f"address at developers.iiflcapital.com (My Apps → View All Details → "
+        f"Primary Static IP)."
+    )
+
 
 def _empty_state(node: Any) -> bool:
     """True for IIFL's 'nothing here' rows, which arrive carrying an error status."""
@@ -1061,7 +1113,7 @@ def portfolio(sections: str | None = None) -> dict[str, Any]:
                 payload = fetchers[name]()
                 broker_error = _broker_error(payload)
                 if broker_error:
-                    out[name] = {"rows": [], "count": 0, "error": broker_error}
+                    out[name] = {"rows": [], "count": 0, "error": _with_ip_hint(broker_error)}
                     continue
                 rows = [r for r in _broker_rows(payload) if not _empty_state(r)]
                 out[name] = {"rows": _clean(rows), "count": len(rows)}
@@ -1110,7 +1162,7 @@ def quote(symbols: str, exchange: str = "NSEEQ") -> dict[str, Any]:
 
     broker_error = _broker_error(payload)
     if broker_error:
-        raise HTTPException(502, broker_error)
+        raise HTTPException(502, _with_ip_hint(broker_error))
 
     rows = _broker_rows(payload)
     for symbol, row in zip(resolved, rows, strict=False):
