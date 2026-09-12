@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { API_URL, getScan, type ScanRow } from "./api";
+import { Button } from "./components/ui/button";
+import { Card, ErrorBox, Hint } from "./components/ui/card";
+import { Input } from "./components/ui/input";
+import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
+import { Switch } from "./components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { cn } from "./lib/utils";
 
 type SortKey = "score" | "ret_1m" | "vs_high" | "rsi" | "vol_x" | "last";
 type Mode = "watchlist" | "all";
@@ -21,13 +28,29 @@ interface ScanAllResponse {
   rows: ScanRow[];
 }
 
-export default function ScannerPanel() {
+function Pill({ tone, children }: { tone: "up" | "down" | "gold" | "flat"; children: ReactNode }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+        tone === "up" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        tone === "down" && "bg-destructive/10 text-destructive",
+        tone === "gold" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        tone === "flat" && "bg-primary/[0.07] text-muted-foreground",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: string) => void }) {
   const [mode, setMode] = useState<Mode>("all");
   const [rows, setRows] = useState<ScanRow[] | null>(null);
   const [asOf, setAsOf] = useState("");
   const [breadth, setBreadth] = useState("");
   const [errors, setErrors] = useState<{ symbol: string; error: string }[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [scanState, setScanState] = useState<ButtonState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [universe, setUniverse] = useState("");
   const [nameFilter, setNameFilter] = useState("");
@@ -36,7 +59,7 @@ export default function ScannerPanel() {
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
   async function load(nextMode: Mode = mode) {
-    setBusy(true);
+    setScanState("loading");
     setError(null);
     try {
       if (nextMode === "all") {
@@ -55,11 +78,11 @@ export default function ScannerPanel() {
         setBreadth(`${res.rows.length} names · live IIFL dailies`);
         setErrors(res.errors);
       }
+      setScanState("success");
     } catch (e) {
       setRows(null);
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+      setScanState("error");
     }
   }
 
@@ -75,6 +98,15 @@ export default function ScannerPanel() {
       setSortKey(k);
       setSortDir(-1);
     }
+  }
+
+  function openChart(sym: string) {
+    try {
+      sessionStorage.setItem("atr.chartSymbol", sym);
+    } catch {
+      /* ignore */
+    }
+    onOpenChart?.("charts");
   }
 
   function switchMode(m: Mode) {
@@ -96,52 +128,45 @@ export default function ScannerPanel() {
     : null;
 
   return (
-    <section className="panel">
-      <div className="row" style={{ marginTop: 0 }}>
-        <button
-          className={mode === "all" ? "primary" : "ghost"}
-          onClick={() => switchMode("all")}
+    <Card className="p-5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Tabs value={mode} onValueChange={(v) => switchMode(v as Mode)} variant="segment">
+          <TabsList>
+            <TabsTrigger value="all">All NSE (cached)</TabsTrigger>
+            <TabsTrigger value="watchlist">Watchlist (live)</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <StatefulButton
+          state={scanState}
+          variant="secondary"
+          onClick={() => void load()}
+          loadingText="Scanning…"
+          successText="Scanned"
+          errorText="Failed — retry"
         >
-          All NSE (cached)
-        </button>
-        <button
-          className={mode === "watchlist" ? "primary" : "ghost"}
-          onClick={() => switchMode("watchlist")}
-        >
-          Watchlist (live)
-        </button>
-        <button className="ghost" disabled={busy} onClick={() => void load()}>
-          {busy ? "Scanning…" : "Re-scan"}
-        </button>
+          Re-scan
+        </StatefulButton>
       </div>
+
       {mode === "watchlist" && (
-        <div className="row">
-          <input
-            placeholder="Universe override: RELIANCE-EQ,INFY-EQ (blank = 19-name default)"
+        <div className="mt-3.5 max-w-xl">
+          <Input
             value={universe}
-            onChange={(e) => setUniverse(e.target.value)}
-            style={{ flex: 1, minWidth: 220 }}
+            onChange={setUniverse}
+            placeholder="Universe override: RELIANCE-EQ,INFY-EQ (blank = 19-name default)"
           />
         </div>
       )}
-      <div className="row">
-        <input
-          placeholder="Filter by symbol…"
-          value={nameFilter}
-          onChange={(e) => setNameFilter(e.target.value)}
-          style={{ maxWidth: 220 }}
-        />
-        <label className="field check">
-          <input
-            type="checkbox"
-            checked={breakoutsOnly}
-            onChange={(e) => setBreakoutsOnly(e.target.checked)}
-          />
-          Breakouts only
-        </label>
+
+      <div className="mt-3.5 flex flex-wrap items-center gap-3.5">
+        <div className="w-55 max-w-full">
+          <Input value={nameFilter} onChange={setNameFilter} placeholder="Filter by symbol…" />
+        </div>
+        <Switch checked={breakoutsOnly} onCheckedChange={setBreakoutsOnly} label="Breakouts only" />
       </div>
-      <p className="hint">
-        {busy
+
+      <Hint className="mt-3">
+        {scanState === "loading"
           ? mode === "all"
             ? "Scoring cached histories…"
             : "Fetching live IIFL dailies — about a minute."
@@ -150,62 +175,68 @@ export default function ScannerPanel() {
             : mode === "all"
               ? "Full market off the local cache — refresh nightly with `atr history sync`."
               : "Momentum scan over liquid NSE names."}
-      </p>
-      {error && <div className="error">{error}</div>}
+      </Hint>
+
+      {error && (
+        <div className="mt-3">
+          <ErrorBox>{error}</ErrorBox>
+        </div>
+      )}
+
       {visible && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="metrics scan">
+        <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+          <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr>
-                <th>Symbol</th>
+              <tr className="border-b border-border bg-muted/40 text-left">
+                <th className="px-3 py-2 font-semibold">Symbol</th>
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
                     onClick={() => onSort(c.key)}
-                    className="sortable"
                     title="sort"
+                    className="cursor-pointer select-none px-3 py-2 text-right font-semibold hover:text-foreground"
                   >
                     {c.label}
                     {sortKey === c.key ? (sortDir === -1 ? " ▼" : " ▲") : ""}
                   </th>
                 ))}
-                <th>Trend</th>
-                <th>Signal</th>
+                <th className="px-3 py-2 font-semibold">Trend</th>
+                <th className="px-3 py-2 font-semibold">Signal</th>
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>
               {visible.map((r) => (
-                <tr key={r.symbol}>
-                  <td>
-                    <strong>{r.symbol.replace("-EQ", "")}</strong>
+                <tr key={r.symbol} className="border-b border-border/60 transition-colors last:border-0 hover:bg-primary/[0.03]">
+                  <td className="px-3 py-1.5">
+                    <strong className="font-semibold">{r.symbol.replace("-EQ", "")}</strong>
                   </td>
-                  <td className="num">{r.score.toFixed(1)}</td>
-                  <td className="num">{r.last.toLocaleString("en-IN")}</td>
-                  <td className={`num ${r.ret_1m >= 0 ? "pos" : "neg"}`}>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{r.last.toLocaleString("en-IN")}</td>
+                  <td className={cn("px-3 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
                     {r.ret_1m.toFixed(1)}
                   </td>
-                  <td className={`num ${r.vs_high > -2 ? "pos" : "neg"}`}>
+                  <td className={cn("px-3 py-1.5 text-right tabular-nums", r.vs_high > -2 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
                     {r.vs_high.toFixed(1)}
                   </td>
-                  <td
-                    className={`num ${r.rsi < 30 ? "pos" : r.rsi > 70 ? "neg" : ""}`}
-                  >
+                  <td className={cn("px-3 py-1.5 text-right tabular-nums", r.rsi < 30 ? "text-emerald-600 dark:text-emerald-400" : r.rsi > 70 ? "text-destructive" : "")}>
                     {r.rsi.toFixed(0)}
                   </td>
-                  <td className="num">{r.vol_x.toFixed(1)}</td>
-                  <td>
-                    <span className={`pill pill-${r.trend.toLowerCase()}`}>
-                      {r.trend}
+                  <td className="px-3 py-1.5 text-right tabular-nums">{r.vol_x.toFixed(1)}</td>
+                  <td className="px-3 py-1.5">
+                    <Pill tone={r.trend === "UP" ? "up" : r.trend === "DOWN" ? "down" : "flat"}>{r.trend}</Pill>
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <span className="inline-flex flex-wrap gap-1">
+                      {r.breakout && <Pill tone="up">BREAKOUT</Pill>}
+                      {r.gold_cross_5d && <Pill tone="gold">GOLD CROSS</Pill>}
+                      {r.rsi < 30 && <Pill tone="gold">OVERSOLD</Pill>}
                     </span>
                   </td>
-                  <td>
-                    {r.breakout && <span className="pill pill-up">BREAKOUT</span>}{" "}
-                    {r.gold_cross_5d && (
-                      <span className="pill pill-gold">GOLD CROSS</span>
-                    )}{" "}
-                    {r.rsi < 30 && (
-                      <span className="pill pill-gold">OVERSOLD</span>
-                    )}
+                  <td className="px-3 py-1.5 text-right">
+                    <Button size="sm" variant="ghost" onClick={() => openChart(r.symbol)} title="Open chart">
+                      Chart
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -214,8 +245,8 @@ export default function ScannerPanel() {
         </div>
       )}
       {errors.length > 0 && (
-        <p className="hint">Skipped: {errors.map((e) => e.symbol).join(", ")}</p>
+        <Hint className="mt-2.5">Skipped: {errors.map((e) => e.symbol).join(", ")}</Hint>
       )}
-    </section>
+    </Card>
   );
 }

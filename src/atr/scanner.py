@@ -6,6 +6,7 @@ signals and research math can't drift apart.
 
 from __future__ import annotations
 
+from datetime import date
 import time
 
 import pandas as pd
@@ -88,7 +89,8 @@ def scan_symbol(
     to_date: str | None = None,
 ) -> dict:
     conid = resolve_conid(master, symbol, exchange)
-    raw = client.historical_data("NSEEQ", conid, "1d", from_date, to_date or "08-Sep-2026")
+    raw = client.historical_data("NSEEQ", conid, "1d", from_date,
+                                 to_date or date.today().strftime("%d-%b-%Y"))
     df = pd.DataFrame(raw["result"][0]["candles"],
                       columns=["ts", "open", "high", "low", "close", "volume"])
     df["ts"] = pd.to_datetime(df["ts"])

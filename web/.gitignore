@@ -1,3 +1,6 @@
 dist/
 node_modules/
 *.local
+
+# Vite config temp files
+vite.config.ts.timestamp-*

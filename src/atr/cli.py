@@ -111,7 +111,12 @@ def _build_parser() -> argparse.ArgumentParser:
     live.add_argument("--topics", default="nseeq/2885", help="comma separated exchange/id")
     live.add_argument("--seconds", type=float, default=10.0)
 
-    sub.add_parser("serve", help="start the FastAPI control plane")
+    serve = sub.add_parser("serve", help="start the app: FastAPI + built frontend on one port")
+    serve.add_argument("--host", help="override API_HOST")
+    serve.add_argument("--port", type=int, help="override API_PORT")
+    serve.add_argument("--no-browser", action="store_true", help="don't open the dashboard on start")
+    serve.add_argument("--rebuild", action="store_true", help="force a frontend rebuild")
+    serve.add_argument("--no-build", action="store_true", help="skip the build/missing check")
 
     # ------------------------------------------------------------------
     hist = sub.add_parser("history", help="bulk history cache + full-market scan")
@@ -131,6 +136,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # ------------------------------------------------------------------
     br = sub.add_parser("brief", help="morning briefing (preview or Telegram it)")
     br.add_argument("action", choices=["preview", "send"], nargs="?", default="preview")
+
+    # ------------------------------------------------------------------
+    dev = sub.add_parser("dev", help="development: FastAPI (reload) + Vite dev server")
+    dev.add_argument("--no-browser", action="store_true", help="don't open the dashboard on start")
     return parser
 
 
@@ -737,13 +746,142 @@ def _run_brief(args) -> int:
     return 0
 
 
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _web_dir() -> Path:
+    return _project_root() / "web"
+
+
+def _web_dist() -> Path:
+    return _web_dir() / "dist"
+
+
+def _frontend_built() -> bool:
+    dist = _web_dist()
+    return (dist / "index.html").exists() and (dist / "assets").is_dir()
+
+
+def _build_frontend() -> None:
+    """Run the Vite production build so the backend can serve the SPA."""
+    import shutil
+    import subprocess
+
+    tool = shutil.which("bun") or shutil.which("npm") or shutil.which("npx")
+    if not tool:
+        logger.warning(
+            "no bun/npm found on PATH — cannot build the frontend. "
+            "Run `bun run build` in web/ yourself, or use `atr dev`."
+        )
+        return
+    cmd = (
+        [tool, "run", "build"]
+        if tool.endswith(("bun", "bun.exe", "npm", "npm.exe"))
+        else [tool, "vite", "build"]
+    )
+    logger.info("building frontend with {} …", tool)
+    res = subprocess.run(cmd, cwd=str(_web_dir()))
+    if res.returncode != 0:
+        logger.error("frontend build failed — the dashboard will not be served")
+
+
+def _open_browser(url: str) -> None:
+    import webbrowser
+
+    try:
+        if not webbrowser.open(url):
+            logger.info("dashboard at {}", url)
+    except Exception:  # noqa: BLE001 — headless machines just get the URL
+        logger.info("dashboard at {}", url)
+
+
+def _session_ready() -> None:
+    from atr.brokers.iifl.auth import SessionStore
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    session = SessionStore(settings.iifl_session_cache).load()
+    if session:
+        logger.info("IIFL session for {} valid until {}", session.client_id,
+                    session.expires_at.strftime("%d-%b %H:%M IST"))
+    else:
+        logger.warning("no active IIFL session — log in from the dashboard when it opens")
+
+
 def _run_serve(args) -> int:
     import uvicorn
 
     from atr.config.settings import get_settings
 
     settings = get_settings()
-    uvicorn.run("atr.api.main:app", host=settings.api_host, port=settings.api_port, reload=False)
+    host = args.host or settings.api_host
+    port = args.port or settings.api_port
+
+    if not args.no_build:
+        if args.rebuild or not _frontend_built():
+            _build_frontend()
+
+    url = f"http://{host}:{port}"
+    logger.info("starting ATR on {}", url)
+    _session_ready()
+    if not args.no_browser:
+        _open_browser(url)
+    uvicorn.run("atr.api.main:app", host=host, port=port, reload=False, log_level="info")
+    return 0
+
+
+def _run_dev(args) -> int:
+    """Run the FastAPI backend (reload) and the Vite dev server together."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    host = settings.api_host
+    port = settings.api_port
+    if not _web_dir().exists():
+        logger.error("web/ directory missing at {}", _web_dir())
+        return 2
+
+    children = [
+        subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "atr.api.main:app",
+             "--host", host, "--port", str(port), "--reload"],
+            cwd=str(_project_root()),
+        ),
+        subprocess.Popen(
+            ["bun", "run", "dev"],
+            cwd=str(_web_dir()),
+            env={**os.environ, "VITE_API_URL": f"http://127.0.0.1:{port}"},
+        ),
+    ]
+
+    url = f"http://localhost:5173"
+    logger.info("dashboard (dev) at {}", url)
+    if not args.no_browser:
+        _open_browser(url)
+
+    def _terminate(*_: object) -> None:
+        for p in children:
+            if p.poll() is None:
+                p.terminate()
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+    signal.signal(signal.SIGINT, _terminate)
+    signal.signal(signal.SIGTERM, _terminate)
+    try:
+        while all(p.poll() is None for p in children):
+            time.sleep(0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for p in children:
+            if p.poll() is None:
+                p.kill()
     return 0
 
 
@@ -764,6 +902,7 @@ def main(argv: list[str] | None = None) -> int:
         "brief": _run_brief,
         "live": _run_live,
         "serve": _run_serve,
+        "dev": _run_dev,
     }
     return handlers[args.command](args)
 

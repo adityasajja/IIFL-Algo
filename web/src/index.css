@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root,
+[data-theme="dark"] {
+  --background: #0e1015;
+  --foreground: #eef1f6;
+  --card: #161a23;
+  --primary: #635bff;
+  --primary-foreground: #ffffff;
+  --muted: #1b202b;
+  --muted-foreground: #8b93a2;
+  --border: #262b36;
+  --ring: #635bff;
+  --destructive: #f5686b;
+  --destructive-foreground: #ffffff;
+  --success: #2ec27e;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --background: #f6f7f9;
+  --foreground: #0a2540;
+  --card: #ffffff;
+  --primary: #635bff;
+  --primary-foreground: #ffffff;
+  --muted: #eef0f4;
+  --muted-foreground: #697386;
+  --border: #e3e6ec;
+  --ring: #635bff;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --success: #16a34a;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(1200px 500px at 85% -10%, rgba(99, 91, 255, 0.07), transparent 60%),
+    radial-gradient(900px 420px at -10% 110%, rgba(99, 91, 255, 0.05), transparent 55%);
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(99, 91, 255, 0.35);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+  border: 2px solid var(--background);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -27,9 +27,11 @@ class BriefingConfig(BaseModel):
     avoid_n: int = 5
     min_price: float = 50.0
     min_day_value_lakh: float = 50.0
+    min_atr_pct: float = 0.5  # kills flat/liquid-fund instruments near their high
     min_bars: int = 60
     universe: str = "all"  # all | watchlist
     watchlist: list[str] = list(UNIVERSE)
+    ranking: str = "vs_high"  # vs_high | score — grid-tested, vs_high wins
     send_enabled: bool = True
 
 
@@ -85,8 +87,10 @@ def _rows(cfg: BriefingConfig) -> pd.DataFrame:
         return scan
     scan = scan[(scan["bars"] >= cfg.min_bars)
                 & (scan["last"] >= cfg.min_price)
-                & (scan["day_value_lakh"] >= cfg.min_day_value_lakh)]
-    return scan.sort_values("score", ascending=False).reset_index(drop=True)
+                & (scan["day_value_lakh"] >= cfg.min_day_value_lakh)
+                & (scan["atr_pct"] >= cfg.min_atr_pct)]
+    col = "vs_high" if cfg.ranking == "vs_high" else "score"
+    return scan.sort_values(col, ascending=False).reset_index(drop=True)
 
 
 def build_brief(cfg: BriefingConfig | None = None,

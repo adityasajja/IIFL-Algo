@@ -96,6 +96,21 @@ means **overfitting and cherry-picking**. Practical consequences:
   A single close below SMA50 flagged 10 of 17 holdings — that is fatigue, not
   information.
 
+## Validation doctrine (hard-won)
+
+- **A statistically significant Sharpe is not a useful signal.** Cross-sectional
+  momentum cleared the deflated-Sharpe bar (0.976) and was still worthless —
+  random selection from the same universe scored 1.41 mean vs momentum's 1.24.
+  Always run a **control**: same universe, cadence and sizing, but random
+  selection. It is the only thing that isolates the signal's contribution.
+- The benchmark must be the thing you would actually do instead — for a
+  long-only rotation strategy that is buy-and-hold of the same universe.
+- Absolute numbers are **survivorship-inflated**: the universe is today's
+  listed names tested over the past. Only relative comparisons are meaningful.
+- Prefer testing a *different hypothesis* over tuning parameters of a dead one.
+  A bigger grid raises the deflated-Sharpe hurdle, so searching harder makes
+  the test stricter, not the result better.
+
 ## Known gaps (verified, not speculation)
 
 - `LiveRunner` is **fixed and tested** (2026-09-11) but still has no CLI

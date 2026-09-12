@@ -8,6 +8,12 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { API_URL, getCandles, type Candle } from "./api";
+import { Button } from "./components/ui/button";
+import { Card, ErrorBox, Hint } from "./components/ui/card";
+import { Input } from "./components/ui/input";
+import { Switch } from "./components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { cn } from "./lib/utils";
 
 type BarTime = string | UTCTimestamp;
 type Theme = "dark" | "light";
@@ -114,29 +120,36 @@ function fmtDate(d: Date): string {
   return `${String(d.getDate()).padStart(2, "0")}-${m[d.getMonth()]}-${d.getFullYear()}`;
 }
 
+function defaultDates() {
+  const to = new Date();
+  const from = new Date(to);
+  from.setMonth(from.getMonth() - 3);
+  return { from: fmtDate(from), to: fmtDate(to) };
+}
+
 function themeOpts(theme: Theme) {
   const dark = theme === "dark";
   return {
-    bg: dark ? "#0f1319" : "#ffffff",
-    text: dark ? "#9aa4b2" : "#555555",
-    grid: dark ? "#1c222c" : "#e8ebf0",
-    border: dark ? "#2a313c" : "#d5dae1",
+    bg: dark ? "#161a23" : "#ffffff",
+    text: dark ? "#8b93a2" : "#697386",
+    grid: dark ? "#262b36" : "#e3e6ec",
+    border: dark ? "#262b36" : "#e3e6ec",
   };
 }
 
-export default function ChartsPanel() {
+export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "light" }) {
   const [symbol, setSymbol] = useState("RELIANCE-EQ");
   const [query, setQuery] = useState("RELIANCE-EQ");
   const [hits, setHits] = useState<SymbolHit[]>([]);
   const [showHits, setShowHits] = useState(false);
   const [interval, setInterval] = useState("1d");
-  const [fromDate, setFromDate] = useState("01-Mar-2026");
-  const [toDate, setToDate] = useState("08-Sep-2026");
+  const initialDates = useMemo(defaultDates, []);
+  const [fromDate, setFromDate] = useState(initialDates.from);
+  const [toDate, setToDate] = useState(initialDates.to);
   const [data, setData] = useState<Candle[] | null>(null);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [theme, setTheme] = useState<Theme>("dark");
   const [showSma, setShowSma] = useState(true);
   const [showEma, setShowEma] = useState(true);
   const [showBb, setShowBb] = useState(true);
@@ -185,6 +198,19 @@ export default function ChartsPanel() {
         setQuotes(q);
       })
       .catch(() => undefined);
+  }, []);
+
+  // prefill from the scanner's "open chart" button
+  useEffect(() => {
+    let pending: string | null = null;
+    try {
+      pending = sessionStorage.getItem("atr.chartSymbol");
+      sessionStorage.removeItem("atr.chartSymbol");
+    } catch {
+      /* ignore */
+    }
+    if (pending) void load(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const model = useMemo(() => {
@@ -361,7 +387,7 @@ export default function ChartsPanel() {
   }
 
   function preset(months: number) {
-    const to = new Date(2026, 8, 8);
+    const to = new Date();
     const from = new Date(to);
     from.setMonth(from.getMonth() - months);
     setFromDate(fmtDate(from));
@@ -369,125 +395,152 @@ export default function ChartsPanel() {
   }
 
   return (
-    <section className="panel">
-      {/* interval toolbar */}
-      <div className="row tv-bar" style={{ marginTop: 0 }}>
-        {INTERVALS.map((o) => (
-          <button
-            key={o.v}
-            className={interval === o.v ? "seg-active" : "seg"}
-            onClick={() => setInterval(o.v)}
-          >
-            {o.label}
-          </button>
-        ))}
-        <span className="tv-sep" />
-        <label className="field check"><input type="checkbox" checked={showSma} onChange={(e) => setShowSma(e.target.checked)} /> SMA</label>
-        <label className="field check"><input type="checkbox" checked={showEma} onChange={(e) => setShowEma(e.target.checked)} /> EMA ribbon</label>
-        <label className="field check"><input type="checkbox" checked={showBb} onChange={(e) => setShowBb(e.target.checked)} /> Bollinger</label>
-        <span className="tv-sep" />
-        <button className="ghost" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
-          {theme === "dark" ? "☾ dark" : "☀ light"}
-        </button>
+    <Card className="p-5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
+        <Tabs value={interval} onValueChange={setInterval} variant="segment">
+          <TabsList>
+            {INTERVALS.map((o) => (
+              <TabsTrigger key={o.v} value={o.v}>
+                {o.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <span className="hidden h-5 w-px bg-border sm:inline-block" />
+        <Switch checked={showSma} onCheckedChange={setShowSma} label="SMA" />
+        <Switch checked={showEma} onCheckedChange={setShowEma} label="EMA ribbon" />
+        <Switch checked={showBb} onCheckedChange={setShowBb} label="Bollinger" />
       </div>
 
-      <div className="tv-layout">
-        <div className="tv-main">
-          <div className="grid">
-            <label className="field" style={{ position: "relative" }}>
-              Symbol
-              <input
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_240px]">
+        <div className="min-w-0">
+          <div className="grid gap-3.5 sm:grid-cols-3">
+            <div className="relative">
+              <Input
+                label="Symbol"
                 value={query}
-                onChange={(e) => { setQuery(e.target.value); setShowHits(true); }}
-                onFocus={() => setShowHits(true)}
+                onChange={(v) => {
+                  setQuery(v);
+                  setShowHits(true);
+                }}
                 placeholder="Search 2600+ NSE names…"
               />
               {showHits && hits.length > 0 && (
-                <div className="combo">
+                <div className="absolute inset-x-0 top-full z-30 mt-1.5 overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
                   {hits.map((h) => (
                     <button
                       key={`${h.exchange}:${h.symbol}`}
-                      onClick={() => { setQuery(h.symbol); void load(h.symbol); }}
+                      type="button"
+                      onClick={() => {
+                        setQuery(h.symbol);
+                        void load(h.symbol);
+                      }}
+                      className="flex w-full items-center justify-between px-3.5 py-2 text-left text-[13px] transition-colors hover:bg-primary/[0.06]"
                     >
-                      {h.symbol} <span>{h.exchange}</span>
+                      <span className="font-medium">{h.symbol}</span>
+                      <span className="text-xs text-muted-foreground">{h.exchange}</span>
                     </button>
                   ))}
                 </div>
               )}
-            </label>
-            <label className="field">
-              From (dd-MMM-yyyy)
-              <input value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-            </label>
-            <label className="field">
-              To (dd-MMM-yyyy)
-              <input value={toDate} onChange={(e) => setToDate(e.target.value)} />
-            </label>
+            </div>
+            <Input label="From (dd-MMM-yyyy)" value={fromDate} onChange={setFromDate} />
+            <Input label="To (dd-MMM-yyyy)" value={toDate} onChange={setToDate} />
           </div>
-          <div className="row">
-            <button className="primary" disabled={busy} onClick={() => void load()}>
+
+          <div className="mt-3.5 flex flex-wrap items-center gap-2">
+            <Button disabled={busy} onClick={() => void load()}>
               {busy ? "Loading…" : "Load chart"}
-            </button>
+            </Button>
             {RANGES.map((r) => (
-              <button key={r.label} className="ghost" onClick={() => preset(r.months)}>
+              <Button key={r.label} size="sm" variant="ghost" onClick={() => preset(r.months)}>
                 {r.label}
-              </button>
+              </Button>
             ))}
-            <button
-              className="ghost"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => {
                 if (!watch.includes(symbol)) setWatch((w) => [...w, symbol]);
               }}
             >
               + Watch
-            </button>
+            </Button>
           </div>
-          {error && <div className="error">{error}</div>}
+
+          {error && (
+            <div className="mt-3">
+              <ErrorBox>{error}</ErrorBox>
+            </div>
+          )}
+
           {data && (
-            <div style={{ marginTop: 14 }}>
-              <div className="tv-title">
-                <strong>{title}</strong>
-                <span className="tv-legend">{legend}</span>
+            <div className="mt-3.5">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <strong className="text-sm font-semibold">{title}</strong>
+                <span className="font-mono text-xs text-muted-foreground">{legend}</span>
               </div>
-              <div ref={priceRef} />
-              <div ref={rsiRef} style={{ marginTop: 8 }} />
-              <p className="hint">Drag to pan · scroll to zoom · right-click to reset</p>
+              <div ref={priceRef} className="mt-2 [&_canvas]:rounded-xl" />
+              <div ref={rsiRef} className="mt-2 [&_canvas]:rounded-xl" />
+              <Hint className="mt-2">Drag to pan · scroll to zoom · right-click to reset</Hint>
             </div>
           )}
           {!data && !error && (
-            <p className="hint">Search any NSE name, or pick from the watchlist →</p>
+            <Hint className="mt-3.5">Search any NSE name, or pick from the watchlist →</Hint>
           )}
         </div>
 
-        <aside className="tv-watch">
-          <h4>Watchlist</h4>
-          {watch.map((w) => {
-            const q = quotes[w];
-            const up = (q?.chg ?? 0) >= 0;
-            return (
-              <div key={w} className="tv-row">
-                <button
-                  className={`tv-sym ${w === symbol ? "active" : ""}`}
-                  onClick={() => { setQuery(w); void load(w); }}
+        <aside className="min-w-0 rounded-xl border border-border bg-background/40 p-3">
+          <h4 className="px-1 pb-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            Watchlist
+          </h4>
+          <div className="space-y-0.5">
+            {watch.map((w) => {
+              const q = quotes[w];
+              const up = (q?.chg ?? 0) >= 0;
+              return (
+                <div
+                  key={w}
+                  className={cn(
+                    "group flex items-center gap-1 rounded-lg px-1 py-0.5 transition-colors",
+                    w === symbol ? "bg-primary/[0.08]" : "hover:bg-primary/[0.04]",
+                  )}
                 >
-                  <span>{w.replace("-EQ", "")}</span>
-                  <span className="num">{q ? q.last.toLocaleString("en-IN") : "…"}</span>
-                  <span className={`num ${up ? "pos" : "neg"}`}>
-                    {q ? `${up ? "+" : ""}${q.chg.toFixed(2)}%` : ""}
-                  </span>
-                </button>
-                <button
-                  className="tv-x"
-                  title="remove"
-                  onClick={() => setWatch((prev) => prev.filter((s) => s !== w))}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery(w);
+                      void load(w);
+                    }}
+                    className="grid min-w-0 flex-1 grid-cols-[1fr_auto_auto] items-center gap-2 px-1.5 py-1.5 text-left text-[13px]"
+                  >
+                    <span className="truncate font-medium">{w.replace("-EQ", "")}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {q ? q.last.toLocaleString("en-IN") : "…"}
+                    </span>
+                    <span
+                      className={cn(
+                        "tabular-nums",
+                        up ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
+                      )}
+                    >
+                      {q ? `${up ? "+" : ""}${q.chg.toFixed(2)}%` : ""}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    title="remove"
+                    onClick={() => setWatch((prev) => prev.filter((s) => s !== w))}
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </aside>
       </div>
-    </section>
+    </Card>
   );
 }

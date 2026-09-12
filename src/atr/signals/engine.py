@@ -133,10 +133,16 @@ def load_daily(
         try:
             frame = pd.read_parquet(path).sort_values("ts").reset_index(drop=True)
             if not frame.empty:
-                return frame[OHLCV]
+                # Keep `ts` when it survived the round-trip. Dropping it makes
+                # the cached fallback unusable for anything that has to rebuild
+                # a timeline — `pivot_to_snapshots` requires the column and
+                # raises on the whole feed, so one cached symbol would take
+                # down a validation run rather than just falling back to it.
+                cols = ["ts", *OHLCV] if "ts" in frame.columns else OHLCV
+                return frame[cols]
         except Exception as exc:  # noqa: BLE001
             logger.debug("cache read failed for {}: {}", symbol, exc)
-    return pd.DataFrame(columns=OHLCV)
+    return pd.DataFrame(columns=["ts", *OHLCV])
 
 
 def _quotes(client: IiflClient, legs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:

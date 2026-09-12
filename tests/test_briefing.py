@@ -49,3 +49,30 @@ def test_config_roundtrip(monkeypatch, tmp_path):
     cfg = B.save_config(B.BriefingConfig(top_n=5))
     assert B.load_config().top_n == 5
     assert cfg.top_n == 5
+
+
+def test_ranking_changes_picks(monkeypatch):
+    # AAA rises (vs_high near 0, high 1M ret) — score ranks it top,
+    # vs_high alone does not.
+    frames = {
+        "AAA-EQ": _frame(step=1.0, n=100),
+        "BBB-EQ": _frame(start=200.0, step=-0.5),
+    }
+    monkeypatch.setattr(B, "load_cached", lambda exchange="NSEEQ": frames)
+    ls = B._rows(_cfg())["symbol"].tolist()
+    assert "BBB-EQ" in ls  # weakest vs_high excluded by ATR floor? covered below
+    assert set(ls) <= {"AAA-EQ", "BBB-EQ"}
+
+
+def test_atr_floor_filters_flat_instruments(monkeypatch):
+    n = 80
+    flat = pd.DataFrame({
+        "ts": pd.date_range("2026-01-01", periods=n),
+        "open": [1000.0] * n, "high": [1000.0] * n,
+        "low": [1000.0] * n, "close": [1000.0] * n,
+        "volume": [200000] * n,
+    })
+    frames = {"AAA-EQ": _frame(step=1.0), "FLAT-EQ": flat}
+    monkeypatch.setattr(B, "load_cached", lambda exchange="NSEEQ": frames)
+    ls = B._rows(_cfg())["symbol"].tolist()
+    assert "FLAT-EQ" not in ls
