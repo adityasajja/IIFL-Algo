@@ -75,7 +75,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
             <code className="font-mono">authCode</code> from the address bar.
           </p>
           <div className="mt-4 grid gap-3">
-            <Input label="Client ID" value={clientId} onChange={setClientId} placeholder="e.g. SNVMK003" />
+            <Input label="Client ID" value={clientId} onChange={setClientId} placeholder="your IIFL client ID" />
             <Input
               label="Auth code"
               value={authCode}
