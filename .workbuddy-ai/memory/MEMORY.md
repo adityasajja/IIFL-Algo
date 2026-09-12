@@ -27,6 +27,29 @@ means **overfitting and cherry-picking**. Practical consequences:
 - Python 3.12, managed with `uv`. Use `./.venv/Scripts/python.exe`.
 - No scipy in dependencies — use `statistics.NormalDist` for normal CDF/inverse.
 
+## Repository & publishing
+
+- Remote: `origin` = https://github.com/adityasajja/IIFL-Algo.git (private).
+  Branch `main`. Commits are authored as `WorkBuddy <workbuddy@local>` via
+  per-command `-c user.name/-c user.email`; no global git identity is set.
+- **`.gitignore` patterns must be anchored.** `data/` (no leading slash)
+  matches at every depth, so it silently excluded `src/atr/data/` — the whole
+  data layer — from every commit for the project's entire life. It is `/data/`
+  now. Before adding an ignore rule, check what else it matches:
+  `git check-ignore -v <path>`.
+- The `.git` directory was destroyed by the environment once (2026-09-12) and
+  recovered from the Recycle Bin. See the daily log for the technique. Two
+  traps: `$I` metadata is v1 (path at offset 24) or v2 (offset 28), and
+  restoring a recycled *directory* requires walking it — recreating the folder
+  alone silently loses its contents.
+- Windows git plumbing: never pass `text=True` to `git mktree` /
+  `hash-object --stdin`. Python rewrites `\n` to `\r\n` and every object
+  hashes wrong.
+- This sandbox silently drops writes to `.git/refs/remotes/`. `git update-ref`
+  reports success and writes nothing — read the ref back to confirm.
+- Probe local servers with Python's `urllib`, not curl: curl here returns exit
+  23 with an empty body against a healthy endpoint.
+
 ## Dashboard — `web/` and the API behind it (2026-09-12)
 
 `atr serve` builds the SPA and serves API + UI on one port; `atr dev` runs
