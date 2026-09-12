@@ -548,6 +548,58 @@ def _broker_rows(payload: Any) -> list[dict[str, Any]]:
     return _rows(payload)
 
 
+#: IIFL reports "there is nothing here" as an error too — e.g. EC926
+#: "No Trade's are found for this user". Those are empty results, not failures.
+_EMPTY_STATES = ("no trade", "no holding", "no position", "no order", "no record")
+
+
+def _empty_state(node: Any) -> bool:
+    """True for IIFL's 'nothing here' rows, which arrive carrying an error status."""
+    if not isinstance(node, dict):
+        return False
+    message = str(node.get("message") or "").lower()
+    return any(hint in message for hint in _EMPTY_STATES)
+
+
+def _broker_error(payload: Any) -> str | None:
+    """IIFL signals failure with a status field, it does not raise.
+
+    The catch is that failures are nested. A rejected call comes back as::
+
+        {"status": "Ok", "message": "Success",
+         "result": [{"status": "EC500",
+                     "message": "Error : IP address not authorized for trading."}]}
+
+    The outer envelope reports Ok no matter what happened, so checking only the
+    top level misses every real failure — which is exactly what happened here,
+    and made a wall of failing calls look like a healthy book. Check both.
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    def failure(node: Any) -> str | None:
+        if not isinstance(node, dict):
+            return None
+        status = node.get("status")
+        if isinstance(status, str) and status.strip().lower() not in ("ok", "success"):
+            message = str(node.get("message") or status).strip()
+            if any(hint in message.lower() for hint in _EMPTY_STATES):
+                return None
+            return message
+        return None
+
+    outer = failure(payload)
+    if outer:
+        return outer
+
+    result = payload.get("result")
+    for row in result if isinstance(result, list) else [result]:
+        inner = failure(row)
+        if inner:
+            return inner
+    return None
+
+
 def _history_feed(symbols: list[str], exchange: str):
     """A ListFeed over the local parquet cache, limited to ``symbols``.
 
@@ -1006,7 +1058,12 @@ def portfolio(sections: str | None = None) -> dict[str, Any]:
     with client:
         for name in wanted:
             try:
-                rows = _broker_rows(fetchers[name]())
+                payload = fetchers[name]()
+                broker_error = _broker_error(payload)
+                if broker_error:
+                    out[name] = {"rows": [], "count": 0, "error": broker_error}
+                    continue
+                rows = [r for r in _broker_rows(payload) if not _empty_state(r)]
                 out[name] = {"rows": _clean(rows), "count": len(rows)}
             except Exception as exc:  # noqa: BLE001
                 out[name] = {"rows": [], "count": 0, "error": str(exc)[:300]}
@@ -1050,6 +1107,10 @@ def quote(symbols: str, exchange: str = "NSEEQ") -> dict[str, Any]:
         payload = client.market_quotes(legs)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"quote request failed: {exc}") from exc
+
+    broker_error = _broker_error(payload)
+    if broker_error:
+        raise HTTPException(502, broker_error)
 
     rows = _broker_rows(payload)
     for symbol, row in zip(resolved, rows, strict=False):
