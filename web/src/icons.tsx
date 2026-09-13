@@ -53,3 +53,6 @@ export const IconPulse = (p: P) => (
 export const IconServer = (p: P) => (
   <svg {...S(p)}><rect x="2.2" y="2.6" width="11.6" height="4.6" rx="1.2" /><rect x="2.2" y="8.8" width="11.6" height="4.6" rx="1.2" /><path d="M4.6 4.9h.01M4.6 11.1h.01" /></svg>
 );
+export const IconCrosshair = (p: P) => (
+  <svg {...S(p)}><circle cx="8" cy="8" r="5" /><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" /></svg>
+);

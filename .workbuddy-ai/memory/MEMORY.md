@@ -1,207 +1,224 @@
-# Project: atr — algorithmic trading backend (IIFL Capital, NSE/BSE)
+# atr — IIFL algo trading backend (NSE/BSE)
 
-## Governing principle (stated by the user)
+## User's principle (verbatim)
 
 > "I want to develop an intelligent but fact based system which acts on pure
 > statistical and strategic data, not on emotions."
 
-In an automated system "emotion" does not mean fear or greed at a keyboard — it
-means **overfitting and cherry-picking**. Practical consequences:
+In code, "emotion" = overfitting / cherry-picking. Therefore:
 
-- Never report a backtest result that has not been validated out of sample.
-  Use `atr research` (walk-forward), not a single `atr backtest` run.
-- Any parameter chosen after seeing the result is contaminated. Parameter
-  selection happens on the training window only.
-- Correct for how many things you tried (deflated Sharpe), not just the winner.
-- Compare against buy-and-hold. A strategy that cannot beat doing nothing is
-  just paying commission.
-- Prefer "not yet disproven" over "this works".
+- **Out-of-sample only.** Use `atr research` (walk-forward). `atr backtest`
+  is in-sample by construction — a tempting number and a meaningless one.
+- **Correct for trial count** (deflated Sharpe). Searching harder makes the
+  test stricter, not the result better — observed OOS +5.91% with deflated
+  Sharpe 0.270 over an 80-trial sweep.
+- **Compare to buy-and-hold** of the same universe. On 19 large caps
+  (2020-2026), B&H was +57.39% at Sharpe 0.85. A long/flat timing overlay
+  starts structurally behind this bar.
+- **Run a control** that isolates the signal's own contribution (random
+  selection, same universe/cadence/sizing). Cross-sectional momentum cleared
+  deflated-Sharpe (0.976) but sat at the 25th percentile of random (z=-0.71).
+  Significance is not usefulness.
+- **A citation is not a measurement.** `papers.py` carried hardcoded win rates
+  (0.58–0.65) and confidence literals (0.85–0.94) that reached the UI as
+  `historical_win_rate`. All 7 were over-optimistic by 3–12 points once
+  measured; see "Paper alpha" below. Never let a literature figure appear as a
+  result — property name, tooltip and all.
+
+## Paper alpha (measured 2026-09-13 — the honest baseline)
+
+18 NSE large caps, 29,358 symbol-bars, 2020-02-17 → 2026-09-11, 400 train /
+200 test / 260 warmup, 5 bps slippage. Control (random selection, 8 seeds):
+**mean Sharpe −0.35**. Buy & hold: **Sharpe +0.69, +49.31%**.
+
+**None of the 7 pass.** Closest: `avellaneda_lee` OOS Sharpe +0.46, +3.15σ over
+control — the only one that plausibly holds signal, and it still loses to B&H.
+`multi_factor_composite` +0.26 (+2.37σ). The rest are negative or ~0.
+Reproduce: `scripts/validate_paper_strategies.py`; served at `GET /validation`;
+rendered in Research → "Measured results".
+
+Fetch long history with `scripts/fetch_long_history.py` first — the daily cache
+holds only 249 bars, far too short for folds plus warmup.
+
+## Navigation model (8 sections + sub-tabs) — since 2026-09-13
+
+Sidebar groups follow the trader's loop. **Sub-tab state lives in `App()`**,
+never in a panel — a panel owning its own tab state makes deep links and
+"open this chart" impossible to route.
+
+| Group | Sections (sub-tabs) |
+|---|---|
+| Observe | Dashboard · Markets (scanner, custom, charts) |
+| Decide | Strategies · Signals (brief, alerts, queue) |
+| Act | Trading (portfolio, mode) |
+| Learn | Evidence (research, measured, backtest) |
+| Maintain | Risk · System |
+
+Hash format is `#tab/subtab`. `LEGACY_TABS` + `LEGACY_SUB` in `App.tsx` map the
+old ids; **both layers are needed** — mapping only the tab lands you on the
+right section showing the wrong panel, which is still a broken link. `#charts`
+must open Markets *with the Charts sub-tab active*. Add a route → add it to
+`VALID_TABS` and both maps.
+
+`openChart(symbol)` is the single entry point for symbol → chart (writes
+`atr.chartSymbol` to sessionStorage, sets sub-tab, navigates).
+
+## Execution mode: paper vs live
+
+Server-side gate, **not** a disabled button. `_STATE["execution_mode"]`
+defaults `"paper"`. `_require_live_execution()` gates `POST /orders` and
+`POST /trade-signals/{id}/execute`; read-only endpoints deliberately skip it.
+`POST /risk/execution-mode` **requires a reason to go live** (400 without) and
+appends to `data/audit/audit.jsonl` via `_append_audit()`. `GET /audit` reads it
+newest-first. 13 tests in `tests/test_execution_mode.py`.
+
+Rule: an audit trail must survive a restart, and a gate must be enforced where
+the money is — not in the component that draws the toggle.
+
+## Traps that fail as plausible results
+
+- **`Row` does not support `in`.** `"close" in row` is always `False` — `Row`
+  subclasses tuple and only overrides `get`/`__getitem__`, so `in` tests
+  *values*, not field names. This silently skipped every paper signal and looked
+  exactly like "no edge". Use `row.get("close")`. Same class of bug as an
+  unanchored `.gitignore` pattern: no error, wrong answer.
+- **`logging` uses `%`-style, not `str.format`.** `logger.warning("a {} b {}", x, y)`
+  raises `TypeError: not all arguments converted` at *emit* time — the call site
+  looks fine and only breaks when the line actually fires. Use `%s`. A missing
+  `logger` binding is the same trap one step earlier: `NameError` on a code path
+  that rarely runs.
+- **NaN-padded frames.** `BacktestEngine._build_frames` NaN-pads any symbol
+  without a bar at a step. A feed with one symbol per snapshot leaves each
+  symbol ~99% NaN, so `ctx.history(sym)` returns no prices and strategies never
+  fire. Put **every symbol on every bar**.
+- **`ctx.history(sym)` is per-symbol but advances per-snapshot.** It returns
+  that symbol's frame sliced to the global index, so a sparse grid handicaps it
+  twice.
+
+
+## Broker facts (verified live — external systems don't drift)
+
+- **The IP whitelist is a SEBI mandate, not IIFL policy.** Algo framework
+  fully mandatory since 2026-04-01. Set as "Primary Static IP" at
+  developers.iiflcapital.com (My Apps → ⋮ → View All Details). One primary
+  + one backup allowed. Not waivable via support.
+- **Egress MUST be IPv4.** `api.iiflcapital.com` publishes A and AAAA; this
+  host is dual-stack so httpx silently picked IPv6 — every gated endpoint
+  returned `EC500 IP not authorized` even with the IPv4 whitelisted.
+  `IiflClient` pins via `local_address="0.0.0.0"` (env `IIFL_FORCE_IPV4`,
+  param `force_ipv4`). Diagnose with multi-service checks
+  (`api64.ipify.org`); `api.ipify.org` is IPv4-only and hid this.
+- IIFL redirect: `/login/callback?authcode=...&clientid=...` (lowercase,
+  no separators). Handler accepts all three spellings. 422 means the auth
+  code was never consumed — may still be live.
+- IIFL nests failures in a success envelope (outer `status` is always
+  "Ok"). Walk into `result` to detect failures — `_broker_error` does.
+  `EC926 No Trade's are found` = empty, not failure.
+- Session: `atr login --client-id <ID> --auth-code <CODE>`. JWT dies at
+  midnight IST — daily step. Cached `.cache/iifl_session.json`.
+- SEBI: API market orders need non-zero `marketProtectionPercent`. Default
+  0.5% in `IiflBroker` (`IIFL_MARKET_PROTECTION_PERCENT` override).
+- developers.iiflcapital.com: Akamai-blocked, JS-SPA — WebFetch cannot read.
 
 ## Conventions
 
-- Verify optimizations by diffing results (equity curve + every fill) against
-  the previous implementation, not merely by tests passing. Weak assertions
-  like `num_trades >= 1` will not catch a silent behaviour change.
-- Backtests must stay fast enough for parameter sweeps — sweeps are the whole
-  point, and they were infeasible at 90s/run. Current: ~1.9s for 17.5k bars.
-- Python 3.12, managed with `uv`. Use `./.venv/Scripts/python.exe`.
-- No scipy in dependencies — use `statistics.NormalDist` for normal CDF/inverse.
+- Diff outputs (equity curve + every fill), not just `num_trades >= 1`.
+- Backtests must stay fast enough for sweeps (~1.9s for 17.5k bars).
+- Python 3.12 via `./.venv/Scripts/python.exe`. No scipy — use
+  `statistics.NormalDist`.
+- Live scanner and backtest strategy must call the **same `eval_entry` /
+  `eval_exit` functions**; otherwise a validation pass is meaningless.
+- Pre-compute indicators in `prepare()` via `precompute_indicators()`.
+  Per-bar recompute is ~15x slower.
+- `min_history_bars` < test window, else "no trades" is indistinguishable
+  from "no edge".
+- Before trusting any new rule, count how many positions it flags in one
+  day (fatigue check).
+- Entry rules are currently unvalidated (-5.05% OOS vs +57.39% B&H,
+  deflated Sharpe 0.926 < 0.95). Do not present as actionable.
 
-## Repository & publishing
+## Repo & sandbox quirks
 
-- Remote: `origin` = https://github.com/adityasajja/IIFL-Algo.git (private).
-  Branch `main`. Commits are authored as `WorkBuddy <workbuddy@local>` via
-  per-command `-c user.name/-c user.email`; no global git identity is set.
-- **`.gitignore` patterns must be anchored.** `data/` (no leading slash)
-  matches at every depth, so it silently excluded `src/atr/data/` — the whole
-  data layer — from every commit for the project's entire life. It is `/data/`
-  now. Before adding an ignore rule, check what else it matches:
-  `git check-ignore -v <path>`.
-- The `.git` directory was destroyed by the environment once (2026-09-12) and
-  recovered from the Recycle Bin. See the daily log for the technique. Two
-  traps: `$I` metadata is v1 (path at offset 24) or v2 (offset 28), and
-  restoring a recycled *directory* requires walking it — recreating the folder
-  alone silently loses its contents.
-- Windows git plumbing: never pass `text=True` to `git mktree` /
-  `hash-object --stdin`. Python rewrites `\n` to `\r\n` and every object
-  hashes wrong.
-- This sandbox silently drops writes to `.git/refs/remotes/`. `git update-ref`
-  reports success and writes nothing — read the ref back to confirm. Workaround:
-  write the ref file directly (`9c21972...` + newline into
-  `.git/refs/remotes/origin/main`); that path does persist.
-- Probe local servers with Python's `urllib`, not curl: curl here returns exit
-  23 with an empty body against a healthy endpoint. And a dead port answers
-  `HTTPError 502` rather than a connection error — the sandbox proxy replies
-  on behalf of the closed port, so use a raw `socket.connect` to test liveness.
+- Remote: github.com/adityasajja/IIFL-Algo (private), `origin/main`. Commits
+  authored as `WorkBuddy <workbuddy@local>` per-command. No global git
+  identity set.
+- **Anchor every .gitignore pattern.** `data/` (no slash) silently excluded
+  the entire `src/atr/data/` layer. Verify with `git check-ignore -v <path>`.
+  Screenshots go to `/.workbuddy-ai/shots-*/` and are ignored — they are
+  regenerated in seconds, and the Chromium profiles beside them are megabytes
+  of cache that will otherwise land in a commit.
+- Sandbox: (a) `text=True` corrupts git plumbing — pass bytes to
+  `mktree`/`hash-object`; (b) writes to `.git/refs/remotes/` silently drop,
+  `update-ref` reports success — write ref files directly; (c) probe local
+  servers with Python `urllib`, not curl (returns exit 23/empty here);
+  (d) dead ports return HTTPError 502, not connection refused — use raw
+  `socket.connect`.
 
-## Dashboard — `web/` and the API behind it (2026-09-12)
+## Web / React build gotchas (added 2026-09-12)
 
-`atr serve` builds the SPA and serves API + UI on one port; `atr dev` runs
-FastAPI with reload alongside Vite. React 18 + Vite 5 + Tailwind 4, motion
-components vendored from **beui.dev** via `shadcn add @beui/<name>`.
+- **`atr serve` builds the SPA once at startup** (bun/npm run build) and serves
+  the resulting bundle. To see frontend changes, rebuild (`bun run build` in
+  `web/`) — the running backend will pick them up immediately.
+- **Lucide icon type is broader than `ComponentType<{ size?: number }>`.** Use
+  `React.ElementType` for props typed as `icon: SomeComponent`, or `typeof Foo`
+  when assigning an icon import to a slot — otherwise `bun run build` fails
+  with TS2322 because lucide's `size` accepts `string | number | null`.
+- **`Edit` can report "updated successfully" without changing the file.** When
+  that happens (sandbox file-cache weirdness), fall back to `Bash` with a
+  Python one-liner for in-place substitutions — much more reliable for
+  multi-line edits and import-block rewrites.
+- **Headless verification without agent-browser** (it does not support
+  Windows). Edge is at
+  `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`. Screenshot:
+  `msedge --headless=new --disable-gpu --hide-scrollbars
+  --virtual-time-budget=9000 --window-size=1600,1100 --screenshot=<abs path> <url>`.
+  For console errors or DOM assertions, drive CDP over
+  `--remote-debugging-port` with `websockets` (stdlib `http.client` for
+  `/json/version` to get `webSocketDebuggerUrl`); listen for
+  `Runtime.exceptionThrown` + `Log.entryAdded` with `level == "error"`.
+  Two gotchas: **`document.querySelector('main')` returns the sidebar inset
+  wrapper, not the page** — use the *last* `<main>`; and passing
+  `--user-data-dir` is required or the profile locks.
+- Portfolio (`web/src/PortfolioPanel.tsx`) is the canonical example of a
+  redesigned panel: hero KPI strip with `NumberTicker`, semantic grouping
+  (Limits → 4 named cards), card-list Holdings/Positions, status-badged
+  Orders/Trades tables, BUY/SELL segmented control with live preview. Same
+  pattern works for the other panels.
 
-Panels: Overview, Scanner, Charts, Signals, Alerts, Briefing, **Research**,
-Backtest, Portfolio, Risk, Caches & session. Ctrl+K palette reaches all of them.
+## Dashboard (web/)
 
-- **Research is the panel that matters.** `/backtest` is in-sample by
-  construction — one config, one dataset, parameters the user already saw the
-  answer for. `/research` picks parameters on the training window, scores once
-  on the next unseen window, and reports the deflated Sharpe against the hurdle
-  implied by the trial count. Always prefer it; the Backtest tab says so in the
-  UI.
-- New endpoints: `/research`, `/signals/config`, `/signals/scan`, `/portfolio`
-  (all five sections), `/quote`, `/history/status`, `/instruments/status`,
-  `/strategies`. `/backtest` takes `source=history`.
-- **Walk-forward on the daily cache is structurally limited.** The cache holds
-  **249 trading days**, and `pivot_to_snapshots` groups by timestamp, so
-  `total` is timeline bars, *not* bars × symbols — adding symbols does not
-  lengthen the window. Auto-sized windows give train=63/test=62. `signals_entry`
-  needs ~110 bars to warm up, so it cannot trade meaningfully inside a fold;
-  `/research` returns a `warnings` array saying exactly that, and the UI renders
-  it above the numbers. Use `source=fetch` (~2200 days/symbol) for a real test.
-- Verified by walking every panel in a real browser: 0 console errors.
-  `agent-browser` is not installed and global npm installs are off-limits, so
-  drive the installed Edge headlessly over CDP instead — no downloads.
+`atr serve` = SPA + API on one port; `atr dev` = FastAPI + Vite. React 19 +
+Vite 5 + Tailwind 4, motion components from beui.dev. Sections: Dashboard,
+Markets, Strategies, Signals, Trading, Evidence, Risk, System (see "Navigation
+model" above). Evidence → Measured results is the section that matters; the
+in-sample Backtest sub-tab says so in its own UI.
 
-## Broker access facts (verified live)
+- **React 19** (upgraded 2026-09-12 from 18.3.1). Done so the beui Animated
+  Sidebar (which assumes React 19 types — `inert` attr, mutable `RefObject`)
+  works without patching. `motion@13` and `lucide-react@1.45` both declare
+  peer `react: ^18 || ^19`. No code changes needed beyond `bun add react@^19
+  react-dom@^19` + matching types.
+- **shadcn / beui setup**: `web/components.json` present, `@/*` aliased in
+  both `tsconfig.json` (`baseUrl: "."`, `paths: {"@/*": ["./src/*"]}`) and
+  `vite.config.ts` (resolve.alias via `fileURLToPath`). Install a new
+  component with `bunx --bun shadcn add @beui/<name> --yes --overwrite`.
+- **Navigation**: `AnimatedSidebarProvider` wraps the whole app in `App.tsx`;
+  the sidebar composes `AnimatedSidebar{Header,Content,Footer,Rail}` and the
+  main area sits inside `AnimatedSidebarInset`. Default state is expanded
+  (`defaultOpen: true`); `Ctrl+B` toggles to the icon rail. The rail
+  component is a drag handle for resize, not a hover trigger.
 
-- IIFL session is created by `atr login --client-id <ID> --auth-code <CODE>`;
-  the auth code is single-use and the JWT dies at **midnight IST**, so this is
-  a daily step. Cached at `.cache/iifl_session.json` (gitignored).
-- **IIFL redirects with lowercase, unseparated parameter names:**
-  `/login/callback?authcode=...&clientid=...` — *not* the camelCase
-  `?authCode=&clientId=` that the README originally claimed. The handler
-  accepts lowercase, camelCase and snake_case. A 422 on the callback means the
-  auth code was **never consumed**, so it may still be usable via the manual
-  entry form — worth checking before sending the user back through IIFL.
-- The docs and README are not a specification. Where they disagree with
-  observed behaviour, the observation wins — and then the doc gets fixed.
-- `ENV=dev` in `.env` is fine for read-only calls; order placement needs
-  `paper` or `live`.
-- Market data (`/marketdata/marketquotes`, historical) and `/profile` work.
-- MQTT bridge auth (verified against IIFL's official BridgePy, 2026-09-11):
-  MQTT **3.1.1** + `clean_session=True`, keepalive **20**,
-  username = JWT `preferred_username`, password = `"OPENID~~" + <raw token> + "~"`.
-  Connecting anonymously over MQTTv5 does not work.
-- The bridge hands raw bytes to callbacks — the official SDK does NOT decode
-  payloads, so `codec.py` is ours to maintain. It is now verified correct
-  against live ticks (tick + 10-level depth, no decode errors).
-- REST coverage is complete: all 18 endpoints in IIFL's official Postman
-  collection are implemented in `IiflClient`.
-- Instrument master: all 9 segments cached in `.cache/contracts/` (207,942
-  contracts). Live quotes work for NSEEQ, BSEEQ, NSEFO, BSEFO, NSECURR.
-  NSECOMM responds but is untraded; **BSECURR and MCXCOMM are not served by
-  `marketquotes`** — they return `{exchange: "Z", instrumentId: 0}`.
-- Gotcha: `value not in (None, "")` is NOT a null check — `nan not in (None, "")`
-  is True. Use `contracts._missing()` for anything coming out of a DataFrame.
-- **API egress MUST be IPv4.** `api.iiflcapital.com` has A *and* AAAA records
-  and this host is dual-stack, so httpx silently connected over IPv6 — an
-  address never whitelisted — and every gated endpoint returned
-  `EC500 IP address not authorized for trading` even though the registered IPv4
-  was correct. `IiflClient` now pins egress with
-  `httpx.HTTPTransport(local_address="0.0.0.0")` (`force_ipv4` / `IIFL_FORCE_IPV4`).
-  Diagnosing this needs a **multi-service** IP check: `api.ipify.org` is
-  IPv4-only and hid the problem.
-- The IP whitelist itself is a **SEBI mandate** (algo framework, circular Feb
-  2025, fully mandatory 2026-04-01), not an IIFL policy — a support ticket will
-  not waive it. Registered as "Primary Static IP" at
-  developers.iiflcapital.com (My Apps → ⋮ → View All Details). IIFL confirmed on
-  their own repo (issue #191) it applies to all APIs, read-only included.
-- SEBI also requires a **non-zero market-protection value** on API market
-  orders (zero/absent is rejected). `IiflBroker` now defaults it to 0.5% for
-  MARKET orders; configure via `IIFL_MARKET_PROTECTION_PERCENT`.
-- developers.iiflcapital.com blocks automated access (Akamai) and its docs are
-  a JS SPA — WebFetch cannot read them.
+Daily-cache walk-forward is structurally limited: 249 trading days, auto-
+sized train/test = 63/62. `signals_entry` needs ~110 bars to warm up, so it
+cannot trade meaningfully inside a fold. Use `source=fetch` (~2200 days /
+symbol) for a real test.
 
-## Signals (buy/sell) — `src/atr/signals/`
+## Known gaps
 
-- Sell rules = risk management (stop loss, trailing stop, confirmed trend
-  break, take profit). No edge needed; they are facts about the book.
-- Buy rules = predictions, so they are validated by `atr signals validate`
-  via `SignalEntryStrategy`. **They currently FAIL** (-5.05% OOS vs buy-and-hold
-  +57.39%, deflated Sharpe 0.926 < 0.95). Buy signals are labelled unvalidated
-  and must never be presented as actionable.
-- The live scanner and the backtest strategy must call the same rule
-  functions. If they diverge, a validation pass means nothing.
-- `min_history_bars` must be well below the walk-forward test window, or the
-  strategy trades zero times and "no trades" is mistaken for "no edge".
-  `WalkForwardConfig.warmup_bars` now prepends an unscored, untraded prefix so
-  a slow strategy is not handicapped by the fold boundary — always set it.
-- Sweeps: `atr signals validate --search`. Coarse grids only. A bigger grid
-  raises the deflated-Sharpe hurdle, so searching harder makes the test
-  stricter, not the result better (observed: OOS +5.91% vs deflated 0.270).
-- Rule indicators must be precomputed via `precompute_indicators()` in the
-  strategy's `prepare()`. Recomputing per bar is ~15x slower — a pandas rolling
-  op costs ~0.35ms regardless of data length.
-- **Buy-and-hold on the 19 large-cap universe returned +57% at Sharpe 0.85**
-  (2020-2026). That is the bar. Any long/flat timing overlay starts structurally
-  behind it. Tuning these entry rules is unlikely to be the answer.
-- Before trusting any new rule, check how many positions it flags in one day.
-  A single close below SMA50 flagged 10 of 17 holdings — that is fatigue, not
-  information.
-
-## Validation doctrine (hard-won)
-
-- **A statistically significant Sharpe is not a useful signal.** Cross-sectional
-  momentum cleared the deflated-Sharpe bar (0.976) and was still worthless —
-  random selection from the same universe scored 1.41 mean vs momentum's 1.24.
-  Always run a **control**: same universe, cadence and sizing, but random
-  selection. It is the only thing that isolates the signal's contribution.
-- The benchmark must be the thing you would actually do instead — for a
-  long-only rotation strategy that is buy-and-hold of the same universe.
-- Absolute numbers are **survivorship-inflated**: the universe is today's
-  listed names tested over the past. Only relative comparisons are meaningful.
-- Prefer testing a *different hypothesis* over tuning parameters of a dead one.
-  A bigger grid raises the deflated-Sharpe hurdle, so searching harder makes
-  the test stricter, not the result better.
-
-## Known gaps (verified, not speculation)
-
-- **`load_cached(exchange)` with no `symbols` reads every parquet file in the
-  cache** (2,654 of them). Always pass the symbols you actually need — reading
-  all of them cost 56s per validation run. `/scan-all` is the one caller that
-  legitimately wants the whole thing.
-- **`/health` must never probe Postgres inline.** `localhost` resolves to both
-  `::1` and `127.0.0.1`, so with no DB running the connect timeout is paid
-  twice (~4s), and the dashboard polls this every 15s. It now probes on a
-  daemon thread and returns the last known answer.
-- `load_daily()`'s cache fallback must keep the `ts` column — dropping it makes
-  `pivot_to_snapshots` raise and loses the whole feed, precisely when the
-  fallback is supposed to be saving you.
-- `LiveRunner` is **fixed and tested** (2026-09-11) but still has no CLI
-  entrypoint — nothing constructs it yet. Its strategy loop was previously
-  incapable of trading at all (prepare() ran once on static frames, so every
-  live bar had NaN indicators). See tests/test_live_runner.py.
-- `prepare()` must be re-run as live bars arrive. It is a one-shot vectorised
-  pass in backtests; in live it is the caller's job to refresh it.
-- `IiflHistoricalFeed` returns candles as **positional arrays**
-  `[ts, o, h, l, c, v]`, wrapped as `{"result": [{"candles": [...]}]}`.
-- `scanner.py` `score_frame()` uses an unvalidated `score = ret_1m + vs_high`
-  heuristic, and `scan_symbol()` has a hardcoded `to_date` fallback
-  (`"08-Sep-2026"`) that will silently go stale.
-- `/signals/scan` does one quote plus one daily fetch per symbol; on the default
-  19-name universe that is slow enough to be worth batching.
-- `data/` is gitignored wholesale, so `data/alerts/rules.json` config and
-  `data/scans/` output are not versioned.
-- Pre-existing ruff errors in `alerts/store.py`, `api/main.py`, `briefing.py`,
-  `brokers/iifl/bridge.py`, `scanner.py` — untouched so far.
+- `load_cached(exchange)` without `symbols` reads all 2,654 parquets (~56s).
+- `/health` Postgres probe runs on daemon thread (dual-stack `localhost`
+  was paying the connect timeout twice inline).
+- `load_daily()` cache fallback must keep `ts` column.
+- `LiveRunner` tested (52 pass) but no CLI entrypoint constructs it.
+- `scanner.py`: unvalidated `score = ret_1m + vs_high` heuristic and a
+  hardcoded `to_date` that will silently go stale.

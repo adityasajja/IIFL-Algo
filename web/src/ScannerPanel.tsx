@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { API_URL, getScan, type ScanRow } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
@@ -6,6 +6,7 @@ import { Input } from "./components/ui/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Switch } from "./components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
 
 type SortKey = "score" | "ret_1m" | "vs_high" | "rsi" | "vol_x" | "last";
@@ -124,8 +125,11 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
               r.symbol.includes(nameFilter.trim().toUpperCase())),
         )
         .sort((a, b) => (a[sortKey] - b[sortKey]) * sortDir)
-        .slice(0, 200)
+        .slice(0, 100)
     : null;
+
+  const visibleSymbols = useMemo(() => visible?.map((r) => r.symbol) ?? [], [visible]);
+  const { getTick } = useLiveTicks(visibleSymbols);
 
   return (
     <Card className="p-5">
@@ -206,16 +210,32 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
               </tr>
             </thead>
             <tbody>
-              {visible.map((r) => (
-                <tr key={r.symbol} className="border-b border-border/60 transition-colors last:border-0 hover:bg-primary/[0.03]">
-                  <td className="px-3 py-1.5">
-                    <strong className="font-semibold">{r.symbol.replace("-EQ", "")}</strong>
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{r.last.toLocaleString("en-IN")}</td>
-                  <td className={cn("px-3 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
-                    {r.ret_1m.toFixed(1)}
-                  </td>
+              {visible.map((r) => {
+                const tick = getTick(r.symbol);
+                const ltp = tick?.ltp ?? r.last;
+                return (
+                  <tr key={r.symbol} className="border-b border-border/60 transition-colors last:border-0 hover:bg-primary/[0.03]">
+                    <td className="px-3 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <strong className="font-semibold">{r.symbol.replace("-EQ", "")}</strong>
+                        {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                      </div>
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      <span
+                        className={cn(
+                          "transition-colors duration-300 font-medium",
+                          tick?.flash === "up" && "text-emerald-500 font-bold",
+                          tick?.flash === "down" && "text-destructive font-bold"
+                        )}
+                      >
+                        {ltp.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                    <td className={cn("px-3 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
+                      {r.ret_1m.toFixed(1)}
+                    </td>
                   <td className={cn("px-3 py-1.5 text-right tabular-nums", r.vs_high > -2 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
                     {r.vs_high.toFixed(1)}
                   </td>
@@ -239,7 +259,8 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                     </Button>
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
         </div>

@@ -7,12 +7,16 @@ session exists — the API is a convenience layer, not a risk control.
 
 from __future__ import annotations
 
+import contextlib
+import json
+import logging
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Request
+import asyncio
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -20,6 +24,16 @@ from pydantic import BaseModel, Field
 from atr.config.settings import Settings, get_settings
 
 app = FastAPI(title="ATR — algo trading backend", version="0.1.0")
+
+logger = logging.getLogger("atr.api")
+
+@app.on_event("startup")
+async def _on_startup() -> None:
+    from atr.api.stream import get_broadcaster
+    from atr.alerts.intelligent import get_intelligent_monitor
+    get_broadcaster().set_loop(asyncio.get_running_loop())
+    await get_intelligent_monitor().start()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -202,6 +216,7 @@ def place_order(request: OrderRequest) -> dict[str, Any]:
     from atr.core.enums import OrderType, Side
     from atr.core.models import Order
 
+    _require_live_execution("Manual order")
     broker = _live_broker()
     instrument = broker.master.find(request.symbol, request.exchange)
     side = Side.BUY if request.quantity > 0 else Side.SELL
@@ -215,6 +230,12 @@ def place_order(request: OrderRequest) -> dict[str, Any]:
         broker_params={"product": request.product} if request.product else {},
     )
     submitted = broker.place_order(order)
+    _append_audit(
+        actor="operator",
+        action="order.place",
+        subject=f"{side.value} {abs(request.quantity)} {request.symbol}",
+        detail=f"{request.order_type} @ {request.price or 'MKT'} -> {submitted.status.value}",
+    )
     return {
         "order_id": submitted.order_id,
         "broker_order_id": submitted.broker_order_id,
@@ -228,12 +249,402 @@ def kill_switch(engaged: bool = True) -> dict[str, bool]:
     """Engage the global kill switch. Blocks all new orders until cleared."""
     store = _risk_state()
     store["kill_switch"] = engaged
+    _append_audit(
+        actor="operator",
+        action="kill_switch.engage" if engaged else "kill_switch.release",
+        subject="global",
+        detail="all new orders blocked" if engaged else "orders permitted again",
+    )
     return {"kill_switch": engaged}
+
+
+@app.get("/risk/execution-mode")
+def get_execution_mode() -> dict[str, Any]:
+    """Whether orders reach the broker, or are only recorded.
+
+    `paper` is the safe default: signals are generated and graded exactly as in
+    live, the order path is exercised up to the broker boundary, but nothing is
+    transmitted. This is enforced in `_place_signal_orders`, not merely shown
+    here — a toggle that only changes a label is worse than none, because it
+    invites you to trust it.
+    """
+    store = _risk_state()
+    mode = str(store.get("execution_mode", "paper"))
+    return {
+        "mode": mode,
+        "live": mode == "live",
+        "paper": mode == "paper",
+        "changed_at": store.get("mode_changed_at"),
+        "changed_by": store.get("mode_changed_by"),
+        "reason": store.get("mode_reason"),
+    }
+
+
+@app.post("/risk/execution-mode")
+def set_execution_mode(mode: str, reason: str = "", actor: str = "operator") -> dict[str, Any]:
+    """Switch between `paper` and `live`.
+
+    Going *live* requires an explicit reason. That is deliberate friction: the
+    transition that can lose real money should cost a sentence, and the
+    sentence is what shows up in the audit trail later.
+    """
+    if mode not in {"paper", "live"}:
+        raise HTTPException(400, "mode must be 'paper' or 'live'")
+    if mode == "live" and not reason.strip():
+        raise HTTPException(400, "Switching to live requires a reason — it is recorded in the audit trail")
+
+    store = _risk_state()
+    previous = str(store.get("execution_mode", "paper"))
+    store["execution_mode"] = mode
+    store["mode_changed_at"] = _utcnow_iso()
+    store["mode_changed_by"] = actor
+    store["mode_reason"] = reason.strip() or None
+
+    _append_audit(
+        actor=actor,
+        action="execution_mode.change",
+        subject=f"{previous} -> {mode}",
+        detail=reason.strip() or None,
+    )
+    logger.warning(
+        "execution mode %s -> %s by %s (%s)", previous, mode, actor, reason.strip() or "no reason"
+    )
+    return get_execution_mode()
 
 
 @app.get("/risk/status")
 def risk_status() -> dict[str, Any]:
-    return dict(_risk_state())
+    """Kill switch plus the limits that actually gate order placement.
+
+    Reads the *live* settings rather than restating a config default, so the
+    panel cannot drift from what the engine enforces — a risk panel showing a
+    stale limit is worse than no panel.
+    """
+    from atr.trade_signals import load_settings
+
+    state = _risk_state()
+    settings = get_settings()
+    ts = load_settings()
+
+    # Broker-reported margin is best-effort: a dead session must not blank the
+    # panel, because the kill switch is exactly what you reach for when things
+    # are broken.
+    margin: dict[str, Any] = {}
+    margin_error: str | None = None
+    try:
+        client = _authed_client()
+        try:
+            row = _broker_rows(client.limits())
+            row = row[0] if row else {}
+            for key in (
+                "availableMargin", "marginUtilized", "collateralValue",
+                "openingCashLimit", "intradayPayinAmount", "creditForSellAmount",
+                "blockedForPayoutAmount", "utilizedAmount", "net",
+            ):
+                if key in row:
+                    margin[key] = row[key]
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+    except Exception as exc:  # noqa: BLE001 — report, don't fail the panel
+        margin_error = str(exc)
+
+    return {
+        "kill_switch": bool(state.get("kill_switch")),
+        "execution_mode": str(state.get("execution_mode", "paper")),
+        "env": settings.env,
+        "live_orders_allowed": settings.env in {"paper", "live"},
+        "limits": {
+            "capital": ts.capital,
+            "risk_per_trade_pct": ts.risk_per_trade_pct,
+            "max_active": ts.max_active,
+            "rr_ratio": ts.rr_ratio,
+            "stop_method": ts.stop_method,
+            "stop_atr_mult": ts.stop_atr_mult,
+            "stop_pct": ts.stop_pct,
+            "product": ts.product,
+        },
+        "margin": margin,
+        "margin_error": margin_error,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Semi-automatic trade signals
+# ---------------------------------------------------------------------------
+# Self-learning quantitative engine
+# ---------------------------------------------------------------------------
+
+@app.get("/self-learning/status")
+def self_learning_status() -> dict[str, Any]:
+    """Returns the market regime, dynamic strategy weights, and training metrics."""
+    from dataclasses import asdict
+    from atr.research.self_learning import get_self_learning_engine
+
+    engine = get_self_learning_engine()
+    return {
+        "market_regime": asdict(engine.state.market_regime),
+        "strategies": {k: asdict(v) for k, v in engine.state.strategies.items()},
+        "total_cycles_trained": engine.state.total_cycles_trained,
+        "last_trained_at": engine.state.last_trained_at,
+        "model_version": engine.state.model_version,
+    }
+
+
+@app.post("/self-learning/train")
+def self_learning_train() -> dict[str, Any]:
+    """Triggers an online learning cycle across historical data."""
+    from atr.research.self_learning import get_self_learning_engine
+    engine = get_self_learning_engine()
+    return engine.train_on_history()
+
+
+@app.get("/trade-signals/settings")
+def trade_signals_settings_get() -> dict[str, Any]:
+    """Return current position sizing + stop-loss configuration."""
+    from atr.trade_signals import load_settings
+    return load_settings().model_dump()
+
+
+@app.put("/trade-signals/settings")
+def trade_signals_settings_put(body: dict[str, Any]) -> dict[str, Any]:
+    """Update position sizing + stop-loss configuration."""
+    from atr.trade_signals import TradeSignalSettings, load_settings, save_settings
+    current = load_settings()
+    merged = TradeSignalSettings(**{**current.model_dump(), **body})
+    save_settings(merged)
+    return merged.model_dump()
+
+
+@app.get("/trade-signals")
+def trade_signals_list(status: str | None = None) -> dict[str, Any]:
+    """Return the signal queue. Pass ?status=PENDING|ACTIVE|DONE|SKIPPED to filter."""
+    from atr.trade_signals import get_queue
+    q = get_queue()
+    signals = q.all()
+    if status:
+        signals = [s for s in signals if s.status == status.upper()]
+    return {
+        "signals": [s.model_dump(mode="json") for s in signals[:100]],
+        "pending": len(q.pending()),
+        "active": len(q.active()),
+    }
+
+
+@app.post("/trade-signals/scan")
+def trade_signals_scan() -> dict[str, Any]:
+    """Trigger an immediate signal scan combining intelligent rules and quantitative research papers."""
+    from datetime import date
+
+    from atr.alerts.channels import channels_from_settings
+    from atr.config.settings import get_settings
+    from atr.data.history import load_cached
+    from atr.alerts.intelligent import evaluate_stock_signals, load_intelligent_config
+    from atr.scanner import UNIVERSE
+    from atr.research.self_learning import get_self_learning_engine
+    from atr.trade_signals import (
+        TradeSignalSettings,
+        build_signal_from_intelligent,
+        format_telegram_preview,
+        get_queue,
+        load_settings,
+    )
+
+    cfg = load_intelligent_config()
+    ts_settings = load_settings()
+    q = get_queue()
+    frames = load_cached("NSEEQ")
+    channels = channels_from_settings(get_settings())
+    sl_engine = get_self_learning_engine()
+
+    # 1. First add highest-conviction quantitative research paper signals
+    new_signals = []
+    try:
+        quant_signals = sl_engine.scan_for_quant_signals(max_candidates=10)
+        for qs in quant_signals:
+            if q.active_count() >= ts_settings.max_active:
+                break
+            existing = [s for s in q.pending() if s.symbol == qs.symbol and s.action == qs.action]
+            if existing:
+                continue
+            df_sym = frames.get(qs.symbol)
+            if df_sym is None or len(df_sym) < 20:
+                continue
+
+            trade_sig = build_signal_from_intelligent(
+                symbol=qs.symbol,
+                action=qs.action,
+                setup=qs.setup,
+                reason=qs.thesis,
+                entry_price=qs.price,
+                df=df_sym,
+                settings=ts_settings,
+                paper_citation=qs.paper_citation,
+                thesis=qs.thesis,
+                confidence_score=qs.confidence_score,
+                expected_value=qs.expected_value,
+                regime_fit=qs.regime_fit,
+            )
+            q.add(trade_sig)
+            new_signals.append(trade_sig.model_dump(mode="json"))
+    except Exception as e:
+        logger.warning("Quant alpha scan failed: %s", e)
+
+    # 2. Add scanner universe & alert rule candidates
+    syms = set(UNIVERSE)
+    try:
+        from atr.api.main import _alert_store
+        store = _alert_store()
+        for r in store.rules():
+            syms.add(r.symbol)
+    except Exception:
+        pass
+
+    for sym in syms:
+        if q.active_count() >= ts_settings.max_active:
+            break
+        df = frames.get(sym)
+        if df is None or len(df) < 30:
+            continue
+        try:
+            found = evaluate_stock_signals(sym, df, cfg)
+            for sig_raw in found:
+                existing = [s for s in q.pending() if s.symbol == sym and s.action == sig_raw.action]
+                if existing:
+                    continue
+                if q.active_count() >= ts_settings.max_active:
+                    continue
+
+                sig = build_signal_from_intelligent(
+                    symbol=sym,
+                    action=sig_raw.action,
+                    setup=sig_raw.metric,
+                    reason=sig_raw.reason,
+                    entry_price=sig_raw.price,
+                    df=df,
+                    settings=ts_settings,
+                    rsi_val=sig_raw.rsi,
+                )
+                q.add(sig)
+                new_signals.append(sig.model_dump(mode="json"))
+
+                # Send Telegram preview
+                header, body = format_telegram_preview(sig)
+                for ch in channels:
+                    try:
+                        if ch.send(header, body):
+                            break
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.debug("trade scan failed for %s: %s", sym, e)
+
+    return {"scanned": len(syms) + len(frames), "new_signals": len(new_signals), "signals": new_signals}
+
+
+@app.post("/trade-signals/{signal_id}/execute")
+def trade_signals_execute(signal_id: str) -> dict[str, Any]:
+    """Approve a pending signal — places entry, stop-loss, and target orders."""
+    from atr.alerts.channels import channels_from_settings
+    from atr.config.settings import get_settings
+    from atr.core.enums import OrderType, Side
+    from atr.core.models import Order
+    from atr.trade_signals import format_telegram_confirm, get_queue
+
+    q = get_queue()
+    sig = q.get(signal_id)
+    if not sig:
+        raise HTTPException(404, f"Signal {signal_id} not found")
+    if sig.status != "PENDING":
+        raise HTTPException(400, f"Signal is {sig.status}, not PENDING")
+
+    # Kill switch check
+    risk = _risk_state()
+    if risk.get("kill_switch"):
+        raise HTTPException(403, "Kill switch is engaged — no orders allowed")
+
+    # Paper mode check — last gate before anything is transmitted.
+    _require_live_execution("Signal execution")
+    _append_audit(
+        actor="operator",
+        action="signal.execute",
+        subject=f"{sig.action} {sig.quantity} {sig.symbol}",
+        detail=f"signal {signal_id} approved from the trade queue",
+    )
+
+    broker = _live_broker()
+    side = Side.BUY if sig.action == "BUY" else Side.SELL
+    sl_side = Side.SELL if sig.action == "BUY" else Side.BUY
+
+    # 1. Entry order
+    entry_inst = broker.master.find(sig.symbol, "NSEEQ")
+    entry_order = Order(
+        instrument=entry_inst,
+        side=side,
+        quantity=sig.quantity,
+        order_type=OrderType.MARKET,
+        tag="ATR-SEMI",
+        broker_params={"product": "CNC"},
+    )
+    placed_entry = broker.place_order(entry_order)
+
+    # 2. Stop-loss order (SL-M)
+    sl_order = Order(
+        instrument=entry_inst,
+        side=sl_side,
+        quantity=sig.quantity,
+        order_type=OrderType.SL_MARKET,
+        limit_price=sig.stop_loss,
+        tag="ATR-SL",
+        broker_params={"product": "CNC", "triggerPrice": sig.stop_loss},
+    )
+    placed_sl = broker.place_order(sl_order)
+
+    # 3. Target limit order
+    tgt_order = Order(
+        instrument=entry_inst,
+        side=sl_side,
+        quantity=sig.quantity,
+        order_type=OrderType.LIMIT,
+        limit_price=sig.target,
+        tag="ATR-TGT",
+        broker_params={"product": "CNC"},
+    )
+    placed_tgt = broker.place_order(tgt_order)
+
+    q.mark_active(
+        signal_id,
+        placed_entry.broker_order_id or "",
+        placed_sl.broker_order_id or "",
+        placed_tgt.broker_order_id or "",
+    )
+
+    # Telegram confirmation
+    channels = channels_from_settings(get_settings())
+    header, body = format_telegram_confirm(sig)
+    for ch in channels:
+        try:
+            if ch.send(header, body):
+                break
+        except Exception:
+            pass
+
+    return {
+        "signal_id": signal_id,
+        "entry_order": placed_entry.broker_order_id,
+        "sl_order": placed_sl.broker_order_id,
+        "target_order": placed_tgt.broker_order_id,
+    }
+
+
+@app.post("/trade-signals/{signal_id}/skip")
+def trade_signals_skip(signal_id: str) -> dict[str, Any]:
+    """Dismiss a pending signal without trading."""
+    from atr.trade_signals import get_queue
+    q = get_queue()
+    if not q.skip(signal_id):
+        raise HTTPException(404, f"Signal {signal_id} not found")
+    return {"skipped": signal_id}
 
 
 class AlertRuleIn(BaseModel):
@@ -316,6 +727,51 @@ def alert_test() -> dict[str, Any]:
     return {"sent_on": sent_on}
 
 
+# ----------------------------------------------------------------------
+# Intelligent Automated Buy & Sell Alerts
+# ----------------------------------------------------------------------
+@app.get("/alerts/intelligent/config")
+def get_intelligent_alert_config() -> dict[str, Any]:
+    from atr.alerts.intelligent import load_intelligent_config, get_intelligent_monitor
+    cfg = load_intelligent_config()
+    status = get_intelligent_monitor().get_status()
+    return {
+        "config": cfg.model_dump(mode="json"),
+        "status": status,
+    }
+
+
+@app.post("/alerts/intelligent/config")
+def update_intelligent_alert_config(body: dict[str, Any]) -> dict[str, Any]:
+    from atr.alerts.intelligent import (
+        IntelligentAlertConfig,
+        load_intelligent_config,
+        save_intelligent_config,
+        get_intelligent_monitor,
+    )
+    current = load_intelligent_config().model_dump()
+    current.update(body)
+    new_cfg = save_intelligent_config(IntelligentAlertConfig(**current))
+    return {
+        "config": new_cfg.model_dump(mode="json"),
+        "status": get_intelligent_monitor().get_status(),
+    }
+
+
+@app.post("/alerts/intelligent/evaluate")
+async def evaluate_intelligent_alerts_now() -> dict[str, Any]:
+    """Force an immediate evaluation cycle across target stocks right now."""
+    from atr.alerts.intelligent import get_intelligent_monitor
+    monitor = get_intelligent_monitor()
+    signals = await monitor.run_evaluation_cycle(force=True)
+    return {
+        "signals": [s.model_dump(mode="json") for s in signals],
+        "count": len(signals),
+        "as_of": datetime.now().isoformat(),
+        "status": monitor.get_status(),
+    }
+
+
 class BriefingIn(BaseModel):
     top_n: int = 8
     avoid_n: int = 5
@@ -377,7 +833,57 @@ def _risk_state() -> dict[str, Any]:
     return _STATE
 
 
-_STATE: dict[str, Any] = {"kill_switch": False}
+_STATE: dict[str, Any] = {"kill_switch": False, "execution_mode": "paper"}
+
+# Append-only audit log. Every action that changes what the system will do to
+# real money lands here, with who and why. Kept as a file rather than in-memory
+# state so a restart cannot erase an inconvenient decision.
+_AUDIT_PATH = Path("data/audit/audit.jsonl")
+
+
+def _utcnow_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _append_audit(*, actor: str, action: str, subject: str, detail: str | None = None) -> dict[str, Any]:
+    """Append one immutable record. Never rewrites or deletes existing lines."""
+    entry = {
+        "ts": _utcnow_iso(),
+        "actor": actor,
+        "action": action,
+        "subject": subject,
+        "detail": detail,
+    }
+    try:
+        _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _AUDIT_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:  # noqa: BLE001 — logging must never break trading
+        logger.warning("audit append failed: %s", exc)
+    return entry
+
+
+def _read_audit(limit: int = 200) -> list[dict[str, Any]]:
+    if not _AUDIT_PATH.exists():
+        return []
+    try:
+        lines = _AUDIT_PATH.read_text(encoding="utf-8").splitlines()
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict[str, Any]] = []
+    for line in reversed(lines[-limit:]):
+        with contextlib.suppress(json.JSONDecodeError):
+            out.append(json.loads(line))
+    return out
+
+
+@app.get("/audit")
+def get_audit(limit: int = 200) -> dict[str, Any]:
+    """The immutable trail, newest first."""
+    return {"entries": _read_audit(limit), "path": str(_AUDIT_PATH)}
+
 
 
 def _authed_client():
@@ -418,13 +924,18 @@ def scan(symbols: str | None = None) -> dict[str, Any]:
     return {"as_of": date.today().isoformat(), "rows": rows, "errors": errors}
 
 
+_SCAN_CACHE: dict[str, Any] = {"data": None, "as_of": 0.0, "exchange": ""}
+
+
 @app.get("/scan-all")
 def scan_all(exchange: str = "NSEEQ") -> dict[str, Any]:
     """Full-market scan over the local history cache (`atr history sync`).
 
     No broker session needed and no API calls — scores 2000+ names in
-    seconds. Refresh the cache nightly for fresh numbers.
+    seconds. Caches results in-memory for 120 seconds to make UI tab
+    switches instant.
     """
+    import time
     from datetime import date
 
     import pandas as pd
@@ -432,7 +943,16 @@ def scan_all(exchange: str = "NSEEQ") -> dict[str, Any]:
     from atr.data.history import load_cached
     from atr.scanner import score_frame
 
-    frames = load_cached(exchange.upper())
+    now = time.monotonic()
+    ex = exchange.upper()
+    if (
+        _SCAN_CACHE["data"] is not None
+        and _SCAN_CACHE["exchange"] == ex
+        and now - float(_SCAN_CACHE["as_of"]) < 120.0
+    ):
+        return _SCAN_CACHE["data"]
+
+    frames = load_cached(ex)
     if not frames:
         raise HTTPException(503, "history cache is empty — run `atr history sync`")
     rows = []
@@ -443,13 +963,189 @@ def scan_all(exchange: str = "NSEEQ") -> dict[str, Any]:
             continue
     scan = pd.DataFrame(rows).sort_values("score", ascending=False)
     up = int((scan["trend"] == "UP").sum())
-    return {
+    result = {
         "as_of": date.today().isoformat(),
         "universe": len(frames),
         "scored": len(scan),
         "breadth_up": up,
         "rows": scan.to_dict(orient="records"),
     }
+    _SCAN_CACHE["data"] = result
+    _SCAN_CACHE["as_of"] = now
+    _SCAN_CACHE["exchange"] = ex
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Custom condition-based scanner
+# ---------------------------------------------------------------------------
+
+class CustomCondition(BaseModel):
+    indicator: str                      # "rsi", "sma", "close", etc.
+    period: int | None = None           # period for sma/ema/rsi/atr/bb_*
+    op: str                             # ">", "<", ">=", "<=", "=", "crosses_above", "crosses_below"
+    rhs_type: str = "value"             # "value" | "indicator"
+    rhs_value: float = 0.0             # used when rhs_type == "value"
+    rhs_indicator: str | None = None   # used when rhs_type == "indicator"
+    rhs_period: int | None = None      # used when rhs_type == "indicator"
+
+
+class CustomScanRequest(BaseModel):
+    conditions: list[CustomCondition] = Field(default_factory=list)
+    combine: str = "AND"               # "AND" | "OR"
+    exchange: str = "NSEEQ"
+    universe: str = "all"              # "all" | "watchlist"
+    watchlist: list[str] = Field(default_factory=list)
+
+
+@app.post("/scanner/custom")
+def scanner_custom(body: CustomScanRequest) -> dict[str, Any]:
+    """Evaluate user-defined indicator conditions over the local Parquet cache.
+
+    No broker session required — runs entirely against the cached dailies.
+    Returns matching symbols with standard score metrics + condition values.
+    """
+    import time
+    from datetime import date
+
+    from atr.data.history import load_cached
+    from atr.scanner import UNIVERSE
+    from atr.scanner_custom import run_custom_scan
+
+    if not body.conditions:
+        raise HTTPException(400, "provide at least one condition")
+
+    ex = body.exchange.upper()
+    t0 = time.monotonic()
+
+    # Load frames — for "watchlist" mode only load the requested symbols
+    if body.universe == "watchlist":
+        syms = body.watchlist or list(UNIVERSE)
+        frames = load_cached(ex, symbols=syms)
+    else:
+        frames = load_cached(ex)
+
+    if not frames:
+        raise HTTPException(503, "history cache empty — run `atr history sync`")
+
+    conds = [c.model_dump() for c in body.conditions]
+    results = run_custom_scan(frames, conds, combine=body.combine)
+
+    elapsed = round(time.monotonic() - t0, 2)
+    return {
+        "as_of": date.today().isoformat(),
+        "universe_size": len(frames),
+        "matched": len(results),
+        "elapsed_s": elapsed,
+        "rows": results,
+    }
+
+
+# Saved scans — stored in data/scans/custom.json
+_SCANS_PATH = Path("data/scans/custom.json")
+
+_DEFAULT_SCANS: list[dict] = [
+    {
+        "id": "oversold_uptrend",
+        "name": "Oversold in Uptrend",
+        "combine": "AND",
+        "conditions": [
+            {"indicator": "rsi", "period": 14, "op": "<", "rhs_type": "value", "rhs_value": 35},
+            {"indicator": "close", "op": ">", "rhs_type": "indicator", "rhs_indicator": "sma", "rhs_period": 50},
+        ],
+    },
+    {
+        "id": "fresh_breakout",
+        "name": "Fresh Breakout",
+        "combine": "AND",
+        "conditions": [
+            {"indicator": "vs_high", "op": ">", "rhs_type": "value", "rhs_value": -3},
+            {"indicator": "vol_x", "op": ">", "rhs_type": "value", "rhs_value": 2.0},
+        ],
+    },
+    {
+        "id": "golden_cross",
+        "name": "Golden Cross (recent)",
+        "combine": "AND",
+        "conditions": [
+            {"indicator": "sma", "period": 20, "op": "crosses_above",
+             "rhs_type": "indicator", "rhs_indicator": "sma", "rhs_period": 50},
+        ],
+    },
+    {
+        "id": "rsi_momentum",
+        "name": "RSI Momentum Zone",
+        "combine": "AND",
+        "conditions": [
+            {"indicator": "rsi", "period": 14, "op": ">=", "rhs_type": "value", "rhs_value": 55},
+            {"indicator": "rsi", "period": 14, "op": "<=", "rhs_type": "value", "rhs_value": 70},
+            {"indicator": "close", "op": ">", "rhs_type": "indicator", "rhs_indicator": "sma", "rhs_period": 20},
+        ],
+    },
+    {
+        "id": "near_52w_high",
+        "name": "Near 52-week High",
+        "combine": "AND",
+        "conditions": [
+            {"indicator": "vs_high", "op": ">", "rhs_type": "value", "rhs_value": -5},
+            {"indicator": "vol_x", "op": ">", "rhs_type": "value", "rhs_value": 1.5},
+        ],
+    },
+]
+
+
+def _load_scans() -> list[dict]:
+    try:
+        import json
+        _SCANS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if _SCANS_PATH.exists():
+            return json.loads(_SCANS_PATH.read_text())
+    except Exception:  # noqa: BLE001
+        pass
+    return list(_DEFAULT_SCANS)
+
+
+def _save_scans(scans: list[dict]) -> None:
+    import json
+    _SCANS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _SCANS_PATH.write_text(json.dumps(scans, indent=2))
+
+
+@app.get("/scanner/saved")
+def scanner_saved_list() -> dict[str, Any]:
+    """List all saved custom scans (includes built-in presets on first run)."""
+    scans = _load_scans()
+    if not _SCANS_PATH.exists():
+        _save_scans(scans)
+    return {"scans": scans}
+
+
+class SavedScanUpsert(BaseModel):
+    id: str
+    name: str
+    combine: str = "AND"
+    conditions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.put("/scanner/saved/{scan_id}")
+def scanner_saved_upsert(scan_id: str, body: SavedScanUpsert) -> dict[str, Any]:
+    """Create or overwrite a saved scan."""
+    scans = _load_scans()
+    entry = body.model_dump()
+    entry["id"] = scan_id
+    scans = [s for s in scans if s["id"] != scan_id]
+    scans.append(entry)
+    _save_scans(scans)
+    return {"saved": entry}
+
+
+@app.delete("/scanner/saved/{scan_id}")
+def scanner_saved_delete(scan_id: str) -> dict[str, Any]:
+    """Delete a saved scan by id."""
+    scans = [s for s in _load_scans() if s["id"] != scan_id]
+    _save_scans(scans)
+    return {"deleted": scan_id}
+
 
 
 @app.get("/candles")
@@ -727,6 +1423,15 @@ _TUNABLE: dict[str, list[str]] = {
     "signals_entry": ["trend_fast_sma", "trend_slow_sma", "pullback_rsi_low", "pullback_rsi_high"],
     "opening_range_breakout": [],
     "cross_sectional_momentum": [],
+    # Paper models: min_confidence is a filter, not a fitted parameter, so
+    # varying it would inflate the trial count without learning anything.
+    "paper_jegadeesh_titman": [],
+    "paper_avellaneda_lee": [],
+    "paper_volatility_breakout": [],
+    "paper_multi_factor_composite": [],
+    "paper_iima_nse_momentum": [],
+    "paper_nism_52w_high": [],
+    "paper_sehgal_low_vol": [],
 }
 
 #: Bars of history each strategy needs before its rules will fire. A test
@@ -737,6 +1442,14 @@ _WARMUP_NEED: dict[str, int] = {
     "signals_entry": 110,
     "opening_range_breakout": 30,
     "cross_sectional_momentum": 130,
+    # Paper models look back ~6 months and use a 200-day SMA.
+    "paper_jegadeesh_titman": 260,
+    "paper_avellaneda_lee": 260,
+    "paper_volatility_breakout": 260,
+    "paper_multi_factor_composite": 260,
+    "paper_iima_nse_momentum": 260,
+    "paper_nism_52w_high": 260,
+    "paper_sehgal_low_vol": 260,
 }
 
 
@@ -783,20 +1496,83 @@ def _fetch_feed(symbols: list[str], exchange: str, lookback_days: int):
     return ListFeed(snapshots, instruments), sorted(used)
 
 
+#: Prior results that live in the project record rather than the current
+#: ``paper_validation.json``. Reporting ``signals_entry`` as merely "untested"
+#: would overstate it: it was tested and lost. Losing is a result.
+_PRIOR_RESULTS: dict[str, dict[str, Any]] = {
+    "signals_entry": {
+        "state": "fail",
+        "oos_return_pct": -5.05,
+        "benchmark_return_pct": 57.39,
+        "deflated_sharpe": 0.926,
+        "note": "Walk-forward on 19 large caps, 2020-2026. Below the 0.95 bar and behind buy-and-hold.",
+    },
+    "cross_sectional_momentum": {
+        "state": "fail",
+        "deflated_sharpe": 0.976,
+        "z_vs_control": -0.71,
+        "note": "Cleared deflated Sharpe but sat at the 25th percentile of random selection — significance without usefulness.",
+    },
+}
+
+_UNTESTED = {"state": "untested"}
+
+
 @app.get("/strategies")
 def strategies() -> dict[str, Any]:
-    """Every strategy the engine can run, and whether it takes a parameter grid."""
+    """Every strategy the engine can run, with its validation status.
+
+    ``validation`` is attached from the last walk-forward run rather than left
+    to the caller. A registry that lists an unvalidated strategy next to a
+    validated one, with nothing to tell them apart, invites exactly the mistake
+    this project is built to avoid.
+    """
     from atr.strategy.strategies import STRATEGIES
 
-    return {
-        "strategies": [
+    measured: dict[str, dict[str, Any]] = {}
+    if _PAPER_VALIDATION_PATH.exists():
+        try:
+            payload = json.loads(_PAPER_VALIDATION_PATH.read_text(encoding="utf8"))
+            for r in payload.get("results", []):
+                measured[r.get("strategy", "")] = r
+        except (OSError, ValueError):
+            measured = {}
+
+    rows = []
+    for name in sorted(STRATEGIES):
+        m = measured.get(name)
+        rows.append(
             {
                 "name": name,
                 "tunable": _TUNABLE.get(name, []),
                 "warmup_bars": _WARMUP_NEED.get(name),
+                "validation": (
+                    {
+                        "state": "pass" if m.get("passed") else "fail",
+                        "oos_sharpe": m.get("oos_sharpe"),
+                        "oos_return_pct": m.get("oos_return_pct"),
+                        "benchmark_sharpe": m.get("benchmark_sharpe"),
+                        "deflated_sharpe": m.get("deflated_sharpe"),
+                        "measured_win_rate": m.get("measured_win_rate"),
+                        "measured_trades": m.get("measured_trades"),
+                        "expectancy_r": m.get("measured_expectancy_r"),
+                        "z_vs_control": m.get("sharpe_z_vs_control"),
+                        "as_of": payload.get("generated_at") if measured else None,
+                    }
+                    if m
+                    # A known loss is a result. Fall back to the project record
+                    # before calling something untested.
+                    else _PRIOR_RESULTS.get(name, _UNTESTED)
+                ),
             }
-            for name in sorted(STRATEGIES)
-        ]
+        )
+
+    return {
+        "strategies": rows,
+        "validation_as_of": payload.get("generated_at") if measured else None,
+        "control_sharpe": (
+            payload.get("control", {}).get("sharpe_mean") if measured else None
+        ),
     }
 
 
@@ -961,118 +1737,30 @@ def research(request: ResearchRequest) -> dict[str, Any]:
     )
 
 
-# ----------------------------------------------------------------------
-# Signals — the buy/sell rules, live
-# ----------------------------------------------------------------------
-class SignalConfigIn(BaseModel):
-    entries: dict[str, Any] = Field(default_factory=dict)
-    exits: dict[str, Any] = Field(default_factory=dict)
-    universe: list[str] = Field(default_factory=list)
-    exchange: str = "NSEEQ"
+_PAPER_VALIDATION_PATH = Path("data/self_learning/paper_validation.json")
 
 
-class SignalScanIn(BaseModel):
-    symbols: list[str] = Field(default_factory=list)
-    include_holdings: bool = True
-    include_entries: bool = True
+@app.get("/validation")
+def validation_report() -> dict[str, Any]:
+    """The last out-of-sample run over the academic paper strategies.
 
-
-def _signal_store():
-    from atr.signals.models import DEFAULT_CONFIG_PATH, SignalConfig
-
-    return SignalConfig, DEFAULT_CONFIG_PATH
-
-
-@app.get("/signals/config")
-def signals_config() -> dict[str, Any]:
-    """The live rule thresholds. These are starting points, not findings."""
-    import dataclasses
-
-    from atr.signals.models import SEARCH_GRID, SignalConfig
-
-    cfg = SignalConfig.load()
-    return {
-        "config": _clean(dataclasses.asdict(cfg)),
-        "search_grid": SEARCH_GRID,
-    }
-
-
-@app.put("/signals/config")
-def signals_save(body: SignalConfigIn) -> dict[str, Any]:
-    import dataclasses
-
-    from atr.signals.models import (
-        DEFAULT_CONFIG_PATH,
-        EntryRules,
-        ExitRules,
-        SignalConfig,
-    )
-
-    try:
-        cfg = SignalConfig(
-            entries=EntryRules(**body.entries) if body.entries else EntryRules(),
-            exits=ExitRules(**body.exits) if body.exits else ExitRules(),
-            universe=[s.strip().upper() for s in body.universe if s.strip()],
-            exchange=body.exchange.upper(),
-        )
-    except TypeError as exc:  # unknown threshold name
-        raise HTTPException(400, f"unknown threshold: {exc}") from exc
-    cfg.save(DEFAULT_CONFIG_PATH)
-    return _clean(dataclasses.asdict(cfg))
-
-
-@app.post("/signals/scan")
-def signals_scan(body: SignalScanIn) -> dict[str, Any]:
-    """Run the exit rules over the book and the entry rules over a watchlist.
-
-    Buy signals come back with ``validated: false`` because the entry rules
-    have not passed ``/research`` — they are a watchlist, not a reason to buy.
+    Serves ``scripts/validate_paper_strategies.py`` output so the dashboard can
+    show measured numbers instead of the constants that used to be hardcoded in
+    ``atr.research.papers``. Includes the random-selection control: a strategy
+    that does not clear it has demonstrated nothing.
     """
-    from atr.scanner import UNIVERSE
-    from atr.signals.engine import scan_holdings, scan_universe
-    from atr.signals.models import SignalConfig
+    if not _PAPER_VALIDATION_PATH.exists():
+        return {
+            "available": False,
+            "hint": "run: .venv/Scripts/python.exe scripts/validate_paper_strategies.py",
+        }
+    try:
+        payload = json.loads(_PAPER_VALIDATION_PATH.read_text(encoding="utf8"))
+    except (OSError, ValueError) as exc:
+        return {"available": False, "error": str(exc)}
 
-    cfg = SignalConfig.load()
-    client = _authed_client()
-    buys, sells, errors = [], [], []
-
-    with client:
-        if body.include_holdings:
-            try:
-                fired, errs = scan_holdings(client, cfg)
-                sells.extend(fired)
-                errors.extend(errs)
-            except Exception as exc:  # noqa: BLE001 — one side failing is still useful
-                errors.append(f"holdings scan failed: {exc}")
-        if body.include_entries:
-            watchlist = body.symbols or cfg.universe or list(UNIVERSE)
-            try:
-                fired, errs = scan_universe(client, watchlist, cfg)
-                buys.extend(fired)
-                errors.extend(errs)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"universe scan failed: {exc}")
-
-    def dump(signal) -> dict[str, Any]:
-        return _clean(
-            {
-                "symbol": signal.symbol,
-                "action": signal.action,
-                "rule": signal.rule,
-                "reason": signal.reason,
-                "price": signal.price,
-                "detail": signal.detail,
-                "validated": signal.validated,
-                "ts": signal.ts,
-            }
-        )
-
-    return {
-        "buys": [dump(s) for s in buys],
-        "sells": [dump(s) for s in sells],
-        "errors": errors,
-        "rules_are_mechanical": True,
-    }
+    payload["available"] = True
+    return payload
 
 
 # ----------------------------------------------------------------------
@@ -1257,6 +1945,22 @@ def _live_broker():
     return IiflBroker(client, InstrumentMaster(client))
 
 
+def _require_live_execution(action: str = "order") -> None:
+    """Refuse to transmit orders unless the operator has switched to live.
+
+    Called by every endpoint that can reach the broker with an order. Read-only
+    paths deliberately skip this — the whole point of paper mode is that you can
+    still see the market, the signals, and the queue.
+    """
+    store = _risk_state()
+    if str(store.get("execution_mode", "paper")) != "live":
+        raise HTTPException(
+            403,
+            f"{action} blocked: execution mode is 'paper'. "
+            "Switch to live in Trading → Execution mode (a reason is required).",
+        )
+
+
 # ----------------------------------------------------------------------
 # Session / login
 # ----------------------------------------------------------------------
@@ -1388,11 +2092,58 @@ def login_callback(
     )
 
 
-@app.post("/logout")
-def logout() -> dict[str, bool]:
-    client = _login_client()
-    client.logout()
-    return {"logged_out": True}
+@app.websocket("/ws/ticks")
+async def ws_ticks(websocket: WebSocket) -> None:
+    """Real-time market ticks stream over WebSocket."""
+    import json
+    from atr.api.stream import get_broadcaster
+
+    broadcaster = get_broadcaster()
+    try:
+        broadcaster.set_loop(asyncio.get_running_loop())
+    except RuntimeError:
+        pass
+
+    await broadcaster.connect(websocket)
+    try:
+        while True:
+            text = await websocket.receive_text()
+            try:
+                msg = json.loads(text)
+                action = msg.get("action")
+                symbols = msg.get("symbols", [])
+                exchange = msg.get("exchange", "NSEEQ")
+                if action == "subscribe" and isinstance(symbols, list):
+                    await broadcaster.subscribe(websocket, symbols, exchange)
+                elif action == "unsubscribe" and isinstance(symbols, list):
+                    await broadcaster.unsubscribe(websocket, symbols)
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        broadcaster.disconnect(websocket)
+    except Exception:
+        broadcaster.disconnect(websocket)
+
+
+@app.get("/ticks/history")
+def get_tick_history(symbol: str = Query(..., description="Stock symbol"), limit: int = 100) -> list[dict[str, Any]]:
+    """Fetch raw buffered ticks from the in-memory time-series ring buffer."""
+    from atr.api.stream import get_broadcaster
+    return get_broadcaster().get_tick_history(symbol, limit=limit)
+
+
+@app.get("/ticks/vwap")
+def get_tick_vwap(symbol: str = Query(..., description="Stock symbol"), window: int = 900) -> dict[str, Any]:
+    """Compute instant rolling VWAP over `window` seconds from in-memory ring buffer."""
+    from atr.api.stream import get_broadcaster
+    return get_broadcaster().get_rolling_vwap(symbol, window_seconds=window)
+
+
+@app.get("/ticks/candles")
+def get_tick_candles(symbol: str = Query(..., description="Stock symbol"), interval: int = 5) -> list[dict[str, Any]]:
+    """Resample buffered ticks into sub-minute OHLCV candles via Polars."""
+    from atr.api.stream import get_broadcaster
+    return get_broadcaster().get_tick_candles(symbol, interval_seconds=interval)
 
 
 # ----------------------------------------------------------------------

@@ -50,6 +50,9 @@ class Session:
         now = now or datetime.now(tz=UTC)
         return now < self.expires_at - timedelta(seconds=30)
 
+    def is_expired(self, now: datetime | None = None) -> bool:
+        return not self.is_valid(now)
+
     def preferred_username(self) -> str:
         """The ``preferred_username`` claim — used as the MQTT client id and
         as the topic for order/trade updates."""

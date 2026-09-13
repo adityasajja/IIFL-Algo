@@ -103,13 +103,6 @@ export const placeOrder = (body: OrderRequest) =>
     body: JSON.stringify(body),
   });
 
-export const getRiskStatus = () => req<Record<string, unknown>>("/risk/status");
-
-export const setKillSwitch = (engaged: boolean) =>
-  req<{ kill_switch: boolean }>(`/risk/kill-switch?engaged=${engaged}`, {
-    method: "POST",
-  });
-
 export interface ScanRow {
   symbol: string;
   last: number;
@@ -218,6 +211,73 @@ export const runAlertCheck = () =>
 export const sendAlertTest = () =>
   req<{ sent_on: string }>("/alerts/test", { method: "POST" });
 
+export interface IntelligentAlertConfig {
+  enabled: boolean;
+  universe: "holdings" | "watchlist" | "both";
+  interval_min: number;
+  cooldown_min: number;
+  sell_sma_breakdown: boolean;
+  sell_rsi_overbought: boolean;
+  sell_rsi_threshold: number;
+  sell_take_profit_enabled: boolean;
+  sell_take_profit_pct: number;
+  sell_stop_loss_enabled: boolean;
+  sell_stop_loss_pct: number;
+  sell_trailing_stop_enabled: boolean;
+  sell_trailing_stop_pct: number;
+  buy_golden_cross: boolean;
+  buy_rsi_oversold: boolean;
+  buy_rsi_threshold: number;
+  buy_breakout_vol: boolean;
+  buy_dip_sma20: boolean;
+}
+
+export interface IntelligentStatus {
+  enabled: boolean;
+  running: boolean;
+  last_run: string | null;
+  market_open: boolean;
+  interval_min: number;
+  universe: string;
+  recent_signals: Array<{
+    symbol: string;
+    action: "BUY" | "SELL";
+    reason: string;
+    price: number;
+    day_chg_pct: number;
+    rsi: number | null;
+    metric: string;
+    ts: string;
+    channel: string;
+  }>;
+}
+
+export const getIntelligentAlerts = () =>
+  req<{ config: IntelligentAlertConfig; status: IntelligentStatus }>("/alerts/intelligent/config");
+
+export const updateIntelligentAlerts = (body: Partial<IntelligentAlertConfig>) =>
+  req<{ config: IntelligentAlertConfig; status: IntelligentStatus }>("/alerts/intelligent/config", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const evaluateIntelligentAlertsNow = () =>
+  req<{
+    signals: Array<{
+      symbol: string;
+      action: "BUY" | "SELL";
+      reason: string;
+      price: number;
+      day_chg_pct: number;
+      rsi: number | null;
+      metric: string;
+      ts: string;
+    }>;
+    count: number;
+    as_of: string;
+    status: IntelligentStatus;
+  }>("/alerts/intelligent/evaluate", { method: "POST" });
+
 export interface BriefingConfig {
   top_n: number;
   avoid_n: number;
@@ -271,10 +331,28 @@ export const sendBriefing = () =>
 // Research — walk-forward validation
 // ---------------------------------------------------------------------------
 
+export type ValidationState = "pass" | "fail" | "untested";
+
+export interface StrategyValidation {
+  state: ValidationState;
+  oos_sharpe?: number | null;
+  oos_return_pct?: number | null;
+  benchmark_sharpe?: number | null;
+  benchmark_return_pct?: number | null;
+  deflated_sharpe?: number | null;
+  measured_win_rate?: number | null;
+  measured_trades?: number | null;
+  expectancy_r?: number | null;
+  z_vs_control?: number | null;
+  as_of?: string | null;
+  note?: string;
+}
+
 export interface StrategyInfo {
   name: string;
   tunable: string[];
   warmup_bars: number | null;
+  validation: StrategyValidation;
 }
 
 export interface VerdictCheck {
@@ -338,54 +416,65 @@ export interface ResearchResponse {
 }
 
 export const getStrategies = () =>
-  req<{ strategies: StrategyInfo[] }>("/strategies");
+  req<{
+    strategies: StrategyInfo[];
+    validation_as_of?: string | null;
+    control_sharpe?: number | null;
+  }>("/strategies");
 
 export const runResearch = (body: ResearchRequest) =>
   req<ResearchResponse>("/research", { method: "POST", body: JSON.stringify(body) });
 
 // ---------------------------------------------------------------------------
-// Signals — the live buy/sell rules
+// Paper-strategy validation (out-of-sample, with a random-selection control)
 // ---------------------------------------------------------------------------
 
-export interface SignalConfig {
-  entries: Record<string, number | null>;
-  exits: Record<string, number | null>;
-  universe: string[];
-  exchange: string;
+export interface ValidationCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
 }
 
-export interface SignalRow {
-  symbol: string;
-  action: "BUY" | "SELL";
-  rule: string;
-  reason: string;
-  price: number;
-  detail: Record<string, number | string | null>;
-  validated: boolean;
-  ts: string;
+export interface ValidationResult {
+  strategy: string;
+  passed?: boolean;
+  error?: string;
+  folds?: number;
+  oos_return_pct?: number;
+  oos_sharpe?: number;
+  oos_max_drawdown_pct?: number;
+  oos_trades?: number;
+  benchmark_return_pct?: number;
+  benchmark_sharpe?: number;
+  deflated_sharpe?: number;
+  required_sharpe?: number;
+  n_trials?: number;
+  measured_win_rate?: number;
+  measured_trades?: number;
+  measured_expectancy_r?: number;
+  sharpe_z_vs_control?: number | null;
+  checks?: ValidationCheck[];
 }
 
-export interface SignalScanResponse {
-  buys: SignalRow[];
-  sells: SignalRow[];
-  errors: string[];
+export interface ValidationReport {
+  available: boolean;
+  hint?: string;
+  error?: string;
+  generated_at?: string;
+  universe?: string[];
+  symbol_bars?: number;
+  window?: string;
+  config?: Record<string, number | string>;
+  control?: {
+    sharpe_mean: number | null;
+    sharpe_sd: number;
+    sharpes: number[];
+    returns_pct: number[];
+  };
+  results?: ValidationResult[];
 }
 
-export const getSignalsConfig = () =>
-  req<{ config: SignalConfig; search_grid: Record<string, number[]> }>("/signals/config");
-
-export const saveSignalsConfig = (body: {
-  entries: Record<string, number | null>;
-  exits: Record<string, number | null>;
-  universe: string[];
-  exchange: string;
-}) => req<SignalConfig>("/signals/config", { method: "PUT", body: JSON.stringify(body) });
-
-export const runSignalsScan = (body: {
-  symbols?: string[];
-  include_holdings?: boolean;
-  include_entries?: boolean;
-}) => req<SignalScanResponse>("/signals/scan", { method: "POST", body: JSON.stringify(body) });
+export const getValidation = () => req<ValidationReport>("/validation");
 
 // ---------------------------------------------------------------------------
 // Portfolio, quotes, caches
@@ -413,6 +502,68 @@ export const getQuote = (symbols: string, exchange = "NSEEQ") =>
     quotes: Record<string, unknown>[];
     failed: { symbol: string; error: string }[];
   }>(`/quote?symbols=${encodeURIComponent(symbols)}&exchange=${encodeURIComponent(exchange)}`);
+
+// ---------------------------------------------------------------------------
+// Risk
+// ---------------------------------------------------------------------------
+
+export interface RiskLimits {
+  capital: number;
+  risk_per_trade_pct: number;
+  max_active: number;
+  rr_ratio: number;
+  stop_method: "atr" | "pct" | string;
+  stop_atr_mult: number;
+  stop_pct: number;
+  product: string;
+}
+
+export interface RiskStatus {
+  kill_switch: boolean;
+  execution_mode: "paper" | "live";
+  env: string;
+  live_orders_allowed: boolean;
+  limits: RiskLimits;
+  margin: Record<string, number>;
+  margin_error: string | null;
+}
+
+export const getRiskStatus = () => req<RiskStatus>("/risk/status");
+
+export const setKillSwitch = (engaged: boolean) =>
+  req<{ kill_switch: boolean }>(
+    `/risk/kill-switch?engaged=${engaged ? "true" : "false"}`,
+    { method: "POST" },
+  );
+
+export interface ExecutionMode {
+  mode: "paper" | "live";
+  live: boolean;
+  paper: boolean;
+  changed_at: string | null;
+  changed_by: string | null;
+  reason: string | null;
+}
+
+export const getExecutionMode = () => req<ExecutionMode>("/risk/execution-mode");
+
+/** Switching to `live` requires a reason — the backend rejects it otherwise. */
+export const setExecutionMode = (mode: "paper" | "live", reason: string) =>
+  req<ExecutionMode>(
+    `/risk/execution-mode?mode=${mode}&reason=${encodeURIComponent(reason)}`,
+    { method: "POST" },
+  );
+
+export interface AuditEntry {
+  ts: string;
+  actor: string;
+  action: string;
+  subject: string;
+  detail: string | null;
+}
+
+export const getAudit = (limit = 200) =>
+  req<{ entries: AuditEntry[]; path: string }>(`/audit?limit=${limit}`);
 
 export interface CacheExchange {
   exchange: string;
@@ -453,3 +604,186 @@ export const searchSymbols = (query: string, exchange = "NSEEQ", limit = 25) =>
   req<{ results: { symbol: string; exchange: string; conid: string }[] }>(
     `/symbols?query=${encodeURIComponent(query)}&exchange=${encodeURIComponent(exchange)}&limit=${limit}`,
   );
+
+// ─── Custom Scanner ───────────────────────────────────────────────────────────
+
+export interface ScanCondition {
+  indicator: string;        // "rsi", "sma", "close", "vol_x", etc.
+  period?: number;          // for sma/ema/rsi/atr/bb_*
+  op: string;               // ">", "<", ">=", "<=", "=", "crosses_above", "crosses_below"
+  rhs_type: "value" | "indicator";
+  rhs_value?: number;
+  rhs_indicator?: string;
+  rhs_period?: number;
+}
+
+export interface SavedScan {
+  id: string;
+  name: string;
+  combine: "AND" | "OR";
+  conditions: ScanCondition[];
+}
+
+export interface CustomScanRow {
+  symbol: string;
+  last: number;
+  day_chg_pct: number;
+  day_high: number;
+  day_low: number;
+  ret_1m: number;
+  vs_high: number;
+  trend: string;
+  rsi: number;
+  vol_x: number;
+  atr_pct: number;
+  gold_cross_5d: boolean;
+  breakout: boolean;
+  score: number;
+  bars: number;
+  _cond_values?: Record<string, number>;
+}
+
+export interface CustomScanResponse {
+  as_of: string;
+  universe_size: number;
+  matched: number;
+  elapsed_s: number;
+  rows: CustomScanRow[];
+}
+
+export const runCustomScan = (body: {
+  conditions: ScanCondition[];
+  combine: "AND" | "OR";
+  universe: "all" | "watchlist";
+  watchlist?: string[];
+  exchange?: string;
+}) => req<CustomScanResponse>("/scanner/custom", { method: "POST", body: JSON.stringify(body) });
+
+export const getSavedScans = () =>
+  req<{ scans: SavedScan[] }>("/scanner/saved");
+
+export const upsertSavedScan = (id: string, scan: SavedScan) =>
+  req<{ saved: SavedScan }>(`/scanner/saved/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(scan),
+  });
+
+export const deleteSavedScan = (id: string) =>
+  req<{ deleted: string }>(`/scanner/saved/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+// ─── Trade Signals (Semi-auto) ────────────────────────────────────────────────
+
+export interface TradeSignal {
+  id: string;
+  symbol: string;
+  action: "BUY" | "SELL";
+  setup: string;
+  reason: string;
+  entry_price: number;
+  stop_loss: number;
+  target: number;
+  quantity: number;
+  risk_amount: number;
+  rr_ratio: number;
+  rsi: number | null;
+  vol_x: number | null;
+  paper_citation?: string | null;
+  thesis?: string | null;
+  confidence_score?: number | null;
+  expected_value?: number | null;
+  regime_fit?: string | null;
+  status: "PENDING" | "ACTIVE" | "DONE" | "SKIPPED";
+  created_at: string;
+  expires_at: string | null;
+  executed_at: string | null;
+  entry_order_id: string | null;
+  sl_order_id: string | null;
+  target_order_id: string | null;
+}
+
+export interface TradeSignalSettings {
+  capital: number;
+  risk_per_trade_pct: number;
+  stop_method: "atr" | "pct";
+  stop_atr_mult: number;
+  stop_pct: number;
+  rr_ratio: number;
+  max_active: number;
+  exchange: string;
+  product: string;
+}
+
+export interface TradeSignalsResponse {
+  signals: TradeSignal[];
+  pending: number;
+  active: number;
+}
+
+export const getTradeSignals = (status?: string) =>
+  req<TradeSignalsResponse>(
+    `/trade-signals${status ? `?status=${status}` : ""}`,
+  );
+
+export const scanTradeSignals = () =>
+  req<{ scanned: number; new_signals: number; signals: TradeSignal[] }>(
+    "/trade-signals/scan", { method: "POST" },
+  );
+
+export const executeTradeSignal = (id: string) =>
+  req<{ signal_id: string; entry_order: string; sl_order: string; target_order: string }>(
+    `/trade-signals/${encodeURIComponent(id)}/execute`, { method: "POST" },
+  );
+
+export const skipTradeSignal = (id: string) =>
+  req<{ skipped: string }>(`/trade-signals/${encodeURIComponent(id)}/skip`, { method: "POST" });
+
+export const getTradeSignalSettings = () =>
+  req<TradeSignalSettings>("/trade-signals/settings");
+
+export const saveTradeSignalSettings = (s: Partial<TradeSignalSettings>) =>
+  req<TradeSignalSettings>("/trade-signals/settings", {
+    method: "PUT",
+    body: JSON.stringify(s),
+  });
+
+// ─── Self-Learning Quant Engine ───────────────────────────────────────────────
+
+export interface StrategyWeightInfo {
+  strategy_id: string;
+  name: string;
+  paper_citation: string;
+  alpha_prior: number;
+  beta_prior: number;
+  total_trades: number;
+  winning_trades: number;
+  profit_factor: number;
+  allocation_weight: number;
+  best_regime: string;
+  active: boolean;
+}
+
+export interface MarketRegimeInfo {
+  regime: "BULL_TREND" | "BEAR_TREND" | "RANGEBOUND" | "VOLATILITY_SHOCK" | string;
+  breadth_pct: number;
+  volatility_ratio: number;
+  nifty_trend: string;
+  confidence: number;
+  as_of: string;
+}
+
+export interface SelfLearningStatus {
+  market_regime: MarketRegimeInfo;
+  strategies: Record<string, StrategyWeightInfo>;
+  total_cycles_trained: number;
+  last_trained_at: string;
+  model_version: string;
+}
+
+export const getSelfLearningStatus = () =>
+  req<SelfLearningStatus>("/self-learning/status");
+
+export const trainSelfLearningModel = () =>
+  req<{ universe_size: number; market_regime: MarketRegimeInfo; cycles_trained: number; strategies: Record<string, StrategyWeightInfo> }>(
+    "/self-learning/train", { method: "POST" },
+  );
+

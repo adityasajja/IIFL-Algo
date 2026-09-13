@@ -60,10 +60,6 @@ body {
 
 body {
   background-color: var(--background);
-  background-image:
-    radial-gradient(1200px 500px at 85% -10%, rgba(99, 91, 255, 0.07), transparent 60%),
-    radial-gradient(900px 420px at -10% 110%, rgba(99, 91, 255, 0.05), transparent 55%);
-  background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: 14px;

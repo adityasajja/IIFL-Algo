@@ -1,4 +1,16 @@
-import { ArrowRight } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  BarChart2,
+  Bell,
+  BrainCircuit,
+  CheckCircle2,
+  Crosshair,
+  TrendingDown,
+  TrendingUp,
+  XCircle,
+  Zap,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   API_URL,
@@ -8,15 +20,19 @@ import {
   getHealth,
   getPositions,
   getRiskStatus,
+  getSelfLearningStatus,
+  getTradeSignals,
   type AlertEvent,
   type AlertRule,
   type Health,
   type Position,
+  type RiskStatus,
+  type SelfLearningStatus,
+  type TradeSignalsResponse,
 } from "./api";
 import { AnimatedNumber } from "./components/ui/animated-number";
-import { Card, ErrorBox } from "./components/ui/card";
 import { NumberTicker } from "./components/ui/number-ticker";
-import { TiltCard } from "./components/ui/tilt-card";
+import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
 
 interface ScanAllResponse {
@@ -31,78 +47,95 @@ interface Props {
   onNavigate: (tab: string) => void;
 }
 
-function Kpi({
+const inrFmt = (n: number) =>
+  `₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+
+// ─── Inline stat row ─────────────────────────────────────────────────────────
+function StatRow({
   label,
-  children,
+  value,
+  tone,
   sub,
-  subTone,
 }: {
   label: string;
-  children: ReactNode;
-  sub: ReactNode;
-  subTone?: "pos" | "neg";
+  value: ReactNode;
+  tone?: "pos" | "neg" | "warn";
+  sub?: string;
 }) {
   return (
-    <TiltCard max={6} className="border border-border bg-card">
-      <div className="p-5">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-          {label}
-        </div>
-        <div className="mt-1.5 text-[26px] font-bold leading-none tracking-tight tabular-nums">
-          {children}
-        </div>
-        <div
+    <div className="flex items-center justify-between py-2.5 border-b border-border/40 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="text-right">
+        <span
           className={cn(
-            "mt-2 text-xs text-muted-foreground",
-            subTone === "pos" && "text-emerald-600 dark:text-emerald-400",
-            subTone === "neg" && "text-destructive",
+            "text-sm font-semibold tabular-nums",
+            tone === "pos" && "text-emerald-500",
+            tone === "neg" && "text-destructive",
+            tone === "warn" && "text-amber-500",
+            !tone && "text-foreground",
           )}
         >
-          {sub}
-        </div>
+          {value}
+        </span>
+        {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
       </div>
-    </TiltCard>
+    </div>
   );
 }
 
-function Feat({
+// ─── Section card ─────────────────────────────────────────────────────────────
+function Section({
+  icon,
   title,
-  tag,
-  lines,
-  empty,
+  children,
   action,
-  onOpen,
+  onAction,
 }: {
+  icon: ReactNode;
   title: string;
-  tag: string;
-  lines: ReactNode[];
-  empty: string;
-  action: string;
-  onOpen: () => void;
+  children: ReactNode;
+  action?: string;
+  onAction?: () => void;
 }) {
   return (
-    <Card className="flex flex-col p-5 transition-colors hover:border-primary/40">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">{title}</span>
-        <span className="text-xs text-muted-foreground">{tag}</span>
+    <div className="rounded-2xl border border-border/60 bg-card/40">
+      {/* header */}
+      <div className="flex items-center gap-2.5 border-b border-border/40 px-5 py-3.5">
+        <span className="text-muted-foreground">{icon}</span>
+        <span className="text-sm font-semibold text-foreground">{title}</span>
       </div>
-      <div className="mt-2.5 flex-1 space-y-1.5 text-[13px] text-muted-foreground">
-        {lines.length > 0 ? lines : <div>{empty}</div>}
-      </div>
-      <button
-        type="button"
-        onClick={onOpen}
-        className="group mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-primary"
-      >
-        {action}
-        <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-      </button>
-    </Card>
+      {/* body */}
+      <div className="px-5 py-1">{children}</div>
+      {/* footer */}
+      {action && onAction && (
+        <div className="border-t border-border/40 px-5 py-3">
+          <button
+            type="button"
+            onClick={onAction}
+            className="group inline-flex items-center gap-1.5 text-xs font-semibold text-primary"
+          >
+            {action}
+            <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
-const inr0 = (n: number) =>
-  `₹${(n >= 0 ? "+" : "−") + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+// ─── Dot status ───────────────────────────────────────────────────────────────
+function StatusDot({ ok }: { ok: boolean | null }) {
+  return (
+    <span
+      className={cn(
+        "inline-block h-2 w-2 rounded-full",
+        ok === true && "bg-emerald-500",
+        ok === false && "bg-destructive",
+        ok === null && "bg-muted-foreground/40",
+      )}
+    />
+  );
+}
 
 export default function OverviewPanel({ onNavigate }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
@@ -110,178 +143,251 @@ export default function OverviewPanel({ onNavigate }: Props) {
   const [rules, setRules] = useState<AlertRule[] | null>(null);
   const [events, setEvents] = useState<AlertEvent[] | null>(null);
   const [briefCfg, setBriefCfg] = useState<{ last_sent: { sent_at: string; channel: string } | null } | null>(null);
-  const [risk, setRisk] = useState<Record<string, unknown> | null>(null);
+  const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [scan, setScan] = useState<ScanAllResponse | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [tradeQueue, setTradeQueue] = useState<TradeSignalsResponse | null>(null);
+  const [learningStatus, setLearningStatus] = useState<SelfLearningStatus | null>(null);
 
   useEffect(() => {
-    const loaders: Promise<unknown>[] = [
-      getHealth().then(setHealth).catch(() => setHealth(null)),
-      getPositions().then(setPositions).catch(() => setPositions(null)),
-      getAlertRules().then(setRules).catch(() => setRules(null)),
-      getAlertEvents().then(setEvents).catch(() => setEvents(null)),
-      getBriefingConfig().then(setBriefCfg).catch(() => setBriefCfg(null)),
-      getRiskStatus().then(setRisk).catch(() => setRisk(null)),
-      fetch(`${API_URL}/scan-all`)
-        .then((r) => (r.ok ? (r.json() as Promise<ScanAllResponse>) : null))
-        .then(setScan)
-        .catch(() => setScan(null)),
-    ];
-    void Promise.allSettled(loaders).then((res) => {
-      const failed = res.filter((r) => r.status === "rejected");
-      if (failed.length) setErrors([`${failed.length} sources unavailable (may need a live IIFL session)`]);
-    });
+    void getHealth().then(setHealth).catch(() => setHealth(null));
+    void getPositions().then(setPositions).catch(() => setPositions(null));
+    void getAlertRules().then(setRules).catch(() => setRules(null));
+    void getAlertEvents().then(setEvents).catch(() => setEvents(null));
+    void getBriefingConfig().then(setBriefCfg).catch(() => setBriefCfg(null));
+    void getRiskStatus().then(setRisk).catch(() => setRisk(null));
+    void getTradeSignals().then(setTradeQueue).catch(() => setTradeQueue(null));
+    void getSelfLearningStatus().then(setLearningStatus).catch(() => setLearningStatus(null));
+    void fetch(`${API_URL}/scan-all`)
+      .then((r) => (r.ok ? (r.json() as Promise<ScanAllResponse>) : null))
+      .then(setScan)
+      .catch(() => setScan(null));
   }, []);
 
-  const armed = rules?.filter((r) => r.armed).length ?? 0;
+  const armed = rules?.filter((r) => r.armed).length ?? null;
+  const totalRules = rules?.length ?? null;
   const pnl = positions?.reduce((a, p) => a + p.unrealized_pnl, 0) ?? null;
-  const breadthPct = scan && scan.scored ? (scan.breadth_up / scan.scored) * 100 : null;
+  const breadthPct = scan?.scored ? Math.round((scan.breadth_up / scan.scored) * 100) : null;
   const totPosVal = positions?.reduce((a, p) => a + p.quantity * p.last_price, 0) ?? null;
-  const killed = risk?.["kill_switch"] === true;
+  const killed = risk?.kill_switch === true;
+
+  const momentumSymbols = scan?.rows?.slice(0, 5).map((r) => r.symbol) ?? [];
+  const { getTick, connected, bridgeActive } = useLiveTicks(momentumSymbols);
 
   return (
-    <div>
-      <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi
+    <div className="grid gap-5 lg:grid-cols-3">
+
+      {/* ── Col 1: System status ───────────────────────────────────────── */}
+      <Section icon={<Activity className="h-4 w-4" />} title="System status">
+        <StatRow
+          label="Broker session"
+          value={
+            <span className="flex items-center gap-1.5">
+              <StatusDot ok={health?.session_active ?? null} />
+              {health === null ? "Loading…" : health.session_active ? "Live" : "Not logged in"}
+            </span>
+          }
+          tone={health?.session_active ? "pos" : health ? "neg" : undefined}
+        />
+        <StatRow
+          label="Live feed"
+          value={
+            <span className="flex items-center gap-1.5">
+              <StatusDot ok={connected && bridgeActive} />
+              {connected && bridgeActive ? "Streaming" : connected ? "Standby" : "Offline"}
+            </span>
+          }
+          tone={connected && bridgeActive ? "pos" : connected ? "warn" : "neg"}
+        />
+        <StatRow
+          label="Risk engine"
+          value={killed ? "Kill switch ON" : "Running"}
+          tone={killed ? "neg" : "pos"}
+          sub={killed ? "No new orders allowed" : undefined}
+        />
+        <StatRow
+          label="Environment"
+          value={health?.env ?? "—"}
+        />
+        <StatRow
+          label="AI Quant Learning"
+          value={
+            learningStatus ? (
+              <span className="flex items-center gap-1.5 text-primary">
+                <BrainCircuit className="h-3.5 w-3.5" />
+                {learningStatus.market_regime.regime.replace("_", " ")}
+              </span>
+            ) : "Initializing"
+          }
+          tone={learningStatus?.market_regime.regime === "BULL_TREND" ? "pos" : learningStatus?.market_regime.regime === "BEAR_TREND" ? "warn" : undefined}
+          sub={learningStatus ? `${learningStatus.market_regime.breadth_pct}% breadth · ${learningStatus.total_cycles_trained} trained cycles` : undefined}
+        />
+        <StatRow
+          label="Morning briefing"
+          value={briefCfg?.last_sent ? "Sent" : "Not sent yet"}
+          tone={briefCfg?.last_sent ? "pos" : undefined}
+          sub={briefCfg?.last_sent ? briefCfg.last_sent.sent_at.slice(0, 16).replace("T", " ") : undefined}
+        />
+      </Section>
+
+      {/* ── Col 2: Market + Portfolio ──────────────────────────────────── */}
+      <Section
+        icon={<BarChart2 className="h-4 w-4" />}
+        title="Market & portfolio"
+        action="Open portfolio"
+        onAction={() => onNavigate("portfolio")}
+      >
+        <StatRow
           label="Market breadth"
-          sub={
-            breadthPct === null
-              ? "universe not loaded"
-              : `${breadthPct.toFixed(0)}% of names in uptrend · as of ${scan!.as_of}`
+          value={
+            breadthPct !== null ? (
+              <span>
+                <NumberTicker value={scan!.breadth_up} locale />
+                <span className="font-normal text-muted-foreground"> / {scan!.scored} up</span>
+              </span>
+            ) : "Run scanner first"
           }
-        >
-          {scan ? (
-            <>
-              <NumberTicker value={scan.breadth_up} locale />{" "}
-              <span className="text-muted-foreground">/ <NumberTicker value={scan.scored} locale /></span>
-            </>
-          ) : (
-            "—"
-          )}
-        </Kpi>
-
-        <Kpi
+          tone={breadthPct === null ? undefined : breadthPct >= 50 ? "pos" : "neg"}
+          sub={breadthPct !== null ? `${breadthPct}% of names in uptrend` : undefined}
+        />
+        <StatRow
           label="Unrealised P&L"
-          sub={pnl === null ? "positions unavailable" : `${positions!.length} open positions`}
-          subTone={pnl === null ? undefined : pnl >= 0 ? "pos" : "neg"}
-        >
-          {pnl === null ? "—" : <AnimatedNumber value={pnl} format={inr0} />}
-        </Kpi>
-
-        <Kpi label="Portfolio value" sub="marked at last live price">
-          {totPosVal === null ? (
-            "—"
-          ) : (
-            <AnimatedNumber
-              value={totPosVal}
-              format={(n) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}
-            />
-          )}
-        </Kpi>
-
-        <Kpi
-          label="Kill switch"
-          sub={killed ? "risk engine halted" : "risk engine running"}
-          subTone={killed ? "neg" : "pos"}
-        >
-          {killed ? "ENGAGED" : "Safe"}
-        </Kpi>
-      </div>
-
-      <div className="mt-3.5 grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Armed alerts" sub="Telegram price & RSI watch">
-          {rules === null ? (
-            "—"
-          ) : (
-            <>
-              <NumberTicker value={armed} />{" "}
-              <span className="text-muted-foreground">/ <NumberTicker value={rules.length} /></span>
-            </>
-          )}
-        </Kpi>
-
-        <Kpi
-          label="Briefing"
-          sub={
-            briefCfg?.last_sent
-              ? `${briefCfg.last_sent.sent_at} via ${briefCfg.last_sent.channel}`
-              : "no briefing delivered yet"
+          value={
+            pnl !== null ? (
+              <span className="flex items-center gap-1">
+                {pnl >= 0
+                  ? <TrendingUp className="h-3.5 w-3.5" />
+                  : <TrendingDown className="h-3.5 w-3.5" />}
+                {pnl >= 0 ? "+" : "−"}
+                <AnimatedNumber value={Math.abs(pnl)} format={inrFmt} />
+              </span>
+            ) : "No positions"
           }
-        >
-          {briefCfg?.last_sent ? "Sent" : "Not sent"}
-        </Kpi>
+          tone={pnl === null ? undefined : pnl >= 0 ? "pos" : "neg"}
+          sub={pnl !== null ? `${positions!.length} open position${positions!.length !== 1 ? "s" : ""}` : undefined}
+        />
+        <StatRow
+          label="Portfolio value"
+          value={
+            totPosVal !== null ? (
+              <AnimatedNumber
+                value={totPosVal}
+                format={(n) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}
+              />
+            ) : "—"
+          }
+          sub="at last live price"
+        />
+        <StatRow
+          label="Alert rules"
+          value={totalRules === null ? "—" : `${armed ?? 0} / ${totalRules} armed`}
+          sub={armed !== null && armed > 0 ? "watching price & RSI" : undefined}
+        />
+        <StatRow
+          label="Recent alert fires"
+          value={events === null ? "—" : events.length === 0 ? "None yet" : `${events.length} in log`}
+          tone={events !== null && events.length > 0 ? "warn" : undefined}
+        />
+      </Section>
 
-        <Kpi
-          label="Engine"
-          sub={health ? `${health.env} · session ${health.session_active ? "active" : "none"}` : "backend unreachable"}
-          subTone={health ? (health.session_active ? "pos" : "neg") : undefined}
-        >
-          {health ? health.status : "offline"}
-        </Kpi>
+      {/* ── Col 3: Live tickers / positions / signals ──────────────────── */}
+      <div className="space-y-5">
 
-        <Kpi label="Recent fires" sub="in the last 50 event window">
-          {events === null ? "—" : <NumberTicker value={events.length} />}
-        </Kpi>
-      </div>
-
-      {errors.map((e, i) => (
-        <div className="mt-3.5" key={i}>
-          <ErrorBox>{e}</ErrorBox>
-        </div>
-      ))}
-
-      <div className="mt-[18px] grid gap-3.5 lg:grid-cols-3">
-        <Feat
+        {/* Top momentum */}
+        <Section
+          icon={<Zap className="h-4 w-4" />}
           title="Top momentum"
-          tag="scanner"
-          lines={
-            scan
-              ? scan.rows.slice(0, 4).map((r) => (
-                  <div key={r.symbol}>
-                    <strong className="font-semibold text-foreground">{r.symbol.replace("-EQ", "")}</strong>
-                    {" "}· ₹{r.last.toLocaleString("en-IN")} · RSI {r.rsi.toFixed(0)}
-                  </div>
-                ))
-              : []
-          }
-          empty="Run the scanner to see ranked names."
           action="Open scanner"
-          onOpen={() => onNavigate("scanner")}
-        />
-        <Feat
-          title="Newest alerts"
-          tag="telegram"
-          lines={
-            events && events.length > 0
-              ? events.slice(0, 3).map((e) => (
-                  <div key={e.id}>
-                    <strong className="font-semibold text-foreground">{e.rule}</strong>
-                    {" "}· {e.message.slice(0, 70)}
+          onAction={() => onNavigate("scanner")}
+        >
+          {scan && scan.rows.length > 0 ? (
+            scan.rows.slice(0, 5).map((r) => {
+              const tick = getTick(r.symbol);
+              const ltp = tick?.ltp ?? r.last;
+              const chg = r.day_chg_pct;
+              return (
+                <StatRow
+                  key={r.symbol}
+                  label={r.symbol.replace("-EQ", "")}
+                  value={`₹${ltp.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}`}
+                  tone={
+                    tick?.flash === "up" ? "pos" :
+                    tick?.flash === "down" ? "neg" :
+                    chg > 0 ? "pos" : chg < 0 ? "neg" : undefined
+                  }
+                  sub={`RSI ${r.rsi.toFixed(0)} · ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`}
+                />
+              );
+            })
+          ) : (
+            <div className="py-4 text-sm text-muted-foreground">Run the scanner to see ranked names.</div>
+          )}
+        </Section>
+
+        {/* Recent signals */}
+        <Section
+          icon={<Bell className="h-4 w-4" />}
+          title="Recent alert fires"
+          action="Open signals & alerts"
+          onAction={() => onNavigate("alerts")}
+        >
+          {events && events.length > 0 ? (
+            events.slice(0, 3).map((e) => (
+              <div key={e.id} className="flex items-start gap-2.5 py-2.5 border-b border-border/40 last:border-0">
+                <span className={cn("mt-0.5 shrink-0", e.ok ? "text-emerald-500" : "text-destructive")}>
+                  {e.ok
+                    ? <CheckCircle2 className="h-3.5 w-3.5" />
+                    : <XCircle className="h-3.5 w-3.5" />}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{e.rule}</p>
+                  <p className="truncate text-xs text-muted-foreground">{e.message.slice(0, 55)}</p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="py-4 text-sm text-muted-foreground">No alert fires yet.</div>
+          )}
+        </Section>
+
+        {/* Pending trade signals */}
+        <Section
+          icon={<Crosshair className="h-4 w-4" />}
+          title="Trade Queue (Semi-Auto)"
+          action="Open trade queue"
+          onAction={() => onNavigate("trade-signals")}
+        >
+          {tradeQueue && tradeQueue.signals.filter((s) => s.status === "PENDING").length > 0 ? (
+            tradeQueue.signals
+              .filter((s) => s.status === "PENDING")
+              .slice(0, 3)
+              .map((s) => (
+                <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-border/40 last:border-0">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold text-foreground">{s.symbol.replace("-EQ", "")}</span>
+                      <span
+                        className={cn(
+                          "rounded px-1.5 py-0.2 text-[10px] font-bold",
+                          s.action === "BUY" ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive",
+                        )}
+                      >
+                        {s.action}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">{s.setup}</div>
                   </div>
-                ))
-              : []
-          }
-          empty="No alert fires yet. Set a rule to watch a level."
-          action="Open alerts"
-          onOpen={() => onNavigate("alerts")}
-        />
-        <Feat
-          title="Positions"
-          tag="portfolio"
-          lines={
-            positions && positions.length > 0
-              ? positions.slice(0, 4).map((p) => (
-                  <div key={`${p.exchange}:${p.symbol}`}>
-                    <strong className="font-semibold text-foreground">{p.symbol}</strong>
-                    {" "}· {p.quantity} @ ₹{p.avg_price.toLocaleString("en-IN")}
+                  <div className="text-right">
+                    <div className="text-xs font-semibold tabular-nums text-foreground">₹{s.entry_price.toFixed(2)}</div>
+                    <div className="text-[11px] text-muted-foreground">{s.quantity} qty · R:R {s.rr_ratio.toFixed(1)}</div>
                   </div>
-                ))
-              : []
-          }
-          empty="No live positions visible yet."
-          action="Open portfolio"
-          onOpen={() => onNavigate("portfolio")}
-        />
+                </div>
+              ))
+          ) : (
+            <div className="py-3 text-sm text-muted-foreground">
+              {tradeQueue?.active ? `${tradeQueue.active} active trade(s) in flight.` : "No pending trades awaiting approval."}
+            </div>
+          )}
+        </Section>
       </div>
     </div>
   );

@@ -3,20 +3,39 @@ import {
   armAlertRule,
   createAlertRule,
   deleteAlertRule,
+  evaluateIntelligentAlertsNow,
   getAlertEvents,
   getAlertRules,
+  getIntelligentAlerts,
   runAlertCheck,
   sendAlertTest,
+  updateIntelligentAlerts,
   type AlertEvent,
   type AlertRule,
+  type IntelligentAlertConfig,
+  type IntelligentStatus,
 } from "./api";
 import { Button } from "./components/ui/button";
-import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { Card } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Switch } from "./components/ui/switch";
 import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
+import {
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  Bell,
+  Clock,
+  Layers,
+  Play,
+  RotateCw,
+  Send,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 
 const KINDS = [
   { v: "price_below", label: "Price falls to/below ₹", needs: true, hint: "exit / falling-stock alert" },
@@ -34,10 +53,12 @@ const THRESHOLD_KINDS = new Set([
 ]);
 
 const selectClass =
-  "h-11 w-full rounded-full border border-border bg-transparent px-3.5 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 disabled:opacity-60 [&>option]:bg-card";
+  "h-10 w-full rounded-xl border border-border bg-[#131722] px-3 text-xs text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60";
 
 export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: string) => void }) {
   const { toast } = useToast();
+
+  // Manual rules & events
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [checkState, setCheckState] = useState<ButtonState>("idle");
@@ -46,11 +67,23 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
   const [kind, setKind] = useState("price_below");
   const [threshold, setThreshold] = useState("1250");
 
+  // Intelligent Monitor State
+  const [intelConfig, setIntelConfig] = useState<IntelligentAlertConfig | null>(null);
+  const [intelStatus, setIntelStatus] = useState<IntelligentStatus | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
+
   async function refresh() {
     try {
       setError(null);
-      setRules(await getAlertRules());
-      setEvents(await getAlertEvents());
+      const [r, ev, intel] = await Promise.all([
+        getAlertRules(),
+        getAlertEvents(),
+        getIntelligentAlerts(),
+      ]);
+      setRules(r);
+      setEvents(ev);
+      setIntelConfig(intel.config);
+      setIntelStatus(intel.status);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -69,7 +102,57 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
     onOpenChart?.("charts");
   }
 
-  async function create() {
+  async function updateConfigField<K extends keyof IntelligentAlertConfig>(
+    key: K,
+    val: IntelligentAlertConfig[K]
+  ) {
+    if (!intelConfig) return;
+    const updated = { ...intelConfig, [key]: val };
+    setIntelConfig(updated);
+    try {
+      const res = await updateIntelligentAlerts({ [key]: val });
+      setIntelConfig(res.config);
+      setIntelStatus(res.status);
+      toast({
+        title: "Rule Updated",
+        description: `Saved: ${String(key).replace(/_/g, " ")}`,
+        status: "success",
+      });
+    } catch (e) {
+      toast({
+        title: "Update Failed",
+        description: e instanceof Error ? e.message : String(e),
+        status: "error",
+      });
+    }
+  }
+
+  async function handleEvaluateNow() {
+    setEvaluating(true);
+    try {
+      const res = await evaluateIntelligentAlertsNow();
+      setIntelStatus(res.status);
+      toast({
+        title: res.count > 0 ? `🚨 ${res.count} Signal(s) Triggered!` : "Evaluation Finished",
+        description:
+          res.count > 0
+            ? "Actionable signals dispatched to Telegram and logged below."
+            : "All monitored stocks healthy; no sell/buy triggers met right now.",
+        status: res.count > 0 ? "success" : "info",
+      });
+      await refresh();
+    } catch (e) {
+      toast({
+        title: "Evaluation Failed",
+        description: e instanceof Error ? e.message : String(e),
+        status: "error",
+      });
+    } finally {
+      setEvaluating(false);
+    }
+  }
+
+  async function createManual() {
     setError(null);
     try {
       await createAlertRule({
@@ -77,7 +160,11 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
         kind,
         threshold: Number(threshold) || 0,
       });
-      toast({ title: "Alert created", description: `${symbol.trim().toUpperCase()} · ${kind.replace(/_/g, " ")}`, status: "success" });
+      toast({
+        title: "Alert created",
+        description: `${symbol.trim().toUpperCase()} · ${kind.replace(/_/g, " ")}`,
+        status: "success",
+      });
       await refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -104,7 +191,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
     }
   }
 
-  async function checkNow() {
+  async function checkManualNow() {
     setCheckState("loading");
     try {
       const res = await runAlertCheck();
@@ -121,15 +208,18 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
     }
   }
 
-  async function test() {
+  async function testTelegram() {
     try {
       const res = await sendAlertTest();
       toast({
-        title: res.sent_on === "none" || res.sent_on === "log" ? "No channel configured" : `Test sent via ${res.sent_on}`,
+        title:
+          res.sent_on === "none" || res.sent_on === "log"
+            ? "No Telegram configured"
+            : `Test sent via ${res.sent_on}`,
         description:
           res.sent_on === "none" || res.sent_on === "log"
-            ? "Add TELEGRAM_BOT_TOKEN + CHAT_ID to .env."
-            : "Check your phone.",
+            ? "Add TELEGRAM_BOT_TOKEN + CHAT_ID to .env to receive notifications."
+            : "Check your Telegram channel/chat.",
         status: res.sent_on === "none" || res.sent_on === "log" ? "info" : "success",
       });
     } catch (e) {
@@ -140,36 +230,437 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
   const kindInfo = KINDS.find((k) => k.v === kind);
 
   return (
-    <div className="space-y-3.5">
-      <Card className="p-5">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <StatefulButton
-            state={checkState}
-            onClick={() => void checkNow()}
-            loadingText="Checking…"
-            successText="Checked"
-            errorText="Failed — retry"
-          >
-            Check now
-          </StatefulButton>
-          <Button variant="secondary" onClick={() => void test()}>
-            Send test message
-          </Button>
-          <Hint>Notify-only: alerts ping you, nothing auto-trades.</Hint>
+    <div className="space-y-4 pb-12">
+      {/* ------------------------------------------------------------- */}
+      {/* 1. INTELLIGENT TRIGGER ENGINE BANNER & CONTROL BAR            */}
+      {/* ------------------------------------------------------------- */}
+      <Card className="border-[#2a2e39] bg-gradient-to-r from-[#131722] via-[#1a1f2c] to-[#131722] p-5 shadow-xl">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/20">
+              <Sparkles size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-white tracking-wide">
+                  Intelligent Periodic Buy & Sell Engine
+                </h2>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider",
+                    intelConfig?.enabled
+                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                      : "bg-zinc-500/20 text-zinc-400 border border-zinc-500/30"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      intelConfig?.enabled ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"
+                    )}
+                  />
+                  {intelConfig?.enabled ? "Auto Monitor Active" : "Paused"}
+                </span>
+              </div>
+              <p className="text-xs text-[#787b86]">
+                Automated multi-factor evaluation of trend breakdowns, overbought/oversold RSI, and trailing stops with Telegram alerts.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void testTelegram()}
+              className="border border-[#2a2e39] bg-[#1e222d] text-xs hover:bg-[#2a2e39]"
+            >
+              <Send size={13} className="mr-1.5 text-blue-400" />
+              Test Telegram
+            </Button>
+            <Button
+              size="sm"
+              disabled={evaluating}
+              onClick={() => void handleEvaluateNow()}
+              className="bg-indigo-600 text-white hover:bg-indigo-500 font-semibold shadow-md shadow-indigo-600/20 text-xs h-9 px-3.5"
+            >
+              {evaluating ? (
+                <>
+                  <RotateCw size={13} className="mr-1.5 animate-spin" />
+                  Evaluating Market…
+                </>
+              ) : (
+                <>
+                  <Play size={13} className="mr-1.5 fill-current" />
+                  Run Evaluation Now
+                </>
+              )}
+            </Button>
+          </div>
         </div>
-        {error && (
-          <div className="mt-3">
-            <ErrorBox>{error}</ErrorBox>
+
+        {/* Engine Config Strip */}
+        {intelConfig && (
+          <div className="mt-5 grid grid-cols-1 gap-3 border-t border-[#2a2e39]/80 pt-4 sm:grid-cols-3">
+            {/* Master Switch */}
+            <div className="flex items-center justify-between rounded-xl bg-[#1e222d]/70 p-3 border border-[#2a2e39]/60">
+              <div>
+                <div className="text-xs font-semibold text-white">Automated Background Engine</div>
+                <div className="text-[11px] text-[#787b86]">Runs in background during market hours</div>
+              </div>
+              <Switch
+                checked={intelConfig.enabled}
+                onCheckedChange={(checked) => void updateConfigField("enabled", checked)}
+              />
+            </div>
+
+            {/* Universe Selector */}
+            <div className="flex flex-col gap-1.5 rounded-xl bg-[#1e222d]/70 p-3 border border-[#2a2e39]/60">
+              <div className="flex items-center justify-between text-xs font-semibold text-white">
+                <span className="flex items-center gap-1.5">
+                  <Layers size={13} className="text-indigo-400" /> Target Universe
+                </span>
+              </div>
+              <div className="flex gap-1 pt-1">
+                {(["both", "holdings", "watchlist"] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => void updateConfigField("universe", u)}
+                    className={cn(
+                      "flex-1 rounded-lg py-1 text-[11px] font-semibold capitalize transition-colors",
+                      intelConfig.universe === u
+                        ? "bg-indigo-600 text-white shadow-sm"
+                        : "bg-[#131722] text-[#787b86] hover:text-white"
+                    )}
+                  >
+                    {u === "both" ? "Both" : u}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Check Frequency */}
+            <div className="flex flex-col gap-1.5 rounded-xl bg-[#1e222d]/70 p-3 border border-[#2a2e39]/60">
+              <div className="flex items-center justify-between text-xs font-semibold text-white">
+                <span className="flex items-center gap-1.5">
+                  <Clock size={13} className="text-emerald-400" /> Check Interval
+                </span>
+                <span className="text-[11px] text-[#787b86]">Every {intelConfig.interval_min}m</span>
+              </div>
+              <div className="flex gap-1 pt-1">
+                {[1, 3, 5, 15].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => void updateConfigField("interval_min", m)}
+                    className={cn(
+                      "flex-1 rounded-lg py-1 text-[11px] font-semibold transition-colors",
+                      intelConfig.interval_min === m
+                        ? "bg-emerald-600 text-white shadow-sm"
+                        : "bg-[#131722] text-[#787b86] hover:text-white"
+                    )}
+                  >
+                    {m}m
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </Card>
 
-      <Card>
-        <CardHeader title="New alert" sub={kindInfo?.hint} />
-        <div className="grid gap-3.5 p-5 sm:grid-cols-3">
+      {/* ------------------------------------------------------------- */}
+      {/* 2. QUANTITATIVE RULES: SELL (EXITS) & BUY (ENTRIES)           */}
+      {/* ------------------------------------------------------------- */}
+      {intelConfig && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* SELL (EXIT) TRIGGERS */}
+          <Card className="border-[#2a2e39] bg-[#131722] p-4">
+            <div className="flex items-center gap-2 border-b border-[#2a2e39] pb-3">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400">
+                <TrendingDown size={16} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Intelligent Sell / Exit Triggers</h3>
+                <p className="text-[11px] text-[#787b86]">Alerts you when it is time to sell or take profit</p>
+              </div>
+            </div>
+
+            <div className="mt-3 divide-y divide-[#2a2e39]/60">
+              {/* Trend Breakdown (SMA 20) */}
+              <div className="flex items-center justify-between py-2.5">
+                <div>
+                  <div className="text-xs font-semibold text-white">Trend Breakdown (SMA20)</div>
+                  <div className="text-[11px] text-[#787b86]">Trigger sell warning when price falls below 20-day SMA</div>
+                </div>
+                <Switch
+                  checked={intelConfig.sell_sma_breakdown}
+                  onCheckedChange={(c) => void updateConfigField("sell_sma_breakdown", c)}
+                />
+              </div>
+
+              {/* RSI Overbought Reversal */}
+              <div className="flex items-center justify-between py-2.5">
+                <div className="pr-3">
+                  <div className="text-xs font-semibold text-white">RSI Overbought Warning</div>
+                  <div className="text-[11px] text-[#787b86]">Alert when momentum hits extreme overbought</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#787b86]">RSI ≥</span>
+                  <input
+                    type="number"
+                    value={intelConfig.sell_rsi_threshold}
+                    onChange={(e) => void updateConfigField("sell_rsi_threshold", Number(e.target.value) || 75)}
+                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                  />
+                  <Switch
+                    checked={intelConfig.sell_rsi_overbought}
+                    onCheckedChange={(c) => void updateConfigField("sell_rsi_overbought", c)}
+                  />
+                </div>
+              </div>
+
+              {/* Trailing Stop Drop from Peak */}
+              <div className="flex items-center justify-between py-2.5">
+                <div className="pr-3">
+                  <div className="text-xs font-semibold text-white">Dynamic Trailing Stop</div>
+                  <div className="text-[11px] text-[#787b86]">Alert when stock drops by % from its 20-day peak</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#787b86]">Drop %</span>
+                  <input
+                    type="number"
+                    value={intelConfig.sell_trailing_stop_pct}
+                    onChange={(e) => void updateConfigField("sell_trailing_stop_pct", Number(e.target.value) || 3)}
+                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                  />
+                  <Switch
+                    checked={intelConfig.sell_trailing_stop_enabled}
+                    onCheckedChange={(c) => void updateConfigField("sell_trailing_stop_enabled", c)}
+                  />
+                </div>
+              </div>
+
+              {/* Take-Profit Target */}
+              <div className="flex items-center justify-between py-2.5">
+                <div className="pr-3">
+                  <div className="text-xs font-semibold text-white">Target Profit Lock</div>
+                  <div className="text-[11px] text-[#787b86]">Alert to book gains when portfolio holding hits +% target</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#787b86]">+%</span>
+                  <input
+                    type="number"
+                    value={intelConfig.sell_take_profit_pct}
+                    onChange={(e) => void updateConfigField("sell_take_profit_pct", Number(e.target.value) || 8)}
+                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                  />
+                  <Switch
+                    checked={intelConfig.sell_take_profit_enabled}
+                    onCheckedChange={(c) => void updateConfigField("sell_take_profit_enabled", c)}
+                  />
+                </div>
+              </div>
+
+              {/* Stop-Loss Cut */}
+              <div className="flex items-center justify-between py-2.5">
+                <div className="pr-3">
+                  <div className="text-xs font-semibold text-white">Max Loss Protection</div>
+                  <div className="text-[11px] text-[#787b86]">Alert to cut position if holding drops past -% loss</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#787b86]">-%</span>
+                  <input
+                    type="number"
+                    value={intelConfig.sell_stop_loss_pct}
+                    onChange={(e) => void updateConfigField("sell_stop_loss_pct", Number(e.target.value) || 4)}
+                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                  />
+                  <Switch
+                    checked={intelConfig.sell_stop_loss_enabled}
+                    onCheckedChange={(c) => void updateConfigField("sell_stop_loss_enabled", c)}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* BUY (ENTRY) TRIGGERS */}
+          <Card className="border-[#2a2e39] bg-[#131722] p-4">
+            <div className="flex items-center gap-2 border-b border-[#2a2e39] pb-3">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                <TrendingUp size={16} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Intelligent Buy / Entry Triggers</h3>
+                <p className="text-[11px] text-[#787b86]">Alerts you when momentum or dips offer high-probability entry</p>
+              </div>
+            </div>
+
+            <div className="mt-3 divide-y divide-[#2a2e39]/60">
+              {/* Golden Cross */}
+              <div className="flex items-center justify-between py-2.5">
+                <div>
+                  <div className="text-xs font-semibold text-white">Golden Cross (SMA 20 × 50)</div>
+                  <div className="text-[11px] text-[#787b86]">SMA20 crosses above SMA50 within the last 3 trading bars</div>
+                </div>
+                <Switch
+                  checked={intelConfig.buy_golden_cross}
+                  onCheckedChange={(c) => void updateConfigField("buy_golden_cross", c)}
+                />
+              </div>
+
+              {/* Oversold Dip Bounce */}
+              <div className="flex items-center justify-between py-2.5">
+                <div className="pr-3">
+                  <div className="text-xs font-semibold text-white">Oversold Dip (RSI)</div>
+                  <div className="text-[11px] text-[#787b86]">Alert when price cools into extreme oversold territory</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#787b86]">RSI ≤</span>
+                  <input
+                    type="number"
+                    value={intelConfig.buy_rsi_threshold}
+                    onChange={(e) => void updateConfigField("buy_rsi_threshold", Number(e.target.value) || 32)}
+                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                  />
+                  <Switch
+                    checked={intelConfig.buy_rsi_oversold}
+                    onCheckedChange={(c) => void updateConfigField("buy_rsi_oversold", c)}
+                  />
+                </div>
+              </div>
+
+              {/* Breakout with Volume */}
+              <div className="flex items-center justify-between py-2.5">
+                <div>
+                  <div className="text-xs font-semibold text-white">Breakout + Volume Surge</div>
+                  <div className="text-[11px] text-[#787b86]">Price breaks 20-day high with &gt; 1.5x average volume</div>
+                </div>
+                <Switch
+                  checked={intelConfig.buy_breakout_vol}
+                  onCheckedChange={(c) => void updateConfigField("buy_breakout_vol", c)}
+                />
+              </div>
+
+              {/* Alert Cooldown */}
+              <div className="flex items-center justify-between py-2.5">
+                <div className="pr-3">
+                  <div className="text-xs font-semibold text-white">Signal Cooldown Silence</div>
+                  <div className="text-[11px] text-[#787b86]">Prevents Telegram spam: minimum minutes before re-alerting same stock</div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    value={intelConfig.cooldown_min}
+                    onChange={(e) => void updateConfigField("cooldown_min", Number(e.target.value) || 45)}
+                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                  />
+                  <span className="text-[11px] text-[#787b86]">min</span>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 3. RECENT INTELLIGENT SIGNALS & DISPATCH HISTORY             */}
+      {/* ------------------------------------------------------------- */}
+      <Card className="border-[#2a2e39] bg-[#131722] p-4">
+        <div className="flex items-center justify-between border-b border-[#2a2e39] pb-3">
+          <div className="flex items-center gap-2">
+            <Activity size={16} className="text-indigo-400" />
+            <h3 className="text-sm font-bold text-white">Recent Intelligent Signals & Telegram Firings</h3>
+          </div>
+          <span className="text-[11px] text-[#787b86]">
+            Last evaluated: {intelStatus?.last_run ? new Date(intelStatus.last_run).toLocaleTimeString("en-IN") : "Ready"}
+          </span>
+        </div>
+
+        <div className="mt-3 divide-y divide-[#2a2e39]/50">
+          {intelStatus?.recent_signals && intelStatus.recent_signals.length > 0 ? (
+            intelStatus.recent_signals.slice(-10).reverse().map((sig, idx) => {
+              const isBuy = sig.action === "BUY";
+              return (
+                <div key={idx} className="flex items-start justify-between py-3 gap-3">
+                  <div className="flex items-start gap-3">
+                    <span
+                      className={cn(
+                        "mt-0.5 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-bold",
+                        isBuy
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                      )}
+                    >
+                      {isBuy ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
+                      {sig.action}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{sig.symbol.replace("-EQ", "")}</span>
+                        <span className="text-[11px] text-[#787b86]">₹{sig.price.toLocaleString("en-IN")}</span>
+                        <span className={cn("text-[11px] font-semibold", sig.day_chg_pct >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {sig.day_chg_pct >= 0 ? `+${sig.day_chg_pct}%` : `${sig.day_chg_pct}%`}
+                        </span>
+                        <span className="rounded bg-[#1e222d] px-1.5 py-0.5 text-[10px] text-[#787b86]">
+                          {sig.metric}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-[#d1d4dc]">{sig.reason}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => openChart(sig.symbol)}
+                      className="h-7 text-xs text-indigo-400 hover:bg-[#1e222d]"
+                    >
+                      Chart
+                    </Button>
+                    <span className="text-[11px] text-[#787b86]">
+                      {new Date(sig.ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="py-6 text-center text-xs text-[#787b86]">
+              No intelligent signals triggered yet. Click <strong>"Run Evaluation Now"</strong> to scan active stocks!
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 4. CUSTOM MANUAL ALERTS (OPTIONAL SPECIFIC PRICE/INDICATOR)   */}
+      {/* ------------------------------------------------------------- */}
+      <Card className="border-[#2a2e39] bg-[#131722] p-4">
+        <div className="flex items-center justify-between border-b border-[#2a2e39] pb-3">
+          <div className="flex items-center gap-2">
+            <Bell size={16} className="text-[#787b86]" />
+            <h3 className="text-sm font-bold text-white">Custom Manual Alerts</h3>
+          </div>
+          <StatefulButton
+            state={checkState}
+            onClick={() => void checkManualNow()}
+            loadingText="Checking…"
+            successText="Checked"
+            errorText="Failed"
+            className="h-7 text-xs"
+          >
+            Check Manual Rules
+          </StatefulButton>
+        </div>
+
+        <div className="grid gap-3 pt-3 sm:grid-cols-4">
           <Input label="Symbol" value={symbol} onChange={setSymbol} placeholder="RELIANCE-EQ" />
           <div className="flex flex-col gap-1.5">
-            <label className="px-1 text-sm font-medium text-foreground">Condition</label>
+            <label className="px-1 text-xs font-medium text-foreground">Condition</label>
             <select value={kind} onChange={(e) => setKind(e.target.value)} className={selectClass}>
               {KINDS.map((k) => (
                 <option key={k.v} value={k.v}>
@@ -185,60 +676,64 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             disabled={!kindInfo?.needs}
             onChange={setThreshold}
           />
+          <div className="flex items-end">
+            <Button onClick={() => void createManual()} className="h-10 w-full text-xs font-semibold">
+              Add Alert
+            </Button>
+          </div>
         </div>
-        <div className="px-5 pb-5">
-          <Button onClick={() => void create()}>Create alert</Button>
-        </div>
-      </Card>
 
-      <Card>
-        <CardHeader title={`Rules (${rules.length})`} sub={rules.length === 0 ? "None yet — create your first above." : undefined} />
-        <div className="divide-y divide-border/60 px-5 pb-2">
-          {rules.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 py-2.5">
-              <div className="min-w-0 flex-1 text-[13px]">
-                <strong className="font-semibold">{r.symbol}</strong>
-                <span className="text-muted-foreground"> · {r.kind.replace(/_/g, " ")}</span>
-                {THRESHOLD_KINDS.has(r.kind) && (
-                  <span className="tabular-nums text-muted-foreground"> @ {r.threshold}</span>
-                )}
-              </div>
-              <Switch checked={r.armed} onCheckedChange={() => void toggle(r)} ariaLabel={r.armed ? "Disarm rule" : "Arm rule"} />
-              <span className={cn("w-14 text-right text-[11px] font-bold", r.armed ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
-                {r.armed ? "ARMED" : "OFF"}
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => openChart(r.symbol)}>
-                Chart
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => void remove(r.id)}>
-                Delete
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Card>
+        {error && (
+          <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-400">
+            {error}
+          </div>
+        )}
 
-      <Card>
-        <CardHeader title="Recent firings" sub={events.length === 0 ? "Nothing fired yet." : undefined} />
-        <div className="divide-y divide-border/60 px-5 pb-2">
-          {events.map((e) => (
-            <div key={e.id} className="flex items-start justify-between gap-3 py-2.5">
-              <div className="min-w-0 text-[13px]">
-                <strong className="font-semibold">{e.rule}</strong>
-                <div className="truncate text-xs text-muted-foreground">{e.message}</div>
-              </div>
-              <div className="shrink-0 text-right">
-                <span className="inline-flex items-center rounded-full bg-primary/[0.07] px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-                  {e.channel}
-                </span>
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  {new Date(e.ts).toLocaleString("en-IN")}
+        {rules.length > 0 && (
+          <div className="mt-4 divide-y divide-[#2a2e39]/60 border-t border-[#2a2e39] pt-2">
+            {rules.map((r) => (
+              <div key={r.id} className="flex items-center justify-between py-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <strong className="text-white">{r.symbol}</strong>
+                  <span className="text-[#787b86]">· {r.kind.replace(/_/g, " ")}</span>
+                  {THRESHOLD_KINDS.has(r.kind) && <span className="tabular-nums text-indigo-400">@ {r.threshold}</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={r.armed} onCheckedChange={() => void toggle(r)} />
+                  <Button size="sm" variant="ghost" onClick={() => openChart(r.symbol)} className="h-7 text-xs">
+                    Chart
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void remove(r.id)} className="h-7 text-xs text-rose-400 hover:text-rose-300">
+                    Delete
+                  </Button>
                 </div>
               </div>
+            ))}
+          </div>
+        )}
+
+        {events.length > 0 && (
+          <div className="mt-4 border-t border-[#2a2e39] pt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#787b86] mb-2">
+              Manual Trigger History ({events.length})
             </div>
-          ))}
-        </div>
+            <div className="max-h-40 overflow-y-auto divide-y divide-[#2a2e39]/40">
+              {events.slice(0, 10).map((e) => (
+                <div key={e.id} className="flex items-center justify-between py-1.5 text-xs">
+                  <div>
+                    <span className="font-semibold text-white">{e.rule}</span>
+                    <span className="ml-2 text-[#787b86]">{e.message}</span>
+                  </div>
+                  <span className="text-[10px] text-[#787b86]">
+                    {new Date(e.ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );
 }
+

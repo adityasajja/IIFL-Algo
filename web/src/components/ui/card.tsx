@@ -14,8 +14,8 @@ export function CardHeader({
   sub,
   action,
 }: {
-  title: string;
-  sub?: string;
+  title: ReactNode;
+  sub?: ReactNode;
   action?: ReactNode;
 }) {
   return (

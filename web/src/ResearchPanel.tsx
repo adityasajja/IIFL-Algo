@@ -1,3 +1,5 @@
+import { Check, HelpCircle, ShieldCheck, Shuffle, X, Zap } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   getStrategies,
@@ -7,7 +9,7 @@ import {
   type StrategyInfo,
 } from "./api";
 import { Button } from "./components/ui/button";
-import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { Card, CardHeader, Hint } from "./components/ui/card";
 import { EquityChart } from "./components/ui/equity-chart";
 import { Input } from "./components/ui/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
@@ -22,23 +24,136 @@ import {
 import { Switch } from "./components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { cn } from "./lib/utils";
+import ValidationPanel from "./ValidationPanel";
 
 type Source = "cache" | "fetch" | "synthetic";
 
-const SOURCE_HELP: Record<Source, string> = {
-  cache:
-    "Local parquet dailies — instant, no broker session. Holds about a year, which is short for anything needing a long indicator warmup.",
-  fetch:
-    "Pulls years of dailies from IIFL. Needs an active session and takes a few minutes, but it is the only source that gives a strategy enough room to warm up.",
-  synthetic:
-    "Generated random walks. Useful for smoke-testing the harness; the numbers mean nothing.",
+const SOURCE_BLURB: Record<Source, string> = {
+  cache: "Quick (saved, ~1 year)",
+  fetch: "Full history (from broker)",
+  synthetic: "Fake data (machinery check)",
 };
 
-const SOURCE_BLURB: Record<Source, string> = {
-  cache: "Local cache (~1y)",
-  fetch: "IIFL deep history",
-  synthetic: "Synthetic",
+const SOURCE_HELP: Record<Source, string> = {
+  cache:
+    "Runs instantly and needs no login, but only holds about a year of prices — usually too short for a conclusive answer. Fine for a first look.",
+  fetch:
+    "Pulls years of daily prices from your broker. Takes a few minutes, but it is the only option that gives a strategy enough room to prove itself. Use this when you want a real answer.",
+  synthetic:
+    "Computer-generated random prices. Only useful for confirming the testing machinery works — any result here is meaningless.",
 };
+
+const EXPLAINER_KEY = "atr.research.explainer";
+
+type Preset = "quick" | "full" | "control";
+
+interface PresetDef {
+  id: Preset;
+  icon: typeof Zap;
+  title: string;
+  blurb: string;
+  badge?: string;
+}
+
+const PRESETS: PresetDef[] = [
+  {
+    id: "quick",
+    icon: Zap,
+    title: "Quick smoke test",
+    blurb: "Run on the saved data (~1 year). Fast, but the verdict will not be conclusive — good for a first look.",
+  },
+  {
+    id: "full",
+    icon: ShieldCheck,
+    title: "Full validation",
+    blurb: "Run on broker history (~6 years) and search a grid of settings. The real answer — use this for a verdict you trust.",
+    badge: "Recommended",
+  },
+  {
+    id: "control",
+    icon: Shuffle,
+    title: "Control test",
+    blurb: "Run on computer-generated prices. Only confirms the testing machinery works — the numbers themselves are meaningless.",
+  },
+];
+
+/** What the run is about to do, phrased for a non-trader. */
+function previewLine(strategy: string, source: Source, nSymbols: number, search: boolean): string {
+  const stocks = nSymbols > 0 ? `${nSymbols} stocks` : "your default list of stocks";
+  const data =
+    source === "cache"
+      ? "on the saved data (~1 year)"
+      : source === "fetch"
+        ? "on broker history (~6 years)"
+        : "on computer-generated prices";
+  const search_ = search ? " It will search a grid of settings to be honest about the bar." : "";
+  return `Will test ${strategy} against ${stocks} ${data}.${search_}`;
+}
+
+
+/** Plain-language verdict: the one sentence a non-trader can act on. */
+function plainVerdict(
+  result: ResearchResponse,
+  oos: Record<string, number>,
+  bench: Record<string, number>,
+): string {
+  if (result.source === "synthetic") {
+    return "This ran on computer-generated prices, so the numbers mean nothing. It only tells you the testing machinery works.";
+  }
+  const ret = oos.total_return_pct ?? 0;
+  const bh = bench.total_return_pct ?? 0;
+  const folds = result.folds.length;
+  const trials = result.n_trials;
+  if (result.verdict.passed) {
+    return `This held up. Across ${folds} stretches of prices it had never seen, it returned ${ret.toFixed(2)}%, against ${bh.toFixed(2)}% from simply buying and holding the same stocks. After adjusting for the ${trials} settings tried, the edge looks real rather than lucky.`;
+  }
+  return `Do not trade this. Across ${folds} stretches of prices it had never seen, it returned ${ret.toFixed(2)}%, while simply buying and holding the same stocks would have returned ${bh.toFixed(2)}%. After adjusting for the ${trials} settings tried, the edge is not statistically real.`;
+}
+
+/** Why this page exists, in words anyone can follow. Dismissible. */
+function PlainExplainer({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <Card className="border-primary/25 bg-primary/[0.03]">
+      <div className="flex items-start gap-3 p-4">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <HelpCircle size={15} />
+        </span>
+        <div className="min-w-0 flex-1 space-y-2 text-[12.5px] leading-relaxed text-muted-foreground">
+          <div className="text-[13px] font-semibold text-foreground">Why this page exists</div>
+          <p>
+            A normal backtest is easy to fool. It scores a strategy on the same
+            prices that were used to pick its settings, so a great-looking number
+            often just means the strategy memorised the past.
+          </p>
+          <p>
+            This page cuts history into consecutive chunks. The strategy learns
+            its settings on one chunk, then is scored on the chunk immediately
+            after — prices it has never seen. It slides forward and repeats. Only
+            the unseen chunks count.
+          </p>
+          <p>
+            Two extra guards a normal backtest skips: the result is compared
+            against simply buying and holding the same stocks, and the passing
+            bar gets stricter the more settings you try — so trying hundreds of
+            combinations cannot manufacture a result.
+          </p>
+          <p className="font-medium text-foreground">
+            Read the verdict as a yes/no on &ldquo;is this real?&rdquo;. Everything
+            else on this page is the evidence behind that answer.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Hide this explanation"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <X size={13} />
+        </button>
+      </div>
+    </Card>
+  );
+}
 
 function paramKeys(folds: FoldRow[]): string[] {
   const keys = new Set<string>();
@@ -55,7 +170,14 @@ function shortDate(iso: string): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" });
 }
 
-export default function ResearchPanel() {
+export default function ResearchPanel({
+  forcedTab,
+  onTabChange,
+}: {
+  /** Lets the parent (Evidence section) drive which sub-view is showing. */
+  forcedTab?: "harness" | "measured";
+  onTabChange?: (tab: "harness" | "measured") => void;
+} = {}) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [strategy, setStrategy] = useState("signals_entry");
   const [source, setSource] = useState<Source>("cache");
@@ -68,8 +190,22 @@ export default function ResearchPanel() {
   const [minFolds, setMinFolds] = useState("3");
   const [minTrades, setMinTrades] = useState("20");
   const [confidence, setConfidence] = useState("0.95");
+  const [mode, setMode] = useState<"run" | "measured">("run");
+  const view: "run" | "measured" =
+    forcedTab === undefined ? mode : forcedTab === "measured" ? "measured" : "run";
+  const [showExplainer, setShowExplainer] = useState(
+    () => localStorage.getItem(EXPLAINER_KEY) !== "hidden",
+  );
+  const [preset, setPreset] = useState<Preset>("full");
+  const reduce = useReducedMotion();
   const [state, setState] = useState<ButtonState>("idle");
-  const [error, setError] = useState<string | null>(null);
+
+  function applyPreset(p: Preset) {
+    setPreset(p);
+    if (p === "quick")   { setSource("cache");     setSearch(false); }
+    if (p === "full")    { setSource("fetch");     setSearch(true);  }
+    if (p === "control") { setSource("synthetic"); setSearch(false); }
+  }
   const [result, setResult] = useState<ResearchResponse | null>(null);
 
   useEffect(() => {
@@ -83,7 +219,6 @@ export default function ResearchPanel() {
 
   async function onRun() {
     setState("loading");
-    setError(null);
     try {
       const res = await runResearch({
         strategy,
@@ -104,7 +239,7 @@ export default function ResearchPanel() {
       setState("success");
     } catch (e) {
       setResult(null);
-      setError(e instanceof Error ? e.message : String(e));
+      throw e instanceof Error ? e : new Error(String(e));
       setState("error");
     }
   }
@@ -115,12 +250,120 @@ export default function ResearchPanel() {
 
   return (
     <div className="space-y-3.5">
+      {/* When the Evidence section drives the view, its own sub-tabs are the
+          switcher — showing a second one here would just be two controls
+          fighting over the same state. */}
+      {forcedTab === undefined && (
+        <div className="flex rounded-lg border border-border/60 overflow-hidden w-fit text-sm font-semibold">
+          {(["run", "measured"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => {
+                setMode(v);
+                onTabChange?.(v === "measured" ? "measured" : "harness");
+              }}
+              className={cn(
+                "px-4 py-1.5 transition-colors",
+                view === v
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-background text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v === "run" ? "Run a test" : "Measured results"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {view === "measured" ? (
+        <ValidationPanel />
+      ) : (
+        <>
+      {showExplainer ? (
+        <PlainExplainer
+          onDismiss={() => {
+            setShowExplainer(false);
+            localStorage.setItem(EXPLAINER_KEY, "hidden");
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setShowExplainer(true);
+            localStorage.removeItem(EXPLAINER_KEY);
+          }}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <HelpCircle size={12} /> What is this page for?
+        </button>
+      )}
+
       <Card>
         <CardHeader
-          title="Walk-forward validation"
-          sub="Parameters are chosen on a training window, then scored once on the window that follows. Only the unseen part counts."
+          title="Set up the test"
+          sub="A preset does the right thing by default. Override anything you want."
         />
-        <div className="space-y-3.5 p-5">
+        <div className="space-y-5 p-5">
+          <div>
+            <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+              Step 1 · Pick a test
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {PRESETS.map((p) => {
+                const Icon = p.icon;
+                const active = preset === p.id;
+                return (
+                  <motion.button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPreset(p.id)}
+                    whileHover={reduce ? undefined : { y: -2 }}
+                    transition={{ type: "spring", stiffness: 380, damping: 28 }}
+                    className={cn(
+                      "relative rounded-2xl border bg-card p-4 text-left transition-colors",
+                      active
+                        ? "border-primary bg-primary/[0.06]"
+                        : "border-border hover:border-foreground/30",
+                    )}
+                  >
+                    <div className="flex items-start justify-between">
+                      <span
+                        className={cn(
+                          "grid h-9 w-9 place-items-center rounded-lg",
+                          active
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-primary/[0.09] text-primary",
+                        )}
+                      >
+                        <Icon size={16} />
+                      </span>
+                      {active ? (
+                        <span className="grid h-5 w-5 place-items-center rounded-full bg-foreground text-background">
+                          <Check size={11} />
+                        </span>
+                      ) : p.badge ? (
+                        <span className="rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {p.badge}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">{p.title}</div>
+                    <div className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                      {p.blurb}
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+              Step 2 · Configure
+            </div>
+
           <div className="flex flex-wrap items-center gap-2.5">
             <Tabs
               value={source}
@@ -149,7 +392,7 @@ export default function ResearchPanel() {
 
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
             <div className="flex flex-col gap-1.5">
-              <label className="px-1 text-sm font-medium text-foreground">Strategy</label>
+              <label className="px-1 text-sm font-medium text-foreground">What to test</label>
               <select
                 value={strategy}
                 onChange={(e) => setStrategy(e.target.value)}
@@ -166,7 +409,7 @@ export default function ResearchPanel() {
               </select>
             </div>
             <Input
-              label="Symbols (blank = default universe)"
+              label="Which stocks? (blank = your default list)"
               value={symbols}
               onChange={setSymbols}
               placeholder="RELIANCE-EQ,INFY-EQ"
@@ -185,7 +428,7 @@ export default function ResearchPanel() {
             <Switch
               checked={search}
               onCheckedChange={setSearch}
-              label="Search a parameter grid (raises the Sharpe hurdle — a bigger search makes the test stricter)"
+              label="Try several settings (this makes the bar stricter, not the result better)"
             />
           )}
 
@@ -201,25 +444,42 @@ export default function ResearchPanel() {
           )}
 
           <div className="flex items-center gap-3">
+          </div>
+        </div>
+      </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="grid items-stretch gap-0 sm:grid-cols-[1fr_auto]">
+          <div className="space-y-2 p-5">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+              Step 3 · Run it
+            </div>
+            <p className="text-[14px] leading-relaxed text-foreground">
+              {previewLine(
+                strategy,
+                source,
+                symbols.trim() ? symbols.split(",").filter(Boolean).length : 0,
+                search,
+              )}
+            </p>
+            <p className="text-[11.5px] text-muted-foreground">
+              A normal run takes 30–60 seconds. A broker-history run can take 2–3 minutes the first time.
+            </p>
+          </div>
+          <div className="flex items-center justify-end p-5 sm:p-5">
             <StatefulButton
               state={state}
+              size="lg"
               onClick={() => void onRun()}
-              loadingText={source === "fetch" ? "Fetching history…" : "Validating…"}
+              loadingText={source === "fetch" ? "Pulling history…" : "Running the test…"}
               successText="Done"
               errorText="Failed — retry"
+              className="w-full sm:w-auto"
             >
-              Run validation
+              Run the test
             </StatefulButton>
-            {state === "loading" && (
-              <Hint>
-                {source === "fetch"
-                  ? "Pulling daily history per symbol — this is the slow path."
-                  : "Walking forward through the folds…"}
-              </Hint>
-            )}
           </div>
-
-          {error && <ErrorBox>{error}</ErrorBox>}
         </div>
       </Card>
 
@@ -236,6 +496,20 @@ export default function ResearchPanel() {
                   {result.bars.toLocaleString("en-IN")} bars ·{" "}
                   {result.folds.length} folds · {result.n_trials} trials
                 </span>
+
+                <p
+                  className={cn(
+                    "mt-3 w-full rounded-xl border px-3.5 py-2.5 text-[13px] leading-relaxed",
+                    result.verdict.passed
+                      ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-300"
+                      : "border-destructive/30 bg-destructive/[0.06] text-destructive",
+                  )}
+                >
+                  <strong className="font-semibold">
+                    {result.verdict.passed ? "What this means: " : "What this means: "}
+                  </strong>
+                  {plainVerdict(result, oos, bench)}
+                </p>
               </div>
               <Badge tone={result.source === "synthetic" ? "warn" : "flat"}>
                 {result.source === "synthetic" ? "synthetic data" : `${result.source} data`}
@@ -244,28 +518,28 @@ export default function ResearchPanel() {
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Stat
-                label="Out-of-sample return"
+                label="Return on unseen prices"
                 value={fmtPct(oos.total_return_pct)}
                 tone={oos.total_return_pct >= 0 ? "good" : "bad"}
                 sub={`buy & hold ${fmtPct(bench.total_return_pct)}`}
-                hint="The concatenation of the unseen windows only."
+                hint="Total return across only the stretches of prices the strategy had never seen."
               />
               <Stat
-                label="OOS Sharpe"
+                label="Return vs risk (unseen)"
                 value={fmtNum(oos.sharpe)}
                 tone={beats ? "good" : "bad"}
                 sub={`buy & hold ${fmtNum(bench.sharpe)}`}
-                hint="Annualised from the out-of-sample equity curve."
+                hint="Return earned per unit of risk taken, measured only on unseen prices. Higher is better; above 1 is decent."
               />
               <Stat
-                label="Deflated Sharpe"
+                label="Edge after adjusting for attempts"
                 value={fmtNum(result.deflated_sharpe, 3)}
                 tone={result.deflated_sharpe >= 0.95 ? "good" : "bad"}
                 sub={`hurdle ${fmtNum(result.required_sharpe, 3)} for ${result.n_trials} trials`}
-                hint="Probability the Sharpe survives the number of things that were tried. Needs to clear the hurdle."
+                hint="The risk-adjusted return after discounting for how many settings were tried. Must clear the hurdle to count as real."
               />
               <Stat
-                label="OOS max drawdown"
+                label="Worst fall (unseen)"
                 value={fmtPct(-Math.abs(oos.max_drawdown_pct))}
                 sub={`${oos.num_trades} trades · win rate ${fmtPct(oos.win_rate_pct, 1)}`}
               />
@@ -274,7 +548,7 @@ export default function ResearchPanel() {
             {result.warnings.length > 0 && (
               <div className="mt-3.5 space-y-2">
                 {result.warnings.map((w) => (
-                  <Callout key={w} tone="warn" title="Read this before believing the numbers">
+                  <Callout key={w} tone="warn" title="Read this before trusting the numbers">
                     {w}
                   </Callout>
                 ))}
@@ -301,7 +575,7 @@ export default function ResearchPanel() {
           <Card>
             <CardHeader
               title="Verdict checks"
-              sub="Every check must pass. A failure here is the harness doing its job."
+              sub="Every box must be ticked. A red one is the test doing its job — it is protecting you."
             />
             <div className="p-5 pt-3">
               <div className="overflow-hidden rounded-xl border border-border">
@@ -415,6 +689,8 @@ export default function ResearchPanel() {
               </Hint>
             </div>
           </Card>
+        </>
+      )}
         </>
       )}
     </div>

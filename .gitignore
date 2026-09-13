@@ -22,3 +22,8 @@ uv.lock.bak
 # Frontend build output and dependencies
 node_modules/
 web/dist/
+
+# Verification artifacts: headless-browser screenshots and the throwaway
+# Chromium profiles they leave behind. Useful to look at, not to version —
+# they are regenerated in seconds and the profiles are megabytes of cache.
+/.workbuddy-ai/shots-*/
