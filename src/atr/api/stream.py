@@ -8,21 +8,21 @@ and tracking the latest ticks with price change and direction.
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
 import json
-import logging
 import threading
 import time
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
 import numpy as np
 import polars as pl
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from loguru import logger
 
 from atr.config.settings import get_settings
+
 
 @dataclass
 class LiveTickPayload:

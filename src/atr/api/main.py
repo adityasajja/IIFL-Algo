@@ -7,15 +7,16 @@ session exists — the API is a convenience layer, not a risk control.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
-from datetime import date, datetime
+import time
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import asyncio
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -29,11 +30,60 @@ logger = logging.getLogger("atr.api")
 
 @app.on_event("startup")
 async def _on_startup() -> None:
-    from atr.api.stream import get_broadcaster
     from atr.alerts.intelligent import get_intelligent_monitor
+    from atr.api.stream import get_broadcaster
+
     get_broadcaster().set_loop(asyncio.get_running_loop())
     await get_intelligent_monitor().start()
+    _warm_breadth_cache()
+    _warm_instrument_master()
 
+
+def _warm_instrument_master() -> None:
+    """Build the instrument index off the request path.
+
+    A cold build reads 3,000+ parquet footers and takes ~8s. Paying that on the
+    first watchlist or search request would look like a hung page, so it is paid
+    at startup on a daemon thread — the same pattern as the breadth cache below.
+    """
+    try:
+        from atr.instruments.service import get_instrument_master
+
+        get_instrument_master().warm()
+    except Exception as exc:  # noqa: BLE001 — best effort, never fatal
+        logger.warning("instrument master warm-up could not start: %s", exc)
+
+
+def _warm_breadth_cache() -> None:
+    """Compute the 5-session breadth series once, off the request path.
+
+    Scoring a universe sample five times takes ~15s. Paying that on the first
+    dashboard poll would look like a hung page, so it is paid at startup on a
+    daemon thread instead — by the time a browser connects, the answer is
+    usually already cached.
+    """
+    import threading
+
+    def work() -> None:
+        try:
+            import time as _t
+
+            t0 = _t.monotonic()
+            _breadth_trend("NSEEQ")
+            logger.info("breadth cache warmed in %.1fs", _t.monotonic() - t0)
+        except Exception as exc:  # noqa: BLE001 — best effort, never fatal
+            logger.warning("breadth warm-up failed: %s", exc)
+
+    threading.Thread(target=work, daemon=True, name="atr-breadth-warm").start()
+
+
+# Request identity, security headers, CSRF and rate limiting. Registered *before*
+# CORS so that CORS ends up outermost — Starlette wraps in reverse registration
+# order, and a 429 or 403 produced by our middleware must still carry CORS
+# headers or the browser reports a network failure instead of the real reason.
+from atr.api.middleware import install_middleware  # noqa: E402
+
+install_middleware(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,12 +98,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Versioned API surface. Registered here, before the SPA catch-all further down,
+# because FastAPI matches routes in registration order — a catch-all declared
+# first would swallow every /api/v1 path.
+from atr.api.routers import include_routers  # noqa: E402
+
+include_routers(app)
+
 
 class HealthResponse(BaseModel):
     status: str
     env: str
     database: bool
     session_active: bool
+    # The environment banner reads these. They live on /health rather than a
+    # separate call so the banner can never disagree with the rest of the
+    # header, and so it refreshes on the existing poll.
+    execution_mode: str = "paper"
+    kill_switch: bool = False
 
 
 class BacktestRequest(BaseModel):
@@ -94,7 +156,12 @@ def health() -> HealthResponse:
         pass
 
     return HealthResponse(
-        status="ok", env=settings.env, database=database, session_active=session_active
+        status="ok",
+        env=settings.env,
+        database=database,
+        session_active=session_active,
+        execution_mode=str(_risk_state().get("execution_mode", "paper")),
+        kill_switch=bool(_risk_state().get("kill_switch")),
     )
 
 
@@ -212,50 +279,119 @@ def positions() -> list[dict[str, Any]]:
 
 
 @app.post("/orders")
-def place_order(request: OrderRequest) -> dict[str, Any]:
-    from atr.core.enums import OrderType, Side
-    from atr.core.models import Order
+def place_order(request: OrderRequest, http_request: Request) -> dict[str, Any]:
+    """Place a manual order.
 
+    Rewired onto the OMS on 2026-09-14. Before this, the route called
+    ``broker.place_order()`` directly: no risk check, no idempotency, no event log,
+    and — because it built the ``Order`` itself — no single place where an order's
+    shape was decided. It now goes through the same
+    :class:`~atr.services.execution.ExecutionService` as every other path.
+
+    **Requires a platform account.** This is a deliberate tightening. An order
+    needs an owner (``orders.user_id`` is a non-null foreign key), and an
+    unattributed order is one nobody can be asked about. Read-only legacy routes
+    stay open; the routes that can move money now require the caller to be
+    identified, which is also what makes the per-account kill switch meaningful.
+    """
+    from atr.execution.oms import OrderDraft
+    from atr.services.execution import (
+        BrokerPortfolio,
+        ExecutionService,
+        VenueError,
+        iifl_venue,
+    )
+    from atr.services.orders import get_order_service
+
+    principal = _order_principal(http_request)
     _require_live_execution("Manual order")
+
     broker = _live_broker()
-    instrument = broker.master.find(request.symbol, request.exchange)
-    side = Side.BUY if request.quantity > 0 else Side.SELL
-    order = Order(
-        instrument=instrument,
+    side = "BUY" if request.quantity > 0 else "SELL"
+    draft = OrderDraft(
+        user_id=principal.user_id,
+        symbol=request.symbol,
         side=side,
         quantity=abs(request.quantity),
-        order_type=OrderType(request.order_type.upper()),
+        mode="LIVE",
+        exchange=request.exchange,
+        order_type=request.order_type,
         limit_price=request.price,
+        product=request.product,
+        requested_price=request.price,
         tag=request.tag,
-        broker_params={"product": request.product} if request.product else {},
     )
-    submitted = broker.place_order(order)
+    service = ExecutionService(
+        orders=get_order_service(
+            portfolio=BrokerPortfolio(broker), instruments=None
+        ),
+        venue=iifl_venue(broker),
+    )
+    try:
+        placed = service.place(draft)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except VenueError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
     _append_audit(
-        actor="operator",
+        actor=principal.username,
         action="order.place",
-        subject=f"{side.value} {abs(request.quantity)} {request.symbol}",
-        detail=f"{request.order_type} @ {request.price or 'MKT'} -> {submitted.status.value}",
+        subject=f"{side} {abs(request.quantity)} {request.symbol}",
+        detail=f"{request.order_type} @ {request.price or 'MKT'} -> {placed.status}",
     )
     return {
-        "order_id": submitted.order_id,
-        "broker_order_id": submitted.broker_order_id,
-        "status": submitted.status.value,
-        "reject_reason": submitted.reject_reason,
+        "order_id": placed.order_id,
+        "broker_order_id": placed.broker_order_id,
+        "status": placed.status,
+        "reject_reason": placed.reject_reason,
     }
 
 
 @app.post("/risk/kill-switch")
-def kill_switch(engaged: bool = True) -> dict[str, bool]:
-    """Engage the global kill switch. Blocks all new orders until cleared."""
-    store = _risk_state()
-    store["kill_switch"] = engaged
+def kill_switch(
+    engaged: bool = True,
+    reason: str = "",
+    actor: str = "operator",
+) -> dict[str, Any]:
+    """Engage or release the global kill switch. Blocks all new orders until cleared.
+
+    Rewired onto the durable state on 2026-09-14. It used to write an in-process
+    dict, which had two consequences: a restart silently re-armed trading, and
+    there was no single answer to "is the switch engaged?" because each route read
+    the dict itself. The switch is now stored in ``system_state`` and read through
+    ``RiskStateService``, which is also where the OMS risk gate gets it — so it
+    applies to every order path rather than to the routes that remembered to ask.
+
+    A reason is now required in **both** directions. Releasing is arguably the more
+    consequential of the two: it re-enables trading, and a release with no recorded
+    reason is indistinguishable from someone clearing it by accident.
+    """
+    from atr.services.risk import RiskStateError, RiskStateService
+
+    if not reason.strip():
+        raise HTTPException(
+            400,
+            detail={
+                "detail": (
+                    "changing the kill switch requires a reason — it is recorded in "
+                    "the audit trail"
+                ),
+                "code": "reason_required",
+            },
+        )
+    try:
+        state = RiskStateService().set_kill_switch(engaged, reason=reason, actor=actor)
+    except RiskStateError as exc:
+        raise HTTPException(exc.status, detail={"detail": str(exc), "code": exc.code}) from exc
+
     _append_audit(
-        actor="operator",
+        actor=actor,
         action="kill_switch.engage" if engaged else "kill_switch.release",
         subject="global",
-        detail="all new orders blocked" if engaged else "orders permitted again",
+        detail=reason.strip(),
     )
-    return {"kill_switch": engaged}
+    return {"kill_switch": state.kill_switch, "reason": reason.strip()}
 
 
 @app.get("/risk/execution-mode")
@@ -264,20 +400,11 @@ def get_execution_mode() -> dict[str, Any]:
 
     `paper` is the safe default: signals are generated and graded exactly as in
     live, the order path is exercised up to the broker boundary, but nothing is
-    transmitted. This is enforced in `_place_signal_orders`, not merely shown
-    here — a toggle that only changes a label is worse than none, because it
-    invites you to trust it.
+    transmitted. This is enforced in the execution service, not merely shown here
+    — a toggle that only changes a label is worse than none, because it invites
+    you to trust it.
     """
-    store = _risk_state()
-    mode = str(store.get("execution_mode", "paper"))
-    return {
-        "mode": mode,
-        "live": mode == "live",
-        "paper": mode == "paper",
-        "changed_at": store.get("mode_changed_at"),
-        "changed_by": store.get("mode_changed_by"),
-        "reason": store.get("mode_reason"),
-    }
+    return _risk_state()
 
 
 @app.post("/risk/execution-mode")
@@ -286,19 +413,30 @@ def set_execution_mode(mode: str, reason: str = "", actor: str = "operator") -> 
 
     Going *live* requires an explicit reason. That is deliberate friction: the
     transition that can lose real money should cost a sentence, and the
-    sentence is what shows up in the audit trail later.
+    sentence is what shows up in the audit trail later. Coming back to paper does
+    not require one — reducing risk must never be harder than taking it on.
     """
+    from atr.services.risk import RiskStateError, RiskStateService
+
     if mode not in {"paper", "live"}:
         raise HTTPException(400, "mode must be 'paper' or 'live'")
     if mode == "live" and not reason.strip():
-        raise HTTPException(400, "Switching to live requires a reason — it is recorded in the audit trail")
+        raise HTTPException(
+            400,
+            detail={
+                "detail": (
+                    "Switching to live requires a reason — it is recorded in the "
+                    "audit trail"
+                ),
+                "code": "reason_required",
+            },
+        )
 
-    store = _risk_state()
-    previous = str(store.get("execution_mode", "paper"))
-    store["execution_mode"] = mode
-    store["mode_changed_at"] = _utcnow_iso()
-    store["mode_changed_by"] = actor
-    store["mode_reason"] = reason.strip() or None
+    previous = _risk_state()["mode"]
+    try:
+        RiskStateService().set_execution_mode(mode, reason=reason, actor=actor)
+    except RiskStateError as exc:
+        raise HTTPException(exc.status, detail={"detail": str(exc), "code": exc.code}) from exc
 
     _append_audit(
         actor=actor,
@@ -309,7 +447,7 @@ def set_execution_mode(mode: str, reason: str = "", actor: str = "operator") -> 
     logger.warning(
         "execution mode %s -> %s by %s (%s)", previous, mode, actor, reason.strip() or "no reason"
     )
-    return get_execution_mode()
+    return _risk_state()
 
 
 @app.get("/risk/status")
@@ -379,6 +517,7 @@ def risk_status() -> dict[str, Any]:
 def self_learning_status() -> dict[str, Any]:
     """Returns the market regime, dynamic strategy weights, and training metrics."""
     from dataclasses import asdict
+
     from atr.research.self_learning import get_self_learning_engine
 
     engine = get_self_learning_engine()
@@ -434,16 +573,14 @@ def trade_signals_list(status: str | None = None) -> dict[str, Any]:
 @app.post("/trade-signals/scan")
 def trade_signals_scan() -> dict[str, Any]:
     """Trigger an immediate signal scan combining intelligent rules and quantitative research papers."""
-    from datetime import date
 
     from atr.alerts.channels import channels_from_settings
+    from atr.alerts.intelligent import evaluate_stock_signals, load_intelligent_config
     from atr.config.settings import get_settings
     from atr.data.history import load_cached
-    from atr.alerts.intelligent import evaluate_stock_signals, load_intelligent_config
-    from atr.scanner import UNIVERSE
     from atr.research.self_learning import get_self_learning_engine
+    from atr.scanner import UNIVERSE
     from atr.trade_signals import (
-        TradeSignalSettings,
         build_signal_from_intelligent,
         format_telegram_preview,
         get_queue,
@@ -543,13 +680,42 @@ def trade_signals_scan() -> dict[str, Any]:
 
 
 @app.post("/trade-signals/{signal_id}/execute")
-def trade_signals_execute(signal_id: str) -> dict[str, Any]:
-    """Approve a pending signal — places entry, stop-loss, and target orders."""
+def trade_signals_execute(signal_id: str, http_request: Request) -> dict[str, Any]:
+    """Approve a pending signal — places the entry, the stop-loss and the target.
+
+    Rewired onto the OMS and the execution service on 2026-09-14. Three things
+    were wrong with the previous version, and all three are why it now shares one
+    order path with everything else:
+
+    * ``OrderType.SL_MARKET`` **did not exist**. The route placed the entry order
+      at the exchange and *then* raised ``AttributeError`` on the stop-loss leg,
+      returning a 500 and leaving a live position with no stop and no target —
+      the single most dangerous state this platform can produce.
+    * Even had the name existed, that leg set ``limit_price`` and a
+      ``broker_params["triggerPrice"]`` that nothing reads. ``IiflBroker`` takes
+      the trigger from ``order.stop_price``, so the stop would have reached the
+      exchange with no trigger price.
+    * There was no idempotency guard, so clicking Execute twice placed the bracket
+      twice.
+
+    Each leg now carries a key derived from ``(signal_id, leg_index)``, so a retry
+    — whether a double click, a timeout the browser retried, or an operator
+    re-sending — returns the order that already exists instead of placing a
+    second bracket.
+    """
     from atr.alerts.channels import channels_from_settings
     from atr.config.settings import get_settings
-    from atr.core.enums import OrderType, Side
-    from atr.core.models import Order
+    from atr.execution.oms import OrderDraft, idempotency_key_for
+    from atr.services.execution import (
+        BrokerPortfolio,
+        ExecutionService,
+        VenueError,
+        iifl_venue,
+    )
+    from atr.services.orders import get_order_service
     from atr.trade_signals import format_telegram_confirm, get_queue
+
+    principal = _order_principal(http_request)
 
     q = get_queue()
     sig = q.get(signal_id)
@@ -558,82 +724,110 @@ def trade_signals_execute(signal_id: str) -> dict[str, Any]:
     if sig.status != "PENDING":
         raise HTTPException(400, f"Signal is {sig.status}, not PENDING")
 
-    # Kill switch check
-    risk = _risk_state()
-    if risk.get("kill_switch"):
-        raise HTTPException(403, "Kill switch is engaged — no orders allowed")
-
-    # Paper mode check — last gate before anything is transmitted.
+    # Paper mode check — last gate before anything is transmitted. The kill switch
+    # is no longer checked here: it lives in the OMS risk gate, so it applies to
+    # this route and to every other one without each having to remember.
     _require_live_execution("Signal execution")
+
+    broker = _live_broker()
+    service = ExecutionService(
+        orders=get_order_service(portfolio=BrokerPortfolio(broker)),
+        venue=iifl_venue(broker),
+    )
+
+    entry_side = "BUY" if sig.action == "BUY" else "SELL"
+    exit_side = "SELL" if sig.action == "BUY" else "BUY"
+    version = getattr(sig, "strategy_version", None)
+    strategy_id = getattr(sig, "strategy_id", None)
+
+    # (leg_index, side, order_type, limit_price, stop_price, tag)
+    legs = (
+        (0, entry_side, "MARKET", None, None, "ATR-SEMI"),
+        (1, exit_side, "SL-M", None, float(sig.stop_loss), "ATR-SL"),
+        (2, exit_side, "LIMIT", float(sig.target), None, "ATR-TGT"),
+    )
+
+    placed: dict[str, Any] = {}
+    for leg_index, side, order_type, limit_price, stop_price, tag in legs:
+        draft = OrderDraft(
+            user_id=principal.user_id,
+            symbol=sig.symbol,
+            side=side,
+            quantity=float(sig.quantity),
+            mode="LIVE",
+            exchange="NSEEQ",
+            order_type=order_type,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            product="CNC",
+            requested_price=float(sig.entry_price) if sig.entry_price else None,
+            signal_id=signal_id,
+            strategy_id=strategy_id,
+            strategy_version=version,
+            tag=tag,
+        )
+        key = idempotency_key_for(
+            user_id=principal.user_id,
+            strategy_id=strategy_id,
+            strategy_version=version,
+            signal_id=signal_id,
+            symbol=sig.symbol,
+            side=side,
+            leg_index=leg_index,
+        )
+        try:
+            result = service.place(draft, idempotency_key=key)
+        except ValueError as exc:
+            raise HTTPException(400, f"leg {leg_index} ({tag}): {exc}") from exc
+        except VenueError as exc:
+            # The leg that failed is named, and the ones already placed are
+            # returned, so an operator knows exactly what is live and what is not
+            # rather than being told only that something went wrong.
+            raise HTTPException(
+                502,
+                detail={
+                    "detail": f"leg {leg_index} ({tag}) failed: {exc}",
+                    "code": "venue_failed",
+                    "placed": placed,
+                },
+            ) from exc
+        placed[tag] = {
+            "order_id": result.order_id,
+            "status": result.status,
+            "broker_order_id": result.broker_order_id,
+            "reject_reason": result.reject_reason,
+            "duplicate": result.duplicate,
+        }
+
     _append_audit(
-        actor="operator",
+        actor=principal.username,
         action="signal.execute",
         subject=f"{sig.action} {sig.quantity} {sig.symbol}",
         detail=f"signal {signal_id} approved from the trade queue",
     )
 
-    broker = _live_broker()
-    side = Side.BUY if sig.action == "BUY" else Side.SELL
-    sl_side = Side.SELL if sig.action == "BUY" else Side.BUY
-
-    # 1. Entry order
-    entry_inst = broker.master.find(sig.symbol, "NSEEQ")
-    entry_order = Order(
-        instrument=entry_inst,
-        side=side,
-        quantity=sig.quantity,
-        order_type=OrderType.MARKET,
-        tag="ATR-SEMI",
-        broker_params={"product": "CNC"},
-    )
-    placed_entry = broker.place_order(entry_order)
-
-    # 2. Stop-loss order (SL-M)
-    sl_order = Order(
-        instrument=entry_inst,
-        side=sl_side,
-        quantity=sig.quantity,
-        order_type=OrderType.SL_MARKET,
-        limit_price=sig.stop_loss,
-        tag="ATR-SL",
-        broker_params={"product": "CNC", "triggerPrice": sig.stop_loss},
-    )
-    placed_sl = broker.place_order(sl_order)
-
-    # 3. Target limit order
-    tgt_order = Order(
-        instrument=entry_inst,
-        side=sl_side,
-        quantity=sig.quantity,
-        order_type=OrderType.LIMIT,
-        limit_price=sig.target,
-        tag="ATR-TGT",
-        broker_params={"product": "CNC"},
-    )
-    placed_tgt = broker.place_order(tgt_order)
-
     q.mark_active(
         signal_id,
-        placed_entry.broker_order_id or "",
-        placed_sl.broker_order_id or "",
-        placed_tgt.broker_order_id or "",
+        placed["ATR-SEMI"]["broker_order_id"] or "",
+        placed["ATR-SL"]["broker_order_id"] or "",
+        placed["ATR-TGT"]["broker_order_id"] or "",
     )
 
-    # Telegram confirmation
     channels = channels_from_settings(get_settings())
     header, body = format_telegram_confirm(sig)
     for ch in channels:
         try:
             if ch.send(header, body):
                 break
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - a notification must not undo a placement
+            logger.debug("telegram confirm failed for signal %s", signal_id)
 
     return {
         "signal_id": signal_id,
-        "entry_order": placed_entry.broker_order_id,
-        "sl_order": placed_sl.broker_order_id,
-        "target_order": placed_tgt.broker_order_id,
+        "entry_order": placed["ATR-SEMI"]["broker_order_id"],
+        "sl_order": placed["ATR-SL"]["broker_order_id"],
+        "target_order": placed["ATR-TGT"]["broker_order_id"],
+        "orders": placed,
     }
 
 
@@ -732,7 +926,7 @@ def alert_test() -> dict[str, Any]:
 # ----------------------------------------------------------------------
 @app.get("/alerts/intelligent/config")
 def get_intelligent_alert_config() -> dict[str, Any]:
-    from atr.alerts.intelligent import load_intelligent_config, get_intelligent_monitor
+    from atr.alerts.intelligent import get_intelligent_monitor, load_intelligent_config
     cfg = load_intelligent_config()
     status = get_intelligent_monitor().get_status()
     return {
@@ -745,9 +939,9 @@ def get_intelligent_alert_config() -> dict[str, Any]:
 def update_intelligent_alert_config(body: dict[str, Any]) -> dict[str, Any]:
     from atr.alerts.intelligent import (
         IntelligentAlertConfig,
+        get_intelligent_monitor,
         load_intelligent_config,
         save_intelligent_config,
-        get_intelligent_monitor,
     )
     current = load_intelligent_config().model_dump()
     current.update(body)
@@ -829,11 +1023,51 @@ def briefing_send() -> dict[str, Any]:
 
 # ----------------------------------------------------------------------
 def _risk_state() -> dict[str, Any]:
-    global _STATE
-    return _STATE
+    """The kill switch and execution mode, read from the durable store.
+
+    This used to return a module-level dict. Two things were wrong with that: a
+    restart silently re-armed trading and dropped the platform back to paper, and
+    there was no single answer to "is the kill switch engaged?" because every
+    route read the dict itself — the manual order route never asked at all.
+
+    It is now a *view* over ``atr.services.risk.RiskStateService``, which is the
+    same state the OMS risk gate reads. One source of truth, so the switch applies
+    everywhere rather than to the routes that remembered.
+
+    A read failure returns the safe answer (paper, switch engaged = False is
+    deliberately *not* the fallback for the switch — see below).
+    """
+    from atr.services.risk import RiskStateService
+
+    try:
+        snapshot = RiskStateService().snapshot()
+    except Exception:  # noqa: BLE001 - an unreadable store must not 500 the dashboard
+        logger.exception("could not read the risk state; reporting the safe default")
+        # Paper, because an unreadable mode must never read as "live". The kill
+        # switch defaults to False because `_require_live_execution` already
+        # refuses to transmit in paper mode, so nothing can be sent anyway — and
+        # reporting it as engaged would misrepresent what an operator did.
+        return {"mode": "paper", "live": False, "paper": True,
+                "changed_at": None, "changed_by": None, "reason": None}
+    return {
+        "mode": snapshot.execution_mode,
+        "live": snapshot.live,
+        "paper": not snapshot.live,
+        "changed_at": snapshot.changed_at,
+        "changed_by": snapshot.changed_by,
+        "reason": snapshot.reason,
+        # Legacy key names kept so existing readers and the dashboard do not break.
+        "execution_mode": snapshot.execution_mode,
+        "kill_switch": snapshot.kill_switch,
+        "mode_changed_at": snapshot.changed_at,
+        "mode_changed_by": snapshot.changed_by,
+        "mode_reason": snapshot.reason,
+    }
 
 
-_STATE: dict[str, Any] = {"kill_switch": False, "execution_mode": "paper"}
+def _kill_switch_engaged() -> bool:
+    """Whether the global kill switch is on. Read through the durable store."""
+    return bool(_risk_state().get("kill_switch", False))
 
 # Append-only audit log. Every action that changes what the system will do to
 # real money lands here, with who and why. Kept as a file rather than in-memory
@@ -842,9 +1076,9 @@ _AUDIT_PATH = Path("data/audit/audit.jsonl")
 
 
 def _utcnow_iso() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _append_audit(*, actor: str, action: str, subject: str, detail: str | None = None) -> dict[str, Any]:
@@ -889,18 +1123,17 @@ def get_audit(limit: int = 200) -> dict[str, Any]:
 def _authed_client():
     """IIFL client with a restored session. Works in any env — market data
     and other read APIs don't need paper/live mode (only order placement
-    goes through the `_live_broker` gate below)."""
-    from atr.brokers.iifl.client import IiflClient
+    goes through the `_live_broker` gate below).
 
-    settings: Settings = get_settings()
-    client = IiflClient(
-        app_key=settings.iifl_app_key,
-        app_secret=settings.iifl_app_secret,
-        base_url=settings.iifl_base_url,
-    )
-    if client.restore_session() is None:
-        raise HTTPException(401, "no active IIFL session — run `atr login`")
-    return client
+    Delegates to `atr.services.broker_access.authed_client`, which is the one place
+    that knows how to build and authenticate a client.
+    """
+    from atr.services.broker_access import BrokerUnavailable, authed_client
+
+    try:
+        return authed_client()
+    except BrokerUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 @app.get("/scan")
@@ -1763,10 +1996,573 @@ def validation_report() -> dict[str, Any]:
     return payload
 
 
+_EPISODIC_VALIDATION_PATH = Path("data/self_learning/episodic_pivot_validation.json")
+_EPISODIC_PREMISE_PATH = Path("data/self_learning/episodic_pivot_premise.json")
+
+
+@app.get("/validation/episodic-pivot")
+def episodic_pivot_report() -> dict[str, Any]:
+    """Pradeep Bonde's Episodic Pivot, measured rather than quoted.
+
+    Serves two scripts together because either alone invites the wrong
+    conclusion. ``episodic_pivot_premise.json`` measures whether the playbook's
+    raw material — routine 20–40% gaps and 100–300% repricings — exists on the
+    universe at all; ``episodic_pivot_validation.json`` scores the rules out of
+    sample. A "no trades" verdict means something entirely different depending
+    on which of the two came up empty, so the panel shows both.
+    """
+    if not _EPISODIC_VALIDATION_PATH.exists():
+        return {
+            "available": False,
+            "hint": (
+                "run: .venv/Scripts/python.exe scripts/research_episodic_pivot.py "
+                "&& .venv/Scripts/python.exe scripts/validate_episodic_pivot.py"
+            ),
+        }
+    try:
+        payload = json.loads(_EPISODIC_VALIDATION_PATH.read_text(encoding="utf8"))
+    except (OSError, ValueError) as exc:
+        return {"available": False, "error": str(exc)}
+
+    if _EPISODIC_PREMISE_PATH.exists():
+        try:
+            payload["premise"] = json.loads(
+                _EPISODIC_PREMISE_PATH.read_text(encoding="utf8")
+            )
+        except (OSError, ValueError):
+            pass
+
+    payload["available"] = True
+    return payload
+
+
+_ALPHA_HUNT_PATHS = {
+    "nifty50": Path("data/self_learning/alpha_hunt_nifty50.json"),
+    "midcap150": Path("data/self_learning/alpha_hunt_midcap150.json"),
+    "smallcap250": Path("data/self_learning/alpha_hunt_smallcap250.json"),
+}
+
+
+@app.get("/validation/alpha-hunt")
+def alpha_hunt_report() -> dict[str, Any]:
+    """Pre-registered candidate edges, each against a null that removes only its signal.
+
+    One JSON per universe because the runs are long enough to want running in
+    parallel; merged here so the dashboard reads one payload. The
+    ``pre_registered`` block is carried through deliberately — a candidate list
+    fixed *after* seeing results is not a test, and the reader should be able to
+    see that the priors and grids were written down first.
+    """
+    present = {u: p for u, p in _ALPHA_HUNT_PATHS.items() if p.exists()}
+    if not present:
+        return {
+            "available": False,
+            "hint": "run: .venv/Scripts/python.exe scripts/research_alpha_hunt.py",
+        }
+
+    merged: dict[str, Any] = {"available": True, "universes": {}, "pre_registered": {},
+                              "config": {}, "generated_at": None}
+    for _universe, path in present.items():
+        try:
+            payload = json.loads(path.read_text(encoding="utf8"))
+        except (OSError, ValueError) as exc:
+            merged.setdefault("errors", {})[str(path)] = str(exc)
+            continue
+        merged["universes"].update(payload.get("universes", {}))
+        merged["pre_registered"].update(payload.get("pre_registered", {}))
+        merged["config"].update(payload.get("config", {}))
+        generated = payload.get("generated_at")
+        if generated and (merged["generated_at"] is None or generated > merged["generated_at"]):
+            merged["generated_at"] = generated
+    return merged
+
+
+#: Findings from the factor research programme, written by
+#: ``scripts/research_honest_verdicts.py``. Each entry is an ``Evidence`` record
+#: rendered with its credibility verdict attached.
+_EVIDENCE_PATH = Path("data/signals/evidence.json")
+
+
+@app.get("/evidence")
+def evidence_report() -> dict[str, Any]:
+    """Measured findings, each with the credibility verdict that reads it.
+
+    This endpoint exists because a backtest number on its own is not evidence.
+    The results served here were each individually correct and collectively
+    misleading when first produced: a +480% index that was really +124% once
+    universe selection was removed, and a "factor" that was beta in disguise.
+
+    Nothing here should be presented to a user as an opportunity without the
+    verdict travelling with it, so the payload keeps them in one record.
+    """
+    if not _EVIDENCE_PATH.exists():
+        return {
+            "available": False,
+            "hint": (
+                "run: .venv/Scripts/python.exe scripts/research_honest_verdicts.py"
+            ),
+        }
+    try:
+        payload = json.loads(_EVIDENCE_PATH.read_text(encoding="utf8"))
+    except (OSError, ValueError) as exc:
+        return {"available": False, "error": str(exc)}
+
+    findings = payload.get("findings", [])
+    payload["available"] = True
+    payload["credible_count"] = sum(
+        1 for f in findings if f.get("verdict", {}).get("credible")
+    )
+    payload["total"] = len(findings)
+    return payload
+
+
 # ----------------------------------------------------------------------
 # Portfolio & quotes — the broker's own view
 # ----------------------------------------------------------------------
 _PORTFOLIO_SECTIONS = ("limits", "positions", "holdings", "orders", "trades")
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary(exchange: str = "NSEEQ") -> dict[str, Any]:
+    """Everything the dashboard KPI strip needs, in one call.
+
+    Four numbers, each with the daily series behind it so the UI can draw a
+    sparkline without a second round trip:
+
+      day_pnl      — change in open positions since yesterday's close
+      win_rate     — fraction of the last 30 *closed* trades that made money
+      drawdown     — current equity vs the running peak of the trade history
+      breadth      — share of the universe in an uptrend, last 5 sessions
+
+    Broker calls are memoised for a few seconds: this is polled every 30s and
+    two IIFL round trips per poll is pure waste. The TTL is short enough that
+    the number still moves visibly during a session.
+    """
+    global _SUMMARY_CACHE
+
+    now = time.monotonic()
+    if (
+        _SUMMARY_CACHE.get("data") is not None
+        and _SUMMARY_CACHE.get("exchange") == exchange.upper()
+        and now - float(_SUMMARY_CACHE.get("at") or 0) < _SUMMARY_TTL
+    ):
+        return _SUMMARY_CACHE["data"]
+
+    out: dict[str, Any] = {"as_of": _utcnow_iso(), "exchange": exchange.upper()}
+
+    # ── positions → day P&L ───────────────────────────────────────────────
+    positions: list[dict[str, Any]] = []
+    try:
+        client = _authed_client()
+        try:
+            payload = client.positions()
+            err = _broker_error(payload)
+            if not err:
+                positions = [_clean(r) for r in _broker_rows(payload) if not _empty_state(r)]
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+
+        # Resolve prior closes once, up front: the broker omits them, so fall
+        # back to the local daily cache. Doing it before the loop keeps the
+        # per-position work trivial and avoids a cache read per row.
+        held = [
+            str(_pick(p, "tradingSymbol", "symbol", "Symbol",
+                      "trading_symbol", default=""))
+            for p in positions
+            if float(_pick(p, "netQuantity", "NetQuantity", "quantity",
+                           "qty", "Quantity", default=0) or 0) != 0
+        ]
+        held_symbols = [s for s in held if s]
+        cache_closes = _prior_closes(held_symbols, exchange) if held_symbols else {}
+
+        total = day = invested = 0.0
+        counted = no_prev = from_cache = 0
+        for p in positions:
+            qty = float(_pick(p, "netQuantity", "NetQuantity", "quantity",
+                              "qty", "Quantity", default=0) or 0)
+            if qty == 0:
+                continue          # mirror IiflBroker.positions(): flat is not a position
+            last = float(_pick(p, "ltp", "LTP", "lastTradedPrice", "lastPrice",
+                               "last_price", default=0) or 0)
+            avg = float(_pick(p, "averagePrice", "AveragePrice", "avgPrice",
+                              "avg_price", default=0) or 0)
+            # Prefer whatever the broker sent; otherwise use the cached prior
+            # close. Never fall back to the entry price — that reports "no
+            # change today" for a book that may be moving hard.
+            sym = str(_pick(p, "tradingSymbol", "symbol", "Symbol",
+                            "trading_symbol", default=""))
+            prev = _pick(p, "close", "prev_close", "previous_close",
+                         "previousClose", "prevClose", default=None)
+            if prev is None:
+                prev = cache_closes.get(sym.upper())
+                if prev is not None:
+                    from_cache += 1
+            invested += qty * avg
+            total += qty * last
+            counted += 1
+            try:
+                prev_f = float(prev)
+            except (TypeError, ValueError):
+                prev_f = None
+            # Sanity-bound the prior close. A price feed and a daily cache can
+            # disagree wildly (different symbol in the master, unadjusted vs
+            # adjusted series, a stale file), and a mismatch turns Day P&L into
+            # fiction — a fixture test produced "+52.99% in one day" this way.
+            # A real session rarely moves a large cap past ±35%; beyond that,
+            # treat the baseline as unusable rather than reporting it.
+            if prev_f is not None and last > 0 and prev_f > 0:
+                move = abs(last - prev_f) / prev_f
+                if move > 0.35:
+                    logger.warning(
+                        "discarding prior close for %s: cached %.2f vs live %.2f "
+                        "is a %.1f%% gap, which is more likely a bad baseline "
+                        "than a real move",
+                        sym or "(unnamed)", prev_f, last, move * 100.0,
+                    )
+                    prev_f = None
+            if prev_f is not None:
+                day += qty * (last - prev_f)
+            else:
+                no_prev += 1
+
+        out["positions"] = {
+            "count": counted,
+            "value": round(total, 2),
+            "invested": round(invested, 2),
+            "day_pnl": round(day, 2),
+            # True only when there is a book AND every counted position had a
+            # usable prior close (broker-sent or cache-resolved). An empty book
+            # reports True, not False: with nothing held, "0 change today" is a
+            # complete and correct answer, whereas False would imply data is
+            # missing. Callers branch on `count` first.
+            "day_pnl_complete": counted == 0 or no_prev == 0,
+            # How many prior closes had to come from the local cache rather
+            # than the broker. Non-zero explains why Day P&L is present at all;
+            # equal to `count` means every baseline is ours, not IIFL's.
+            "day_pnl_from_cache": from_cache,
+            "day_pnl_pct": round((day / invested * 100.0) if invested else 0.0, 3),
+            "unrealized_pnl": round(total - invested, 2),
+            "last_flat_at": _last_flat_at(positions),
+        }
+    except Exception as exc:  # noqa: BLE001
+        out["positions"] = {"count": 0, "error": str(exc)[:200]}
+
+    # ── trade book → win rate + drawdown ──────────────────────────────────
+    try:
+        client = _authed_client()
+        try:
+            payload = client.trades()
+            err = _broker_error(payload)
+            trades = [] if err else [_clean(r) for r in _broker_rows(payload)]
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+        out["performance"] = _performance_from_trades(trades)
+    except Exception as exc:  # noqa: BLE001
+        out["performance"] = {"error": str(exc)[:200], "trades": 0}
+
+    # ── breadth trend over the last 5 sessions ────────────────────────────
+    # `load_cached` reads 2,672 parquets (~6s). It must only be paid on a
+    # genuine cache miss, so the cache check happens *inside* the helper and
+    # the frames are loaded there rather than here.
+    try:
+        out["breadth"] = _breadth_trend(exchange.upper())
+    except Exception as exc:  # noqa: BLE001
+        out["breadth"] = {"error": str(exc)[:200], "series": []}
+
+    _SUMMARY_CACHE = {"data": out, "at": now, "exchange": exchange.upper()}
+    return out
+
+
+_SUMMARY_CACHE: dict[str, Any] = {"data": None, "at": 0.0, "exchange": ""}
+_SUMMARY_TTL = 20.0   # seconds; shorter than the UI's 30s poll, so it still moves
+
+
+def _pick(row: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """First present, non-empty value among `keys`.
+
+    Mirrors the identical helper in `atr.brokers.iifl.broker` so the two
+    layers resolve IIFL's polymorphic field names the same way.
+    """
+    for key in keys:
+        if key in row and row[key] not in (None, ""):
+            return row[key]
+    return default
+
+
+def _last_flat_at(positions: list[dict[str, Any]]) -> str | None:
+    """When the book was last empty, if the broker tells us.
+
+    Not every IIFL payload carries a timestamp on a flat book, so this is
+    best-effort — the UI falls back to "no record" rather than inventing one.
+    """
+    for p in positions:
+        for key in ("last_flat_at", "flat_at", "as_of", "updated_at"):
+            if p.get(key):
+                return str(p[key])
+    return None
+
+
+_PNL_KEYS = ("realized_pnl", "realised_pnl", "pnl", "net_pnl", "profit")
+_TRADE_TS_KEYS = ("ts", "time", "trade_time", "fill_time", "order_time", "date")
+
+
+def _trade_day(trade: dict[str, Any]) -> str | None:
+    """Calendar date (YYYY-MM-DD) of a closed trade, or None if unreadable.
+
+    IIFL nests the fill timestamp under several field names. Return None
+    rather than today's date on failure: silently bucketing an undated trade
+    into "now" would make a stale book look freshly active.
+    """
+    raw = None
+    for key in _TRADE_TS_KEYS:
+        if trade.get(key):
+            raw = trade[key]
+            break
+    if raw is None:
+        return None
+    text = str(raw)
+    # Accept ISO ("2026-09-11T09:32:00+05:30") and epoch seconds alike.
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    with contextlib.suppress(TypeError, ValueError, OSError):
+        ts = float(text)
+        if ts > 1e11:          # milliseconds
+            ts /= 1000.0
+        return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%d")
+    return None
+
+
+def _performance_from_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """Win rate over the last 30 closed trades, plus peak-to-now drawdown.
+
+    Trades arrive newest-first from IIFL. Realised P&L is read from whichever
+    of the several plausible field names is present; a trade with none is
+    skipped rather than counted as a loss, because counting an unknown as a
+    loss would understate the win rate and mislead in the opposite direction.
+    """
+    realised: list[float] = []
+    for t in trades:
+        for key in _PNL_KEYS:
+            if t.get(key) is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    realised.append(float(t[key]))
+                break
+
+    window = realised[:30]
+    wins = sum(1 for p in window if p > 0)
+    losses = sum(1 for p in window if p < 0)
+
+    # Equity path from realised results, oldest → newest, to find the peak.
+    equity, peak, max_dd, curve = 0.0, 0.0, 0.0, []
+    for p in reversed(realised):
+        equity += p
+        peak = max(peak, equity)
+        dd = (equity - peak) / abs(peak) * 100.0 if peak else 0.0
+        max_dd = min(max_dd, dd)
+        curve.append(round(equity, 2))
+    current_dd = (equity - peak) / abs(peak) * 100.0 if peak else 0.0
+
+    # Sparkline: cumulative realised P&L sampled over the last 7 *sessions*,
+    # not the last 7 fills. Slicing `realised[:7]` would draw a line through
+    # seven trades in one afternoon and label it a week. Bucket by calendar
+    # date and carry the running total forward so a quiet session reads flat
+    # rather than collapsing the window. Oldest → newest, matching the curve.
+    by_day: dict[str, float] = {}
+    for t in trades:
+        day = _trade_day(t)
+        if day is None:
+            continue
+        for key in _PNL_KEYS:
+            if t.get(key) is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    by_day[day] = by_day.get(day, 0.0) + float(t[key])
+                break
+    recent: list[float] = []
+    if by_day:
+        run = 0.0
+        for day in sorted(by_day)[-7:]:
+            run += by_day[day]
+            recent.append(round(run, 2))
+
+    return {
+        "trades": len(realised),
+        "win_rate": round(wins / len(window) * 100.0, 1) if window else None,
+        "wins": wins,
+        "losses": losses,
+        "sample": len(window),
+        "realized_pnl": round(sum(realised), 2),
+        "current_drawdown_pct": round(current_dd, 2),
+        "max_drawdown_pct": round(max_dd, 2),
+        "sparkline": recent,
+        "equity_curve": curve[-40:],
+    }
+
+
+def _prior_closes(symbols: list[str], exchange: str = "NSEEQ") -> dict[str, float]:
+    """Previous session's close per symbol, from the local daily cache.
+
+    IIFL's position rows carry no prior close, so Day P&L would otherwise be
+    unavailable for every real book. The daily parquets already hold it.
+
+    Two guards, because a stale prior close produces a confidently wrong
+    number rather than a missing one:
+
+    * The cached frame's last date must be the *most recent completed* trading
+      session, not merely "recent". If the cache is more than 4 days behind
+      the newest frame we can see, we return nothing and let the caller report
+      Day P&L as unknown. A number that is silently three weeks old is worse
+      than `n/a`.
+    * Only the named symbols are read, so this stays cheap.
+    """
+    if not symbols:
+        return {}
+    import datetime as _dt
+
+    from atr.data.history import load_cached
+
+    wanted = [s.upper() for s in symbols]
+    try:
+        frames = load_cached(exchange=exchange, symbols=wanted)
+    except Exception as exc:  # noqa: BLE001 — a cache miss must not break the page
+        logger.warning("prior-close lookup failed for %d symbols: %s", len(wanted), exc)
+        return {}
+
+    latest: dict[str, tuple[str, float]] = {}
+    for sym, df in frames.items():
+        day = _frame_last_date(df)
+        if day is None or getattr(df, "empty", True):
+            continue
+        try:
+            close = float(df["close"].iloc[-1])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if close != close or close <= 0:   # NaN or nonsense
+            continue
+        latest[sym.upper()] = (day, close)
+
+    if not latest:
+        return {}
+
+    newest = max(day for day, _ in latest.values())
+    try:
+        newest_d = _dt.date.fromisoformat(newest)
+    except ValueError:
+        return {}
+    today = _dt.datetime.now(_dt.UTC).date()
+    # > 4 calendar days behind = a weekend plus a holiday, or a stale cache.
+    if (today - newest_d).days > 4:
+        logger.warning(
+            "daily cache last session is %s (%d days old) — reporting Day P&L "
+            "as unknown rather than serving a stale baseline",
+            newest, (today - newest_d).days,
+        )
+        return {}
+
+    return {sym: close for sym, (day, close) in latest.items() if day == newest}
+
+
+def _frame_last_date(df: Any) -> str | None:
+    """Last calendar date in a cached history frame.
+
+    `load_cached` returns a RangeIndex, with the timestamps in a `ts` column —
+    so this reads the column, not the index. Returns None (not "") when there
+    is genuinely no timestamp, so the caller can tell the two apart.
+    """
+    try:
+        if "ts" in getattr(df, "columns", []):
+            ts = df["ts"].iloc[-1]
+        else:
+            ts = df.index[-1]
+        import pandas as pd
+
+        return str(pd.Timestamp(ts).date())
+    except Exception:  # noqa: BLE001 — a missing date must not break breadth
+        return None
+
+
+def _breadth_trend(exchange: str = "NSEEQ") -> dict[str, Any]:
+    """Share of the universe above its trend, for each of the last 5 sessions.
+
+    Measured the same way the scanner measures it — same frames, same
+    `score_frame` — so this cannot drift from the number on the scanner page.
+
+    Three things make it fast enough to sit on a 30s dashboard poll:
+      * results are cached for `_BREADTH_TTL`, because breadth only changes
+        when a new session closes;
+      * the cache check happens **before** `load_cached`, so the 6s parquet
+        read is only paid on a genuine miss;
+      * it samples the universe rather than scoring all 2,672 names. Scoring
+        every symbol five times costs ~55s, which is not a dashboard call.
+        A 600-name sample puts the standard error near 2pp — fine for a
+        sparkline whose whole job is "expanding or contracting".
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    cached = _BREADTH_CACHE.get("data")
+    if (
+        cached is not None
+        and _BREADTH_CACHE.get("exchange") == exchange.upper()
+        and now - float(_BREADTH_CACHE.get("as_of") or 0) < _BREADTH_TTL
+    ):
+        return cached
+
+    from atr.data.history import load_cached
+    from atr.scanner import score_frame
+
+    frames = load_cached(exchange.upper())
+    if not frames:
+        raise ValueError("history cache is empty — run `atr history sync`")
+
+    series: list[float] = []
+    dates: list[str] = []
+    sample = sorted(frames.items())[:_BREADTH_SAMPLE]
+
+    for back in range(4, -1, -1):
+        up = total = 0
+        as_of: str | None = None
+        for _symbol, df in sample:
+            if df is None or len(df) <= back + 60:
+                continue
+            window = df.iloc[: len(df) - back] if back else df
+            try:
+                row = score_frame("_", window)
+            except Exception:  # noqa: BLE001 — thin/odd histories just don't count
+                continue
+            total += 1
+            if row.get("trend") == "UP":
+                up += 1
+            if as_of is None:
+                # The frame index is a RangeIndex; the real timestamp lives in
+                # the `ts` column. Reading `.index[-1].date()` silently returns
+                # "" (RangeIndex holds ints) — a plausible-looking empty string
+                # rather than an error.
+                as_of = _frame_last_date(window)
+        if total:
+            series.append(round(up / total * 100.0, 1))
+            dates.append(as_of or "")
+
+    delta = (series[-1] - series[0]) if len(series) >= 2 else None
+    result = {
+        "series": series,
+        "dates": dates,
+        "current": series[-1] if series else None,
+        "delta_5d": round(delta, 2) if delta is not None else None,
+        "expanding": None if delta is None else delta > 0,
+        "sampled": min(len(sample), _BREADTH_SAMPLE),
+        "universe": len(frames),
+    }
+    _BREADTH_CACHE["data"] = result
+    _BREADTH_CACHE["as_of"] = now
+    _BREADTH_CACHE["exchange"] = exchange.upper()
+    return result
+
+
+_BREADTH_CACHE: dict[str, Any] = {"data": None, "as_of": 0.0, "exchange": ""}
+_BREADTH_TTL = 900.0      # 15 min — breadth moves once a session
+_BREADTH_SAMPLE = 600     # ~2pp standard error on a 50% proportion
 
 
 @app.get("/portfolio")
@@ -1863,6 +2659,55 @@ def quote(symbols: str, exchange: str = "NSEEQ") -> dict[str, Any]:
     }
 
 
+def _watchlist_live_quotes(
+    symbols: list[str], exchange: str = "NSEEQ"
+) -> dict[str, dict[str, Any]]:
+    """Batch quote overlay for the watchlist table.
+
+    Returns ``{}`` on any failure — no broker session, a rejected IP, a broker
+    error — so the table degrades to cached closes per symbol instead of
+    blanking. A watchlist is a read-only view; losing live prices must not make
+    it unusable, and every affected row is marked ``stale`` so the reader knows.
+    """
+    try:
+        from atr.brokers.iifl.contracts import InstrumentMaster
+        from atr.scanner import resolve_conid
+
+        client = _authed_client()
+        master = InstrumentMaster(client)
+        master.load_cached([exchange.upper()])
+
+        legs: list[tuple[str, Any]] = []
+        resolved: list[str] = []
+        for symbol in symbols[:50]:
+            try:
+                legs.append((exchange.upper(), resolve_conid(master, symbol, exchange.upper())))
+                resolved.append(symbol)
+            except Exception:  # noqa: BLE001 - one unresolved symbol is not fatal
+                continue
+        if not legs:
+            return {}
+
+        payload = client.market_quotes(legs)
+        if _broker_error(payload):
+            return {}
+        rows = _broker_rows(payload)
+        return {
+            symbol: dict(row)
+            for symbol, row in zip(resolved, rows, strict=False)
+            if isinstance(row, dict)
+        }
+    except Exception as exc:  # noqa: BLE001 - live data is optional
+        logger.debug("live quote overlay unavailable: %s", exc)
+        return {}
+
+
+# Consumed by the watchlist router through ``request.app.state`` rather than an
+# import, because the router is imported *by* this module and importing back
+# would be circular.
+app.state.live_quote_provider = _watchlist_live_quotes
+
+
 # ----------------------------------------------------------------------
 # Local caches — what the engine has to work with offline
 # ----------------------------------------------------------------------
@@ -1935,14 +2780,51 @@ def instruments_status() -> dict[str, Any]:
 
 
 def _live_broker():
-    from atr.brokers.iifl.broker import IiflBroker
-    from atr.brokers.iifl.contracts import InstrumentMaster
+    """The broker that may place orders, via the shared access service.
 
-    settings: Settings = get_settings()
-    if settings.env == "dev":
-        raise HTTPException(403, "live endpoints disabled in dev — set ENV=paper|live")
-    client = _authed_client()
-    return IiflBroker(client, InstrumentMaster(client))
+    Delegates rather than building the client here: the construction of an
+    authenticated IIFL client used to live in this module, which meant the
+    reconciler — a service — would have had to reach into the transport layer for
+    one. `atr.services.broker_access` owns it now, and it owns the paper/live gate
+    with it, so "can this transmit?" has exactly one answer.
+    """
+    from atr.services.broker_access import BrokerUnavailable, live_broker
+
+    try:
+        return live_broker()
+    except BrokerUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+def _order_principal(request: Request):
+    """The account that owns an order placed through a legacy route.
+
+    The legacy order routes predate accounts. An order without an owner is not
+    something this platform can store — ``orders.user_id`` is a non-null foreign
+    key — and it is not something it *should* store: an unattributed order is one
+    nobody can be asked about, and the per-account kill switch has nothing to
+    switch.
+
+    So placing an order requires a platform account while read-only legacy routes
+    stay open. This is a deliberate tightening of behaviour, recorded in
+    ``docs/NEXT_STAGE_GAP_REPORT.md`` §4.2: the previous shape let an
+    unauthenticated request reach the exchange with no risk check.
+    """
+    from atr.api.deps import optional_principal
+
+    principal = optional_principal(request)
+    if principal is None or not getattr(principal, "user_id", None):
+        raise HTTPException(
+            401,
+            detail={
+                "detail": (
+                    "placing an order requires a platform account — sign in first. "
+                    "Read-only routes remain available without one."
+                ),
+                "code": "authentication_required_for_orders",
+            },
+        )
+    return principal
 
 
 def _require_live_execution(action: str = "order") -> None:
@@ -2084,7 +2966,7 @@ def login_callback(
         )
     return HTMLResponse(
         _LOGIN_CALLBACK_HTML
-        + f'<div class="card"><h1 class="ok">Logged in ✓</h1>'
+        + '<div class="card"><h1 class="ok">Logged in ✓</h1>'
         + f"<p>Client: <strong>{session.client_id}</strong></p>"
         + f"<p>Expires: <strong>{session.expires_at.strftime('%d-%b-%Y %H:%M')} IST</strong></p>"
         + '<p>You can close this tab and return to the dashboard.</p>'
@@ -2096,6 +2978,7 @@ def login_callback(
 async def ws_ticks(websocket: WebSocket) -> None:
     """Real-time market ticks stream over WebSocket."""
     import json
+
     from atr.api.stream import get_broadcaster
 
     broadcaster = get_broadcaster()
