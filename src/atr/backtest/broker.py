@@ -136,7 +136,11 @@ class SimulatedBroker:
             return []
 
         fill_price = self.slippage.apply(raw_price, order.side, order.instrument)
-        commission = self.commission.compute(qty, fill_price, order.instrument)
+        # `side` matters: stamp duty is buy-only and DP charges are sell-only,
+        # so a cost model that never sees the side cannot charge either.
+        commission = self.commission.compute(
+            qty, fill_price, order.instrument, side=order.side
+        )
 
         order.apply_fill(qty, fill_price)
         fill = Fill(
