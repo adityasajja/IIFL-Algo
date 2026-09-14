@@ -128,6 +128,66 @@ def fixed_price_source(prices: dict[str, float]) -> Callable[[str, str], float |
     return lambda symbol, exchange: table.get(symbol.upper())  # noqa: ARG005
 
 
+def live_tick_source(
+    broadcaster: Any | None = None,
+    *,
+    resolve: Callable[[], Any] | None = None,
+) -> Callable[[str, str], float | None]:
+    """The live tick stream's last traded price.
+
+    This is the difference between a paper account that trades and one that only
+    pretends to: with the daily cache as the price source, a paper fill happens at
+    yesterday's close and a resting limit order is re-evaluated against a price
+    that does not move. Every one of those orders either fills immediately or
+    never, and neither is what the order would have done at the exchange.
+
+    The broadcaster is **injected**, never imported. ``services`` sits below
+    ``api`` in this codebase's layering and ``tests/test_architecture.py`` enforces
+    that a service must not import the transport layer — so this module cannot
+    reach for :mod:`atr.api.stream` itself, not even inside a function. The API
+    layer owns that wiring (``atr.api.price_sources``) and passes the result in.
+
+    ``resolve`` is a zero-argument callable returning the broadcaster, for callers
+    that hold a *hook* to one rather than the object itself.
+    """
+    def source(symbol: str, exchange: str) -> float | None:  # noqa: ARG001
+        try:
+            if broadcaster is not None:
+                return broadcaster.latest_price(symbol)
+            if resolve is not None:
+                target = resolve()
+                return target.latest_price(symbol) if target is not None else None
+            return None
+        except Exception:  # noqa: BLE001 - a missing stream is "no price"
+            logger.debug("live tick lookup failed for %s", symbol)
+            return None
+
+    return source
+
+
+def fallback_price_source(
+    primary: Callable[[str, str], float | None],
+    secondary: Callable[[str, str], float | None],
+) -> Callable[[str, str], float | None]:
+    """Try ``primary``; use ``secondary`` only when it has no price.
+
+    The live source alone would refuse every fill outside market hours, which is
+    when most paper strategies are actually started. Falling back to the cache
+    keeps the account usable after the close, and the *order event* records the
+    price actually used, so a fill is never ambiguous about which source priced
+    it. Outside hours this is yesterday's close and the account behaves as it did
+    before the live feed existed — which is the correct degradation, not a
+    silent one.
+    """
+    def source(symbol: str, exchange: str) -> float | None:
+        price = primary(symbol, exchange)
+        if price is not None:
+            return price
+        return secondary(symbol, exchange)
+
+    return source
+
+
 # ===========================================================================
 # Matching
 # ===========================================================================
@@ -655,7 +715,14 @@ def _per_unit_slippage(order: dict[str, Any], price: float, side: Side) -> float
 
 
 def default_price_source() -> Callable[[str, str], float | None]:
-    """The price source the API uses for paper fills: the local daily cache close.
+    """The price source a running paper deployment fills against.
+
+    **Live ticks first, the daily cache as the fallback.** The cache alone is not
+    a price a paper trade can be judged on — it is yesterday's close, so a fill
+    happens at a level the market was never at and a resting limit order is
+    re-evaluated against a number that does not move. Live ticks alone would
+    refuse every fill when the feed is down or the market is closed, which is
+    when most paper strategies are actually started.
 
     A named function rather than an inline default, so a caller — a test, or an
     operator running paper against a different feed — can substitute a
@@ -663,17 +730,43 @@ def default_price_source() -> Callable[[str, str], float | None]:
     be in the operator's cache is not a testable fill, and "the test passed because
     the cache had data today" is not a test.
 
-    The live quote feed is the natural upgrade here and belongs to the same seam:
-    the matching rules do not care where the reference price came from, only that
-    a missing one is treated as missing.
+    Which source priced a fill is never ambiguous: the price actually used is
+    written to the order event, so the log carries the level rather than leaving
+    it to be re-derived from a feed that has since moved.
     """
-    return cached_close_source()
+    return fallback_price_source(
+        default_live_source(), cached_close_source()
+    )
+
+
+def default_live_source() -> Callable[[str, str], float | None]:
+    """The live tick source, or a source that never prices if none is wired.
+
+    The API layer calls :func:`atr.api.price_sources.install_live_source` at
+    startup to point this at the process-wide broadcaster. Until then — in a CLI
+    run, in a test, or if the stream failed to start — it returns nothing and
+    :func:`default_price_source` falls through to the daily cache, which is the
+    pre-existing behaviour rather than a crash or a fabricated price.
+    """
+    if _LIVE_SOURCE[0] is None:
+        return live_tick_source()
+    return _LIVE_SOURCE[0]
+
+
+#: Set once by the API layer. A one-slot registry rather than a module import,
+#: because the dependency runs the other way (api → services, never back).
+_LIVE_SOURCE: list[Callable[[str, str], float | None] | None] = [None]
+
+
+def install_live_source(source: Callable[[str, str], float | None] | None) -> None:
+    """Register the live price source. Called by the API layer at startup."""
+    _LIVE_SOURCE[0] = source
 
 
 def paper_venue(
     prices: Callable[[str, str], float | None] | None = None, **kwargs: Any
 ) -> PaperVenue:
-    """A :class:`PaperVenue` over the local daily cache unless told otherwise."""
+    """A :class:`PaperVenue` over live ticks (cache as fallback) unless told otherwise."""
     return PaperVenue(prices=prices or default_price_source(), **kwargs)
 
 
