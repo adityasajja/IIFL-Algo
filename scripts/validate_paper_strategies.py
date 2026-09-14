@@ -56,6 +56,7 @@ from atr.backtest.engine import BacktestConfig, BacktestEngine  # noqa: E402
 from atr.core.enums import AssetClass, Timeframe  # noqa: E402
 from atr.core.models import Bar, Instrument, MarketSnapshot  # noqa: E402
 from atr.data.base import ListFeed  # noqa: E402
+from atr.data.hygiene import drop_reverting_spikes  # noqa: E402
 from atr.execution.risk import RiskLimits  # noqa: E402
 from atr.research.validate import (  # noqa: E402
     ValidationConfig,
@@ -86,8 +87,14 @@ DEFAULT_UNIVERSE = (
 
 
 def load_series(symbols: list[str], exchange: str = "NSEEQ", min_bars: int = 500):
-    """Read cached parquets into per-symbol frames, each on its own timeline."""
+    """Read cached parquets into per-symbol frames, each on its own timeline.
+
+    Vendor glitches are dropped here rather than left for a strategy to trade on
+    — see :mod:`atr.data.hygiene`. The count is printed, not swallowed: a silent
+    repair is indistinguishable from a silent bug.
+    """
     series: dict[str, pd.DataFrame] = {}
+    dropped_total = 0
     for symbol in symbols:
         path = CACHE_ROOT / f"{symbol}.parquet"
         if not path.exists():
@@ -107,10 +114,19 @@ def load_series(symbols: list[str], exchange: str = "NSEEQ", min_bars: int = 500
             .drop_duplicates("ts", keep="last")
             .reset_index(drop=True)
         )
+        frame, dropped = drop_reverting_spikes(frame)
+        if len(dropped):
+            dropped_total += len(dropped)
+            dates = ", ".join(
+                f"{d:%Y-%m-%d}" for d in pd.to_datetime(dropped["ts"]).dt.date.unique()
+            )
+            print(f"  {symbol}: dropped {len(dropped)} corrupt bar(s) — {dates}")
         if len(frame) < min_bars:
             print(f"  skip {symbol}: {len(frame)} usable bars")
             continue
         series[symbol] = frame
+    if dropped_total:
+        print(f"  dropped {dropped_total} corrupt bar(s) in total")
     return series
 
 
@@ -133,11 +149,15 @@ def build_feed(series: dict[str, pd.DataFrame], exchange: str = "NSEEQ"):
     grid = sorted({ts for frame in series.values() for ts in frame["ts"]})
     index = pd.DatetimeIndex(sorted(set(grid)))
 
+    # Index once per symbol, not once per symbol per date. The obvious nesting
+    # calls `set_index` 129 x 1,567 = 202k times on the mid-cap universe, which
+    # is a minute of pure overhead for the same result.
+    indexed = {s: f.set_index("ts") for s, f in series.items()}
+
     rows: list[MarketSnapshot] = []
     for i, ts in enumerate(index):
         bars: dict[str, Bar] = {}
-        for symbol, frame in series.items():
-            frame = frame.set_index("ts")
+        for symbol, frame in indexed.items():
             if ts not in frame.index:
                 bars[symbol] = Bar(ts=ts.to_pydatetime(), open=float("nan"),
                                    high=float("nan"), low=float("nan"),
