@@ -38,9 +38,26 @@ export default function RiskPanel() {
   }, [load]);
 
   const toggle = async (engage: boolean) => {
+    // Required in both directions and recorded in the audit trail — releasing
+    // re-enables trading, so a silent release is the more dangerous of the two.
+    const reason = window.prompt(
+      engage
+        ? "Why are you engaging the kill switch? This is recorded in the audit trail."
+        : "Why are you releasing the kill switch? This is recorded in the audit trail.",
+      "",
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast({
+        title: "A reason is required",
+        description: "The kill switch cannot be changed without one.",
+        status: "error",
+      });
+      return;
+    }
     setBtn("loading");
     try {
-      await setKillSwitch(engage);
+      await setKillSwitch(engage, reason.trim());
       await load();
       setBtn("success");
       toast({

@@ -22,6 +22,7 @@ import { StatefulButton, type ButtonState } from "./components/ui/stateful-butto
 import { Switch } from "./components/ui/switch";
 import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
+import { RelativeTime } from "./lib/time";
 import {
   Activity,
   ArrowDownRight,
@@ -575,7 +576,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             <h3 className="text-sm font-bold text-white">Recent Intelligent Signals & Telegram Firings</h3>
           </div>
           <span className="text-[11px] text-[#787b86]">
-            Last evaluated: {intelStatus?.last_run ? new Date(intelStatus.last_run).toLocaleTimeString("en-IN") : "Ready"}
+            Last evaluated: {intelStatus?.last_run ? <RelativeTime value={intelStatus.last_run} /> : "Ready"}
           </span>
         </div>
 
@@ -622,7 +623,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                       Chart
                     </Button>
                     <span className="text-[11px] text-[#787b86]">
-                      {new Date(sig.ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                      <RelativeTime value={sig.ts} lead="relative" absolute={false} />
                     </span>
                   </div>
                 </div>
@@ -725,7 +726,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                     <span className="ml-2 text-[#787b86]">{e.message}</span>
                   </div>
                   <span className="text-[10px] text-[#787b86]">
-                    {new Date(e.ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    <RelativeTime value={e.ts} lead="relative" absolute={false} />
                   </span>
                 </div>
               ))}

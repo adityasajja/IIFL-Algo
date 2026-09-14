@@ -25,6 +25,8 @@ import { Switch } from "./components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { cn } from "./lib/utils";
 import ValidationPanel from "./ValidationPanel";
+import EpisodicPivotPanel from "./EpisodicPivotPanel";
+import AlphaHuntPanel from "./AlphaHuntPanel";
 
 type Source = "cache" | "fetch" | "synthetic";
 
@@ -277,7 +279,11 @@ export default function ResearchPanel({
       )}
 
       {view === "measured" ? (
-        <ValidationPanel />
+        <>
+          <ValidationPanel />
+          <EpisodicPivotPanel />
+          <AlphaHuntPanel />
+        </>
       ) : (
         <>
       {showExplainer ? (

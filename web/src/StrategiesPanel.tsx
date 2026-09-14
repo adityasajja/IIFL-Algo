@@ -4,6 +4,7 @@ import { getStrategies, type StrategyInfo, type ValidationState } from "./api";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
 import { Badge, Callout, fmtNum, fmtPct } from "./components/ui/stat";
 import { cn } from "./lib/utils";
+import { RelativeTime } from "./lib/time";
 
 /**
  * Strategies — decide.
@@ -95,7 +96,11 @@ export default function StrategiesPanel({ onOpenResearch }: { onOpenResearch: ()
           title="Registry"
           sub={
             asOf
-              ? `Validation last run ${new Date(asOf).toLocaleString()}`
+              ? (
+                <>
+                  Validation last run <RelativeTime value={asOf} />
+                </>
+              )
               : "No validation run on disk yet"
           }
         />

@@ -19,7 +19,9 @@ import {
   Briefcase,
   FlaskConical,
   Home,
+  ListChecks,
   LogIn,
+  LogOut,
   Palette,
   PanelLeft,
   Search,
@@ -28,30 +30,36 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import AlertsPanel from "./AlertsPanel";
+import AuthGate from "./AuthGate";
 import BacktestPanel from "./BacktestPanel";
 import ChartsPanel from "./ChartsPanel";
 import CustomScannerPanel from "./CustomScannerPanel";
 import ExecutionModePanel from "./ExecutionModePanel";
 import TradeSignalsPanel from "./TradeSignalsPanel";
+import WatchlistPanel from "./WatchlistPanel";
 import { Button } from "./components/ui/button";
 import { CommandPalette, type CommandItem } from "./components/ui/command-palette";
 import { GlobalTickerBar } from "./components/ui/global-ticker-bar";
+import { EnvironmentBanner } from "./components/ui/environment-banner";
 import { ThemeToggle } from "./components/ui/theme-toggle";
 import LoginBanner from "./LoginBanner";
 import PortfolioPanel from "./PortfolioPanel";
 import NotificationsPanel from "./NotificationsPanel";
 import OverviewPanel from "./OverviewPanel";
 import ResearchPanel from "./ResearchPanel";
+import EvidencePanel from "./EvidencePanel";
 import RiskPanel from "./RiskPanel";
 import StrategiesPanel from "./StrategiesPanel";
 import ScannerPanel from "./ScannerPanel";
 import SystemPanel from "./SystemPanel";
 import {
+  appLogout,
   getHealth,
   getLoginStatus,
   type Health,
   type LoginStatus,
 } from "./api";
+import { useSession } from "./lib/useSession";
 import {
   IconBell,
   IconBrief,
@@ -66,6 +74,7 @@ import { cn } from "./lib/utils";
 
 export type Tab =
   | "dashboard"
+  | "watchlist"
   | "markets"
   | "strategies"
   | "signals"
@@ -76,7 +85,7 @@ export type Tab =
 
 export type MarketsSub = "scanner" | "custom" | "charts";
 export type SignalsSub = "brief" | "alerts" | "queue";
-export type EvidenceSub = "research" | "measured" | "backtest";
+export type EvidenceSub = "research" | "measured" | "findings" | "backtest";
 export type TradingSub = "portfolio" | "mode";
 
 /**
@@ -97,6 +106,7 @@ const GROUPS: { label: string; items: { id: Tab; name: string; icon: (p: { size?
     label: "Observe",
     items: [
       { id: "dashboard", name: "Dashboard", icon: IconHome },
+      { id: "watchlist", name: "Watchlist", icon: ListChecks },
       { id: "markets", name: "Markets", icon: IconScan },
     ],
   },
@@ -126,6 +136,7 @@ const GROUPS: { label: string; items: { id: Tab; name: string; icon: (p: { size?
 
 const TITLES: Record<Tab, { title: string; sub: string }> = {
   dashboard: { title: "Dashboard", sub: "Where you stand right now" },
+  watchlist: { title: "Watchlist", sub: "Your own symbols, your own columns" },
   markets: { title: "Markets", sub: "Scanner and charts across 2600+ NSE names" },
   strategies: { title: "Strategies", sub: "What the system would do, and whether it has earned trust" },
   signals: { title: "Signals", sub: "Buy & sell triggers, quantitative rules, and the morning brief" },
@@ -135,8 +146,18 @@ const TITLES: Record<Tab, { title: string; sub: string }> = {
   system: { title: "System", sub: "History cache, contract files, broker session" },
 };
 
+/** Avatar tint per role, so authority is legible at a glance in the sidebar. */
+const ROLE_TONE: Record<string, string> = {
+  owner: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+  admin: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  trader: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  researcher: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  viewer: "bg-muted text-muted-foreground",
+};
+
 const VALID_TABS = new Set<Tab>([
   "dashboard",
+  "watchlist",
   "markets",
   "strategies",
   "signals",
@@ -149,6 +170,7 @@ const VALID_TABS = new Set<Tab>([
 /** Old tab ids → their new home. Keeps saved links and bookmarks working. */
 const LEGACY_TABS: Record<string, Tab> = {
   overview: "dashboard",
+  watchlists: "watchlist",
   scanner: "markets",
   charts: "markets",
   alerts: "signals",
@@ -291,11 +313,13 @@ function EvidenceTabContainer({
         options={[
           { id: "research" as EvidenceSub, label: "Walk-forward harness" },
           { id: "measured" as EvidenceSub, label: "Measured results" },
+          { id: "findings" as EvidenceSub, label: "Findings & verdicts" },
           { id: "backtest" as EvidenceSub, label: "In-sample backtest" },
         ]}
       />
       {sub === "research" && <ResearchPanel forcedTab={researchTab} onTabChange={setResearchTab} />}
       {sub === "measured" && <ResearchPanel forcedTab="measured" onTabChange={setResearchTab} />}
+      {sub === "findings" && <EvidencePanel />}
       {sub === "backtest" && <BacktestPanel />}
     </div>
   );
@@ -346,6 +370,27 @@ export default function App() {
   const [tradingSub, setTradingSub] = useState<TradingSub>(
     (initial.sub as TradingSub) ?? "portfolio",
   );
+
+  // Who is using the dashboard, and what they may do. This is the *platform*
+  // account; the IIFL broker session below is a separate credential.
+  const {
+    state: sessionState,
+    principal,
+    error: sessionError,
+    refresh: refreshSession,
+    adopt: adoptSession,
+    clear: clearSession,
+  } = useSession();
+
+  const signOut = useCallback(async () => {
+    try {
+      await appLogout();
+    } catch {
+      // A failed logout still clears the local view: the session may already be
+      // revoked server-side, and leaving the UI looking signed in would be worse.
+    }
+    clearSession();
+  }, [clearSession]);
 
   const setTab = useCallback((nextTab: Tab, sub?: string) => {
     setTabState(nextTab);
@@ -431,6 +476,7 @@ export default function App() {
 
   const meta = TITLES[tab];
   const dbUp = health?.database === true;
+  const accountInitials = (principal?.display_name || principal?.username || "?").slice(0, 2);
   const [showLogin, setShowLogin] = useState(false);
   const prompted = useRef(false);
 
@@ -448,18 +494,52 @@ export default function App() {
   const paletteItems: CommandItem[] = useMemo(
     () => [
       { id: "go-dashboard", label: "Go to Dashboard", group: "Navigate", icon: Home, hint: "1", keywords: ["overview", "home", "status"], onSelect: () => setTab("dashboard") },
-      { id: "go-markets", label: "Go to Markets", group: "Navigate", icon: Search, hint: "2", keywords: ["scanner", "momentum", "charts", "scan"], onSelect: () => setTab("markets") },
-      { id: "go-strategies", label: "Go to Strategies", group: "Navigate", icon: BarChart3, hint: "3", keywords: ["registry", "validated", "paper", "models"], onSelect: () => setTab("strategies") },
-      { id: "go-signals", label: "Go to Signals", group: "Navigate", icon: Bell, hint: "4", keywords: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning"], onSelect: () => setTab("signals") },
-      { id: "go-trading", label: "Go to Trading", group: "Navigate", icon: Briefcase, hint: "5", keywords: ["portfolio", "holdings", "positions", "limits", "order book", "trade book"], onSelect: () => setTab("trading") },
-      { id: "go-evidence", label: "Go to Evidence (walk-forward)", group: "Navigate", icon: FlaskConical, hint: "6", keywords: ["research", "validate", "out of sample", "deflated sharpe", "backtest", "measured"], onSelect: () => setTab("evidence") },
-      { id: "go-risk", label: "Go to Risk", group: "Navigate", icon: ShieldAlert, hint: "7", keywords: ["kill switch", "limits", "exposure", "halt", "stop"], onSelect: () => setTab("risk") },
-      { id: "go-system", label: "Go to System", group: "Navigate", icon: Server, hint: "8", keywords: ["cache", "contracts", "session", "health", "history"], onSelect: () => setTab("system") },
+      { id: "go-watchlist", label: "Go to Watchlist", group: "Navigate", icon: ListChecks, hint: "2", keywords: ["watchlist", "my symbols", "columns", "favourites", "track"], onSelect: () => setTab("watchlist") },
+      { id: "go-markets", label: "Go to Markets", group: "Navigate", icon: Search, hint: "3", keywords: ["scanner", "momentum", "charts", "scan"], onSelect: () => setTab("markets") },
+      { id: "go-strategies", label: "Go to Strategies", group: "Navigate", icon: BarChart3, hint: "4", keywords: ["registry", "validated", "paper", "models"], onSelect: () => setTab("strategies") },
+      { id: "go-signals", label: "Go to Signals", group: "Navigate", icon: Bell, hint: "5", keywords: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning"], onSelect: () => setTab("signals") },
+      { id: "go-trading", label: "Go to Trading", group: "Navigate", icon: Briefcase, hint: "6", keywords: ["portfolio", "holdings", "positions", "limits", "order book", "trade book"], onSelect: () => setTab("trading") },
+      { id: "go-evidence", label: "Go to Evidence (walk-forward)", group: "Navigate", icon: FlaskConical, hint: "7", keywords: ["research", "validate", "out of sample", "deflated sharpe", "backtest", "measured"], onSelect: () => setTab("evidence") },
+      { id: "go-risk", label: "Go to Risk", group: "Navigate", icon: ShieldAlert, hint: "8", keywords: ["kill switch", "limits", "exposure", "halt", "stop"], onSelect: () => setTab("risk") },
+      { id: "go-system", label: "Go to System", group: "Navigate", icon: Server, hint: "9", keywords: ["cache", "contracts", "session", "health", "history"], onSelect: () => setTab("system") },
       { id: "toggle-theme", label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", group: "View", icon: Palette, keywords: ["appearance"], onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
       { id: "login", label: "Log in with IIFL", group: "Session", icon: LogIn, keywords: ["auth", "session", "broker"], onSelect: () => setShowLogin(true) },
+      { id: "sign-out", label: "Sign out of ATR", group: "Session", icon: LogOut, keywords: ["logout", "account", "leave", "end session"], onSelect: () => void signOut() },
     ],
-    [theme, setTab],
+    [theme, setTab, signOut],
   );
+
+  // ── the gate ───────────────────────────────────────────────────────────────
+  // Placed after every hook so the hook order is stable across renders, and
+  // before the shell so an unauthenticated visitor never sees a dashboard frame
+  // they cannot populate.
+  //
+  // `offline` is passed through rather than folded into `anonymous`: a backend
+  // that is down must not be presented as a rejected login, or the user retypes a
+  // correct password and is told it is wrong.
+  if (sessionState === "loading") {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-muted-foreground">
+        <div className="grid gap-2 text-center">
+          <div className="mx-auto grid size-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-lg font-extrabold text-white">
+            A
+          </div>
+          <span className="text-xs">Checking your session…</span>
+        </div>
+      </div>
+    );
+  }
+  if (sessionState === "anonymous") {
+    return <AuthGate onAuthenticated={adoptSession} />;
+  }
+  if (sessionState === "offline") {
+    return (
+      <AuthGate
+        offline={{ error: sessionError, onRetry: () => void refreshSession() }}
+        onAuthenticated={adoptSession}
+      />
+    );
+  }
 
   return (
     <AnimatedSidebarProvider>
@@ -504,6 +584,38 @@ export default function App() {
         </AnimatedSidebarContent>
 
         <AnimatedSidebarFooter className="gap-3 border-none p-3">
+          {/* Who is signed in. Distinct from the broker session below it: this is
+              the platform account (what you may change), that is the IIFL session
+              (what you may trade). Both matter, neither implies the other. */}
+          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1 group-data-[state=collapsed]/sidebar:justify-center">
+            <span
+              title={`${principal?.username ?? "?"} · ${principal?.role ?? ""}`}
+              className={cn(
+                "grid size-9 shrink-0 place-items-center rounded-full text-[11px] font-bold uppercase",
+                ROLE_TONE[principal?.role ?? ""] ?? "bg-muted text-muted-foreground",
+              )}
+            >
+              {accountInitials}
+            </span>
+            <span className="min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {principal?.display_name || principal?.username}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {principal?.auth_method === "anonymous" ? "auth disabled" : principal?.role}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              title="Sign out of ATR"
+              aria-label="Sign out of ATR"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            >
+              <LogOut aria-hidden="true" className="size-4" />
+            </button>
+          </div>
+
           <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1 group-data-[state=collapsed]/sidebar:justify-center">
             <span
               className={cn(
@@ -535,6 +647,13 @@ export default function App() {
       </AnimatedSidebar>
 
       <AnimatedSidebarInset>
+        {/* Environment banner sits above everything, including the ticker bar —
+            the whole point is that it cannot be missed or scrolled past. */}
+        <EnvironmentBanner
+          env={health?.env}
+          executionMode={health?.execution_mode}
+          killSwitch={health?.kill_switch}
+        />
         <GlobalTickerBar onSelectSymbol={openChart} />
         <main
           className={cn(
@@ -598,6 +717,9 @@ export default function App() {
         </div>
 
         {tab === "dashboard" && <OverviewPanel onNavigate={(t) => setTab(t as Tab)} />}
+        {tab === "watchlist" && (
+          <WatchlistPanel permissions={principal?.permissions ?? []} onOpenChart={openChart} />
+        )}
         {tab === "markets" && (
           <MarketsTabContainer
             sub={marketsSub}

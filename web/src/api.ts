@@ -1,7 +1,13 @@
 // Typed client for the ATR FastAPI backend (src/atr/api/main.py).
 
+// Default to a *relative* URL so the dashboard always talks to whatever origin
+// served it. `atr serve` puts the SPA and the API on one port, so a relative
+// path is correct there and on any port. Hardcoding http://127.0.0.1:8000 broke
+// `atr serve --port 8123`: the page loaded from :8123 and every request went to
+// :8000, failing CORS on a backend that was never started. Set VITE_API_URL only
+// for `atr dev`, where Vite runs on a different port from FastAPI.
 export const API_URL =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -27,7 +33,56 @@ export interface Health {
   env: string;
   database: boolean;
   session_active: boolean;
+  execution_mode: "paper" | "live";
+  kill_switch: boolean;
 }
+
+export interface DashboardSummary {
+  as_of: string;
+  exchange: string;
+  positions?: {
+    count: number;
+    value?: number;
+    invested?: number;
+    day_pnl?: number;
+    // False when at least one open position had no prior close, i.e. day P&L
+    // is unknown rather than zero. Without this the UI cannot tell "flat
+    // today" from "we don't know" and would assert the former.
+    day_pnl_complete?: boolean;
+    // How many prior closes came from the local daily cache because the broker
+    // omitted them. Provenance, not decoration — `== count` means every
+    // baseline is ours.
+    day_pnl_from_cache?: number;
+    day_pnl_pct?: number;
+    unrealized_pnl?: number;
+    last_flat_at?: string | null;
+    error?: string;
+  };
+  performance?: {
+    trades?: number;
+    win_rate?: number | null;
+    wins?: number;
+    losses?: number;
+    sample?: number;
+    realized_pnl?: number;
+    current_drawdown_pct?: number;
+    max_drawdown_pct?: number;
+    sparkline?: number[];
+    equity_curve?: number[];
+    error?: string;
+  };
+  breadth?: {
+    series?: number[];
+    dates?: string[];
+    current?: number | null;
+    delta_5d?: number | null;
+    expanding?: boolean | null;
+    error?: string;
+  };
+}
+
+export const getDashboardSummary = () =>
+  req<DashboardSummary>("/dashboard/summary");
 
 export interface BacktestRequest {
   strategy: string;
@@ -477,6 +532,193 @@ export interface ValidationReport {
 export const getValidation = () => req<ValidationReport>("/validation");
 
 // ---------------------------------------------------------------------------
+// Episodic Pivot — Pradeep Bonde's playbook, measured
+// ---------------------------------------------------------------------------
+
+export interface EpisodicPivotMeasured {
+  win_rate: number | null;
+  trades: number;
+  payoff: number | null;
+  expectancy_r: number | null;
+  avg_win_return_pct?: number | null;
+  avg_loss_return_pct?: number | null;
+  best_trade_return_pct?: number | null;
+  worst_trade_return_pct?: number | null;
+  median_hold_days?: number | null;
+}
+
+export interface EpisodicPivotVariant {
+  passed?: boolean;
+  error?: string;
+  folds?: number;
+  oos_return_pct?: number;
+  oos_sharpe?: number;
+  oos_max_drawdown_pct?: number;
+  oos_trades?: number;
+  benchmark_return_pct?: number;
+  benchmark_sharpe?: number;
+  deflated_sharpe?: number;
+  required_sharpe?: number;
+  n_trials?: number;
+  sharpe_z_vs_control?: number | null;
+  control?: {
+    runs: number;
+    sharpe_mean?: number | null;
+    sharpe_sd?: number;
+    return_mean_pct?: number | null;
+  };
+  measured?: EpisodicPivotMeasured;
+  chosen_params?: Record<string, number>[];
+  checks?: ValidationCheck[];
+}
+
+export interface EpisodicPivotUniverse {
+  symbols: number;
+  sessions: number;
+  symbol_bars: number;
+  window: string;
+  variants: Record<string, EpisodicPivotVariant>;
+}
+
+export interface EpisodicPivotPremise {
+  universe: string;
+  symbols: number;
+  symbol_bars: number;
+  window: string;
+  gap_days: Record<string, number>;
+  gap_pct_of_days: Record<string, number>;
+  volume_spike_days: Record<string, number>;
+  joint_catalyst_days: number;
+  joint_catalyst_pct_of_days: number;
+  quiet_tape_pct_of_days: number;
+  quiet_and_catalyst_days: number;
+  fwd20_unconditional_pct: number | null;
+  fwd20_after_catalyst_pct: number | null;
+  fwd20_after_quiet_catalyst_pct: number | null;
+  fwd20_after_catalyst_hit_rate: number | null;
+  fwd20_after_catalyst_n: number;
+  best_20d_move_pct: number | null;
+  best_20d_symbol: string | null;
+  windows_20d_over_50pct: number;
+  windows_20d_over_100pct: number;
+  windows_20d_over_50pct_share: number;
+  one_day_moves_over_10pct: number;
+  one_day_moves_over_20pct: number;
+}
+
+export interface EpisodicPivotReport {
+  available: boolean;
+  hint?: string;
+  error?: string;
+  generated_at?: string;
+  config?: Record<string, unknown>;
+  universes?: Record<string, EpisodicPivotUniverse>;
+  premise?: { generated_at: string; universes: EpisodicPivotPremise[] };
+}
+
+export const getEpisodicPivot = () => req<EpisodicPivotReport>("/validation/episodic-pivot");
+
+// ---------------------------------------------------------------------------
+// Alpha hunt — pre-registered candidates, each with a matched null
+// ---------------------------------------------------------------------------
+
+export interface AlphaHuntMetrics {
+  oos_return_pct: number;
+  oos_sharpe: number;
+  oos_calmar: number;
+  oos_max_drawdown_pct: number;
+  bench_return_pct: number;
+  bench_sharpe: number;
+  bench_calmar: number;
+  bench_max_drawdown_pct: number;
+  avg_exposure_pct: number | null;
+  trades: number;
+  commission: number;
+  n_trials: number;
+  deflated_sharpe: number;
+}
+
+export interface AlphaHuntHypothesis {
+  prior?: string;
+  error?: string;
+  metrics?: AlphaHuntMetrics;
+  control?: { seeds: number; sharpe_mean: number | null; sharpe_sd: number };
+  verdict?: {
+    passed: boolean;
+    sharpe_z_vs_control: number | null;
+    t_critical: number | null;
+    control_df: number;
+    checks: ValidationCheck[];
+  };
+  folds?: { fold: number; test_start: string; test_sharpe: number; params: Record<string, number> }[];
+}
+
+export interface AlphaHuntReport {
+  available: boolean;
+  hint?: string;
+  generated_at?: string;
+  config?: Record<string, unknown>;
+  pre_registered?: Record<string, { prior: string; grid: Record<string, number[]> }>;
+  universes?: Record<string, { symbols: number; sessions: number; window: string; hypotheses: Record<string, AlphaHuntHypothesis> }>;
+}
+
+export const getAlphaHunt = () => req<AlphaHuntReport>("/validation/alpha-hunt");
+
+// ---------------------------------------------------------------------------
+// Evidence — findings with their credibility verdicts
+// ---------------------------------------------------------------------------
+
+export interface EvidenceRegime {
+  is_leverage: boolean;
+  up_excess_pct: number;
+  down_excess_pct: number;
+  desc: string;
+}
+
+export interface EvidenceStability {
+  consistent: boolean;
+  positive_share: number;
+  desc: string;
+}
+
+export interface EvidenceSelectionBias {
+  selected_pct: number;
+  unbiased_pct: number;
+  gap_pct: number;
+  meaningful: boolean;
+}
+
+export interface EvidenceFinding {
+  title: string;
+  claim: string;
+  headline_pct: number;
+  universe: string;
+  n_trials: number;
+  oos_sharpe: number | null;
+  benchmark_sharpe: number | null;
+  p_edge_real: number | null;
+  max_drawdown_pct: number;
+  benchmark_drawdown_pct: number;
+  selection_bias: EvidenceSelectionBias | null;
+  regime: EvidenceRegime | null;
+  stability: EvidenceStability | null;
+  notes: string[];
+  verdict: { credible: boolean; reasons: string[] };
+}
+
+export interface EvidenceReport {
+  available: boolean;
+  hint?: string;
+  error?: string;
+  generated_at?: string;
+  total?: number;
+  credible_count?: number;
+  findings?: EvidenceFinding[];
+}
+
+export const getEvidence = () => req<EvidenceReport>("/evidence");
+
+// ---------------------------------------------------------------------------
 // Portfolio, quotes, caches
 // ---------------------------------------------------------------------------
 
@@ -530,9 +772,17 @@ export interface RiskStatus {
 
 export const getRiskStatus = () => req<RiskStatus>("/risk/status");
 
-export const setKillSwitch = (engaged: boolean) =>
-  req<{ kill_switch: boolean }>(
-    `/risk/kill-switch?engaged=${engaged ? "true" : "false"}`,
+/**
+ * Engage or release the global kill switch.
+ *
+ * A reason is required in **both** directions. Releasing is arguably the more
+ * consequential: it re-enables trading, and a release with no recorded reason is
+ * indistinguishable from someone clearing it by accident. The backend rejects a
+ * blank reason, so this cannot be left to the UI to remember.
+ */
+export const setKillSwitch = (engaged: boolean, reason: string) =>
+  req<{ kill_switch: boolean; reason: string }>(
+    `/risk/kill-switch?engaged=${engaged ? "true" : "false"}&reason=${encodeURIComponent(reason)}`,
     { method: "POST" },
   );
 
@@ -786,4 +1036,523 @@ export const trainSelfLearningModel = () =>
   req<{ universe_size: number; market_regime: MarketRegimeInfo; cycles_trained: number; strategies: Record<string, StrategyWeightInfo> }>(
     "/self-learning/train", { method: "POST" },
   );
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Platform accounts and watchlists — the versioned `/api/v1` surface
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Two unrelated credentials live in this app, and conflating them causes real
+// confusion, so:
+//
+//   * the **broker session** (`/login`, `getLoginStatus`, `logoutSession`) is a
+//     daily IIFL trading credential. It authorises *orders*.
+//   * the **platform account** (`/api/v1/auth/*`) is who may use the dashboard
+//     at all. It authorises *the human*.
+//
+// They are independent on purpose. An account with no broker session can read
+// the research; a broker session with no account is what a single-operator box
+// with `AUTH_REQUIRED=false` looks like.
+//
+// The account session is an opaque token in an **HttpOnly** cookie, so
+// JavaScript cannot read it — that is the whole point of it being HttpOnly. Every
+// request therefore has to opt into sending it via `credentials: "include"`.
+
+/** An error from `/api/v1`, carrying the stable machine-readable `code`. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, detail: string) {
+    super(detail);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** True when the caller is simply not signed in, as opposed to being refused. */
+export const isUnauthorized = (e: unknown): boolean =>
+  e instanceof ApiError && e.status === 401;
+
+/** True when the caller is signed in but lacks the permission. */
+export const isForbidden = (e: unknown): boolean =>
+  e instanceof ApiError && e.status === 403;
+
+/**
+ * Pull `{detail, code}` out of an error body.
+ *
+ * FastAPI produces two shapes and both reach us: a bare `{"detail": "..."}` from
+ * a plain `HTTPException`, and `{"detail": {"detail": "...", "code": "..."}}`
+ * when the handler passed a dict as the detail — which every route here does, so
+ * that a rejection carries a stable `code` the UI can branch on instead of
+ * pattern-matching on prose. Middleware (CSRF, rate limiting) returns the flat
+ * form. This normalises all three.
+ */
+function errorParts(body: unknown): { detail: string; code: string } {
+  const outer = (body ?? {}) as Record<string, unknown>;
+  const inner = outer.detail ?? outer;
+  if (typeof inner === "string") return { detail: inner, code: "" };
+  const obj = (inner ?? {}) as Record<string, unknown>;
+  const detail =
+    typeof obj.detail === "string"
+      ? obj.detail
+      : typeof obj.message === "string"
+        ? obj.message
+        : "";
+  return { detail, code: typeof obj.code === "string" ? obj.code : "" };
+}
+
+async function v1<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_URL}/api/v1${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+
+  // 204 carries no body; parsing "" as JSON would throw and turn a success into
+  // a reported failure.
+  if (res.status === 204) return undefined as T;
+
+  const text = await res.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
+  }
+
+  if (!res.ok) {
+    const { detail, code } = errorParts(body);
+    // The request id is echoed on every response; quoting it turns "it broke"
+    // into a line an operator can find in the log.
+    const rid = res.headers.get("X-Request-ID");
+    throw new ApiError(
+      res.status,
+      code || `http_${res.status}`,
+      detail || `${res.status} ${res.statusText}${rid ? ` [${rid}]` : ""}`,
+    );
+  }
+  return body as T;
+}
+
+export interface BootstrapStatus {
+  /** No account exists yet, so the first-run screen is the right thing to show. */
+  needs_setup: boolean;
+  /** Whether self-registration is open on this instance. */
+  allow_signup: boolean;
+  env: string;
+  auth_required: boolean;
+}
+
+export interface AppUser {
+  user_id: string;
+  email: string;
+  username: string;
+  display_name: string | null;
+  role: "viewer" | "researcher" | "trader" | "admin" | "owner" | string;
+  is_active: boolean;
+  mfa_enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface Principal {
+  user_id: string;
+  username: string;
+  email: string;
+  display_name: string | null;
+  role: string;
+  /** What this principal may actually do right now. */
+  permissions: string[];
+  /** `session` | `api-key` | `anonymous` — how it authenticated. */
+  auth_method: string;
+  /** False when a password login still owes its TOTP step. */
+  mfa_satisfied: boolean;
+  /** `/auth/me` only: everything the role grants, for greying out UI. */
+  role_permissions?: string[];
+}
+
+export interface LoginSuccess {
+  token: string;
+  expires_at: string;
+  user: AppUser;
+}
+
+export interface MfaChallenge {
+  mfa_required: true;
+  detail?: string;
+}
+
+export interface SessionRow {
+  session_id: string;
+  created_at: string;
+  last_seen_at: string | null;
+  expires_at: string;
+  ip: string | null;
+  user_agent: string | null;
+  current: boolean;
+}
+
+export interface ApiKeyRow {
+  key_id: string;
+  label: string;
+  prefix: string;
+  scopes: string[];
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked: boolean;
+}
+
+export interface CreatedApiKey extends Omit<ApiKeyRow, "revoked" | "last_used_at"> {
+  /** Returned exactly once, at creation. Never retrievable afterwards. */
+  key: string;
+  warning?: string;
+}
+
+export const getBootstrapStatus = () =>
+  v1<BootstrapStatus>("/auth/bootstrap");
+
+/** Create the first account. Succeeds once; refused thereafter. */
+export const bootstrapOwner = (body: {
+  email: string;
+  username: string;
+  password: string;
+  display_name?: string;
+}) =>
+  v1<LoginSuccess>("/auth/bootstrap", { method: "POST", body: JSON.stringify(body) });
+
+/** Self-registration. Only available when `allow_signup` is on. */
+export const registerAccount = (body: {
+  email: string;
+  username: string;
+  password: string;
+  display_name?: string;
+}) => v1<{ user: AppUser }>("/auth/register", { method: "POST", body: JSON.stringify(body) });
+
+/**
+ * Password login.
+ *
+ * Returns a `MfaChallenge` (HTTP 202) when the password was accepted but a TOTP
+ * code is still owed. That is deliberately not a thrown error: the credentials
+ * were correct, and the caller needs to tell the difference to know whether to
+ * reveal a code field or show "wrong password".
+ */
+export const appLogin = async (body: {
+  identifier: string;
+  password: string;
+  totp_code?: string;
+}): Promise<LoginSuccess | MfaChallenge> =>
+  v1<LoginSuccess | MfaChallenge>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const appLogout = () => v1<{ logged_out: number }>("/auth/logout", { method: "POST" });
+
+export const appLogoutAll = () =>
+  v1<{ sessions_revoked: number }>("/auth/logout-all", { method: "POST" });
+
+export const getMe = () => v1<Principal>("/auth/me");
+
+export const updateMe = (body: { display_name?: string; email?: string }) =>
+  v1<{ user: AppUser }>("/auth/me", { method: "PATCH", body: JSON.stringify(body) });
+
+/** Changes the password and revokes every session, including this one. */
+export const changePassword = (body: { current_password: string; new_password: string }) =>
+  v1<{ changed: boolean; sessions_revoked: boolean }>("/auth/me/password", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const enrollMfa = () =>
+  v1<{ secret: string; otpauth_uri: string; enabled: boolean }>("/auth/me/mfa/enroll", {
+    method: "POST",
+  });
+
+export const activateMfa = (code: string) =>
+  v1<{ enabled: boolean }>("/auth/me/mfa/activate", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+
+export const disableMfa = (password: string) =>
+  v1<{ enabled: boolean }>("/auth/me/mfa/disable", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+
+export const getMySessions = () => v1<{ sessions: SessionRow[] }>("/auth/me/sessions");
+
+export const revokeSession = (sessionId: string) =>
+  v1<{ revoked: boolean }>(`/auth/me/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
+
+export const getMyApiKeys = () => v1<{ keys: ApiKeyRow[] }>("/auth/me/api-keys");
+
+export const createApiKey = (body: {
+  label: string;
+  scopes?: string[];
+  expires_in_days?: number;
+}) => v1<CreatedApiKey>("/auth/me/api-keys", { method: "POST", body: JSON.stringify(body) });
+
+export const revokeApiKey = (keyId: string) =>
+  v1<{ revoked: boolean }>(`/auth/me/api-keys/${encodeURIComponent(keyId)}`, {
+    method: "DELETE",
+  });
+
+// ─── Watchlists ───────────────────────────────────────────────────────────────
+
+export interface WatchlistSummary {
+  watchlist_id: string;
+  user_id: string;
+  name: string;
+  exchange: string;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  item_count: number;
+  columns: string[];
+}
+
+export interface WatchlistDetail extends WatchlistSummary {
+  /** Just the tickers, in display order. */
+  items: string[];
+}
+
+export interface ColumnSpec {
+  key: string;
+  label: string;
+  group: string;
+  kind: "currency" | "number" | "percent" | "integer" | "text" | string;
+  /**
+   * False when this repo has no data source for the column yet. The UI must
+   * render these as "—" with the reason, never as 0 — a zero looks like a
+   * measurement, and this platform does not report a missing feed as a value.
+   */
+  available: boolean;
+  requires: string | null;
+  description: string;
+}
+
+export interface AvailableColumns {
+  columns: ColumnSpec[];
+  groups: string[];
+  available: string[];
+  unavailable: string[];
+}
+
+export interface WatchlistQuoteRow {
+  symbol: string;
+  name: string | null;
+  industry?: string | null;
+  indices?: string[];
+  /** True when the price came from the local cache rather than the broker. */
+  stale?: boolean;
+  /** Set when there is no local history for this symbol at all. */
+  error?: string;
+  [column: string]: unknown;
+}
+
+export interface WatchlistQuotes {
+  watchlist_id: string;
+  name: string;
+  exchange: string;
+  as_of: string;
+  /** `broker+cache` when at least one live price arrived, else `local_cache`. */
+  source: string;
+  live_symbols: string[];
+  columns: ColumnSpec[];
+  rows: WatchlistQuoteRow[];
+  count: number;
+}
+
+export interface AddItemsResult {
+  added: string[];
+  /** Already present — reported, not an error. */
+  skipped: string[];
+  /** Not in the instrument master. Surfaced so a typo is visible. */
+  unknown: string[];
+}
+
+export const getAvailableColumns = () => v1<AvailableColumns>("/watchlists/columns/available");
+
+export const listWatchlists = () =>
+  v1<{ watchlists: WatchlistSummary[] }>("/watchlists");
+
+export const createWatchlist = (body: {
+  name: string;
+  exchange?: string;
+  columns?: string[];
+}) => v1<WatchlistDetail>("/watchlists", { method: "POST", body: JSON.stringify(body) });
+
+export const getWatchlist = (id: string) =>
+  v1<WatchlistDetail>(`/watchlists/${encodeURIComponent(id)}`);
+
+export const updateWatchlist = (
+  id: string,
+  body: { name?: string; exchange?: string; is_default?: boolean },
+) =>
+  v1<WatchlistDetail>(`/watchlists/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+export const deleteWatchlist = (id: string) =>
+  v1<{ deleted: boolean; watchlist_id: string }>(`/watchlists/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+
+export const addWatchlistItems = (id: string, symbols: string[]) =>
+  v1<AddItemsResult>(`/watchlists/${encodeURIComponent(id)}/items`, {
+    method: "POST",
+    body: JSON.stringify({ symbols }),
+  });
+
+export const removeWatchlistItem = (id: string, symbol: string) =>
+  v1<{ removed: string }>(
+    `/watchlists/${encodeURIComponent(id)}/items/${encodeURIComponent(symbol)}`,
+    { method: "DELETE" },
+  );
+
+/** Sets the whole order at once. Idempotent, so a retry cannot double-move. */
+export const reorderWatchlistItems = (id: string, symbols: string[]) =>
+  v1<WatchlistDetail>(`/watchlists/${encodeURIComponent(id)}/items/order`, {
+    method: "PUT",
+    body: JSON.stringify({ symbols }),
+  });
+
+export const setWatchlistColumns = (id: string, columns: string[]) =>
+  v1<WatchlistDetail & { rejected_columns?: string[] }>(
+    `/watchlists/${encodeURIComponent(id)}/columns`,
+    { method: "PUT", body: JSON.stringify({ columns }) },
+  );
+
+/**
+ * Every configured column for every symbol.
+ *
+ * `live=true` asks the broker first and falls back to the cached close per
+ * symbol; each row then carries `stale` so a cached price is never displayed as
+ * a live one.
+ */
+export const getWatchlistQuotes = (id: string, live = true) =>
+  v1<WatchlistQuotes>(
+    `/watchlists/${encodeURIComponent(id)}/quotes?live=${live ? "true" : "false"}`,
+  );
+
+// ─── Instrument master ────────────────────────────────────────────────────────
+
+export interface InstrumentRecord {
+  symbol: string;
+  exchange: string;
+  asset_class: string;
+  series: string | null;
+  name: string | null;
+  isin: string | null;
+  industry: string | null;
+  lot_size: number;
+  tick_size: number;
+  bars: number;
+  first_date: string | null;
+  last_date: string | null;
+  cache_file: string | null;
+  /** Which granularities have local data — `["1d"]`, `["1d", "15m"]`, … */
+  timeframes: string[];
+  indices: string[];
+}
+
+/**
+ * Ranked symbol search.
+ *
+ * Accepts any spelling — `RELIANCE`, `reliance-eq`, `NIFTY 50` — and returns the
+ * canonical record. Canonicalisation belongs to the server, so the client never
+ * has to guess whether to strip a series suffix.
+ */
+export const searchInstruments = (
+  q: string,
+  opts: { exchange?: string; asset_class?: string; limit?: number } = {},
+) => {
+  const params = new URLSearchParams({ q });
+  if (opts.exchange) params.set("exchange", opts.exchange);
+  if (opts.asset_class) params.set("asset_class", opts.asset_class);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  return v1<{ query: string; count: number; results: InstrumentRecord[] }>(
+    `/instruments/search?${params.toString()}`,
+  );
+};
+
+export const getInstrument = (symbol: string) =>
+  v1<InstrumentRecord>(`/instruments/${encodeURIComponent(symbol)}`);
+
+export const getInstrumentExchanges = () =>
+  v1<{ exchanges: { exchange: string; symbols: number }[] }>("/instruments/exchanges");
+
+/** Provenance of the master: how many symbols, how fresh, built from where. */
+export const getInstrumentStatus = () =>
+  v1<Record<string, unknown>>("/instruments/status");
+
+export const getInstrumentUniverses = () =>
+  v1<{ universes: Record<string, number> }>("/instruments/universes");
+
+export const getUniverse = (name: string) =>
+  v1<{ name: string; count: number; symbols: string[] }>(
+    `/instruments/universes/${encodeURIComponent(name)}`,
+  );
+
+// ─── Audit trail ──────────────────────────────────────────────────────────────
+//
+// The queryable table, not the JSONL file. `GET /audit` (legacy, above) still
+// reads the file — that sink is restart-proof and is the one an operator greps.
+// These are the same facts with filters, which is what a UI needs.
+
+export interface AuditEvent {
+  event_id: string;
+  ts: string;
+  user_id: string | null;
+  /** Denormalised: survives the user row being deleted. */
+  actor: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  strategy_id: string | null;
+  strategy_version: number | null;
+  request_id: string | null;
+  result: "success" | "failure" | "denied" | "pending" | string;
+  detail: string | null;
+  ip: string | null;
+}
+
+export interface AuditQuery {
+  user_id?: string;
+  action?: string;
+  result?: "success" | "failure" | "denied" | "pending";
+  since?: string;
+  until?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const getAuditEvents = (query: AuditQuery = {}) => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  const qs = params.toString();
+  return v1<{ events: AuditEvent[]; total: number; limit: number; offset: number }>(
+    `/audit/events${qs ? `?${qs}` : ""}`,
+  );
+};
+
+export const getAuditEvent = (eventId: string) =>
+  v1<AuditEvent>(`/audit/events/${encodeURIComponent(eventId)}`);
+
+/** Distinct action names, for building a filter dropdown. */
+export const getAuditActions = () => v1<{ actions: string[] }>("/audit/actions");
 

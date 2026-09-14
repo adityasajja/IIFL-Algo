@@ -4,6 +4,7 @@ import { getValidation, type ValidationReport, type ValidationResult } from "./a
 import { Card, CardHeader, Hint } from "./components/ui/card";
 import { Badge, Callout, fmtNum, fmtPct } from "./components/ui/stat";
 import { cn } from "./lib/utils";
+import { RelativeTime } from "./lib/time";
 
 /**
  * Measured results for the academic paper strategies.
@@ -190,7 +191,7 @@ export default function ValidationPanel() {
       )}
 
       <Hint>
-        Generated {report.generated_at ? new Date(report.generated_at).toLocaleString() : "—"} ·{" "}
+        Generated <RelativeTime value={report.generated_at} /> ·{" "}
         {report.symbol_bars?.toLocaleString()} symbol-bars ·{" "}
         {String(report.config?.train_bars)} train / {String(report.config?.test_bars)} test /{" "}
         {String(report.config?.warmup_bars)} warmup · {String(report.config?.slippage_bps)} bps

@@ -1580,9 +1580,27 @@ export default function PortfolioPanel() {
       );
       if (!confirm) return;
     }
+    // The reason is recorded in the audit trail, and it is required in both
+    // directions — releasing the switch re-enables trading, so a release with no
+    // stated reason is indistinguishable from someone clearing it by accident.
+    const reason = window.prompt(
+      nextState
+        ? "Why are you engaging the kill switch? This is recorded in the audit trail."
+        : "Why are you releasing the kill switch? This is recorded in the audit trail.",
+      "",
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast({
+        title: "A reason is required",
+        description: "The kill switch cannot be changed without one — it goes in the audit trail.",
+        status: "error",
+      });
+      return;
+    }
     setKillLoading(true);
     try {
-      await setKillSwitch(nextState);
+      await setKillSwitch(nextState, reason.trim());
       setKillEngaged(nextState);
       toast({
         title: nextState ? "Kill Switch ENGAGED" : "Kill Switch Disarmed",
