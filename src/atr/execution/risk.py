@@ -58,8 +58,23 @@ class RiskEngine:
         self.halted = False
         self.halt_reason = None
 
-    def reset_daily(self) -> None:
+    def reset_daily(self, equity_at_rollover: float | None = None) -> None:
+        """Start a new session. Pass the equity at the rollover for a usable baseline.
+
+        ``max_daily_loss`` is measured from the start of the day, so the caller
+        has to say what the day started at. Without an argument the baseline
+        re-seeds on the next :meth:`check` — which the engine runs *after*
+        marking the bar, so on daily bars the day's loss is already in the
+        equity and the limit compares a number to itself: it can never fire.
+        Passing the previous close (which is what the engine has at the rollover
+        point) makes a full session's loss visible.
+
+        Leaving ``day_start_equity`` pinned across days is the other failure
+        mode: the limit silently becomes "cumulative drawdown since inception",
+        trips once, and reports a single-day loss that never happened.
+        """
         self.orders_today = 0
+        self.day_start_equity = equity_at_rollover
 
     def trip(self, reason: str) -> None:
         self.halted = True

@@ -18,13 +18,17 @@ import pytest
 
 
 @pytest.fixture()
-def api(tmp_path, monkeypatch):
-    """Fresh API module with its audit file redirected into tmp_path."""
+def api(tmp_path, monkeypatch, fresh_env):
+    """Fresh API module with its audit file and app store redirected into tmp_path.
+
+    ``fresh_env`` gives each test its own ``APP_DB_URL``. That matters more than it
+    used to: the kill switch and the execution mode are now **durable** rather than
+    a module-level dict, so a shared store would leak one test's live mode into the
+    next. Each test starting from the safe default is the property under test.
+    """
     mod = importlib.import_module("atr.api.main")
     importlib.reload(mod)
     monkeypatch.setattr(mod, "_AUDIT_PATH", tmp_path / "audit.jsonl")
-    mod._STATE.clear()
-    mod._STATE.update({"kill_switch": False, "execution_mode": "paper"})
     return mod
 
 
@@ -119,13 +123,35 @@ def test_mode_changes_are_recorded(api):
 
 
 def test_kill_switch_is_recorded(api):
-    api.kill_switch(True)
-    api.kill_switch(False)
+    api.kill_switch(True, reason="halting into the RBI policy announcement")
+    api.kill_switch(False, reason="announcement digested, spreads normal")
 
     entries = api.get_audit()["entries"]
     actions = [e["action"] for e in entries]
     assert "kill_switch.release" in actions
     assert "kill_switch.engage" in actions
+
+
+def test_the_kill_switch_requires_a_reason(api):
+    """Releasing re-enables trading, so a silent release is the dangerous one."""
+    from fastapi import HTTPException
+
+    for engaged in (True, False):
+        with pytest.raises(HTTPException) as exc:
+            api.kill_switch(engaged, reason="   ")
+        assert exc.value.status_code == 400
+        assert exc.value.detail["code"] == "reason_required"
+    assert api.get_execution_mode()["kill_switch"] is False
+
+
+def test_the_kill_switch_survives_a_restart(api, tmp_path, monkeypatch):
+    """It used to live in a module-level dict, so a bounce re-armed trading."""
+    api.kill_switch(True, reason="broker returning stale ticks")
+
+    fresh = importlib.reload(importlib.import_module("atr.api.main"))
+    monkeypatch.setattr(fresh, "_AUDIT_PATH", tmp_path / "audit.jsonl")
+    assert fresh.get_execution_mode()["kill_switch"] is True
+    assert fresh._kill_switch_engaged() is True
 
 
 def test_trail_is_append_only(api):
