@@ -19,7 +19,7 @@ from atr.brokers.base import Broker, BrokerError
 from atr.brokers.iifl.client import IiflClient
 from atr.brokers.iifl.contracts import InstrumentMaster
 from atr.core.enums import AssetClass, OrderStatus, OrderType, Side
-from atr.core.models import Fill, Instrument, Order, Position
+from atr.core.models import Fill, Funds, Holding, Instrument, Order, Position
 
 # IIFL product codes
 PRODUCT_INTRADAY = "INTRADAY"
@@ -189,6 +189,73 @@ class IiflBroker(Broker):
             if ltp is not None:
                 out[instrument.symbol] = float(ltp)
         return out
+
+    # ------------------------------------------------------------------
+    def holdings(self) -> list[Holding]:
+        """Settled holdings, for reconciliation against the platform's positions.
+
+        A holding and a position are not the same thing: on a T+1 market a purchase
+        is a position today and a holding tomorrow. That is why the reconciler
+        treats a position mismatch as critical and a holding mismatch as a warning —
+        the difference is usually settlement, and calling it critical would train
+        an operator to ignore the alarm.
+        """
+        out = []
+        for row in self.client.holdings():
+            instrument = self._instrument_for(row)
+            quantity = float(
+                _pick(row, "quantity", "Quantity", "holdingQuantity", "totalQty", default=0) or 0
+            )
+            if quantity == 0:
+                continue
+            sellable = _pick(row, "sellableQuantity", "sellableQty", "freeQty", "availableQty")
+            out.append(
+                Holding(
+                    instrument=instrument,
+                    quantity=quantity,
+                    avg_price=float(
+                        _pick(row, "averagePrice", "AveragePrice", "avgPrice", default=0) or 0
+                    ),
+                    last_price=float(_pick(row, "ltp", "LTP", "lastPrice", default=0) or 0),
+                    sellable_quantity=float(sellable) if sellable is not None else None,
+                    isin=_pick(row, "isin", "ISIN"),
+                    raw=row,
+                )
+            )
+        return out
+
+    def funds(self) -> Funds:
+        """Cash and margin, from the broker's limits endpoint.
+
+        The field names differ between broker environments, so this reads the
+        common spellings and keeps the raw payload. It deliberately does **not**
+        guess: if none of the known keys is present, ``available_cash`` stays at
+        ``0.0`` and ``raw`` carries the payload, so a reconciler can see that the
+        figure was absent rather than conclude the account is empty.
+        """
+        payload = self.client.limits()
+        row = payload if isinstance(payload, dict) else {}
+        # Some environments nest the figures one level down.
+        for key in ("limits", "data", "result"):
+            nested = row.get(key)
+            if isinstance(nested, dict):
+                row = {**row, **nested}
+
+        cash = _pick(
+            row,
+            "availableCash", "availablecash", "availableMargin", "netAvailableMargin",
+            "cashMarginAvailable", "availableBalance", "net",
+        )
+        margin = _pick(row, "marginUsed", "utilisedMargin", "usedMargin", "marginUtilised")
+        withdrawable = _pick(row, "withdrawableAmount", "withdrawable", "netWithdrawable")
+        collateral = _pick(row, "collateralValue", "collateral", "totalCollateral")
+        return Funds(
+            available_cash=float(cash or 0.0),
+            margin_used=float(margin or 0.0),
+            withdrawable=float(withdrawable) if withdrawable is not None else None,
+            collateral=float(collateral) if collateral is not None else None,
+            raw=row,
+        )
 
     # ------------------------------------------------------------------
     def margin_required(self, order: Order) -> dict[str, Any]:

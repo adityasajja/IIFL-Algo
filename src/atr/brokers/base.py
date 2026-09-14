@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from atr.core.models import Fill, Instrument, Order, Position
+from atr.core.models import Fill, Funds, Holding, Instrument, Order, Position
 
 
 class BrokerError(RuntimeError):
@@ -39,6 +39,32 @@ class Broker(ABC):
     @abstractmethod
     def last_price(self, instruments: list[Instrument]) -> dict[str, float]:
         ...
+
+    # ---------------------------------------------------------------- reconciliation
+    def holdings(self) -> list[Holding]:
+        """Settled holdings in the demat account.
+
+        Not abstract, and that is deliberate: adding an abstract method to this ABC
+        breaks every existing implementer at import time, including the simulated
+        broker the backtester uses. Raising here instead means the *reconciler*
+        decides what an unsupported comparison means — it records "not comparable"
+        with a reason rather than silently reporting a clean run, which is the same
+        rule that stops a missing price being read as zero.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose holdings, so holdings cannot be reconciled"
+        )
+
+    def funds(self) -> Funds:
+        """The account's cash position.
+
+        See :meth:`holdings` for why this is not abstract. Without it the
+        platform cannot measure equity on the live path, so ``max_daily_loss``
+        cannot fire — an absence worth surfacing rather than defaulting away.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose funds, so funds cannot be reconciled"
+        )
 
     def cancel_all(self) -> int:
         cancelled = 0
