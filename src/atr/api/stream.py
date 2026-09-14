@@ -306,6 +306,41 @@ class TickBroadcaster:
     # ------------------------------------------------------------------
     # In-Memory Time-Series Ring Buffer Query Engine
     # ------------------------------------------------------------------
+    def latest_price(self, symbol: str) -> float | None:
+        """The most recent traded price for a symbol, or ``None``.
+
+        The seam the paper engine reads so a fill is priced off the market
+        rather than off yesterday's close. Returns the whole number or nothing:
+        a NaN or a zero here would become the cost basis of a position, and from
+        there every P&L figure downstream.
+
+        Read under the lock because the bridge writes ``_latest_ticks`` from its
+        own MQTT thread — a dict mutation concurrent with this read is exactly
+        the race the lock exists for.
+        """
+        sym = symbol.strip().upper()
+        with self._lock:
+            tick = self._latest_ticks.get(sym)
+        if tick is None:
+            return None
+        price = float(tick.ltp)
+        return price if price == price and price > 0 else None
+
+    def latest_prices(self) -> dict[str, float]:
+        """Every symbol with a live price, as ``{symbol: ltp}``.
+
+        One snapshot for the whole book rather than N lookups, so marking a
+        deployment's positions does not re-acquire the lock per position.
+        """
+        with self._lock:
+            items = list(self._latest_ticks.items())
+        out: dict[str, float] = {}
+        for symbol, tick in items:
+            price = float(tick.ltp)
+            if price == price and price > 0:
+                out[symbol] = price
+        return out
+
     def get_tick_history(self, symbol: str, limit: int = 100) -> list[dict[str, Any]]:
         """Return the most recent ticks up to `limit` for a symbol."""
         sym_clean = symbol.strip().upper()
