@@ -11,9 +11,11 @@ Notify-only system; never place orders.
 |---|---|---|
 | 2026-09-14 (Mon) | 16:50 | Guard tripped — after 15:30 close. No scan run, no Telegram message. |
 | 2026-09-14 (Mon) | 17:51 | Guard tripped again — after 15:30 close. No scan, no Telegram message. |
+| 2026-09-14 (Mon) | 18:53 | Guard tripped a third time — after 15:30 close. No scan, no Telegram message. |
 
-**Recurring pattern:** the job has now fired twice on 2026-09-14, both ~45–60 min
-after the close, never inside 09:15–15:30. Each run therefore does nothing. The
+**Recurring pattern:** the job has now fired three times on 2026-09-14 (16:50,
+17:51, 18:53), all after the close, never inside 09:15–15:30. Each run therefore
+does nothing. The
 run log alone cannot distinguish "schedule is set to the wrong wall-clock time"
 from "the machine's local clock is wrong" — see the clock-check note below.
 
@@ -24,7 +26,9 @@ from "the machine's local clock is wrong" — see the clock-check note below.
   Either the schedule is set to the wrong wall-clock time, or it is expressed in
   a non-IST timezone. Flagged to Aditya on both runs.
 - **Clock check (2026-09-14):** the host local clock and the injected session
-  time agree — both read 17:51 IST. So the schedule, not the clock, is at fault.
+  time agree — both read 17:51 IST. Re-verified at the 18:53 run: Python
+  `zoneinfo` gives 18:53 IST, matching the injected 18:52 IST. So the schedule,
+  not the clock, is at fault. Escalation: three inert runs in a row.
 - **Trap — `TZ=` is broken under Git Bash.** `TZ=Asia/Kolkata date ...` silently
   returns a wrong or `GMT`-labelled result; every zone renders as `+0000`, and
   `/usr/share/zoneinfo` is absent. Do **not** trust shell `date` for IST.
