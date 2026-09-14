@@ -11,9 +11,9 @@ is no trade — that discipline is the whole point.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from pathlib import Path
-import json
 
 import pandas as pd
 from pydantic import BaseModel
@@ -115,7 +115,7 @@ def build_brief(cfg: BriefingConfig | None = None,
 
     day = as_of or date.today().strftime("%a %d %b")
     lines = [f"ATR morning brief — {day}", f"Regime: {regime} · breadth {breadth}", ""]
-    lines.append(f"WATCH LONGS (trigger prev-high, exit at close):")
+    lines.append("WATCH LONGS (trigger prev-high, exit at close):")
     for _, r in longs.iterrows():
         tag = "BO" if r["breakout"] else ("OS" if r["rsi"] < 32 else "MO")
         lines.append(f"{r['symbol'].replace('-EQ', '')} {r['last']} "

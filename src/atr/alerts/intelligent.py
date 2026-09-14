@@ -8,20 +8,20 @@ take-profit, and volume breakouts) and dispatches instant actionable Telegram al
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
+
 import pandas as pd
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from atr.alerts.channels import Channel, channels_from_settings
+from atr.alerts.channels import channels_from_settings
 from atr.alerts.models import AlertEvent
-from atr.alerts.store import AlertStore
 from atr.config.settings import get_settings
-from atr.data.history import load_cached, CACHE_ROOT
-from atr.strategy.indicators import crossover, crossunder, rsi, sma
+from atr.data.history import CACHE_ROOT, load_cached
+from atr.strategy.indicators import crossover, rsi, sma
 
 IST = timezone(timedelta(hours=5, minutes=30))
 CONFIG_PATH = Path("data/alerts/intelligent.json")
@@ -404,6 +404,8 @@ class IntelligentMonitorManager:
                     from atr.trade_signals import (
                         build_signal_from_intelligent,
                         get_queue,
+                    )
+                    from atr.trade_signals import (
                         load_settings as load_ts_settings,
                     )
                     ts_settings = load_ts_settings()
