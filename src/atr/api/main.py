@@ -35,8 +35,36 @@ async def _on_startup() -> None:
 
     get_broadcaster().set_loop(asyncio.get_running_loop())
     await get_intelligent_monitor().start()
+    # Price the paper engine off live ticks before the runner starts, so the
+    # first fill is priced from the feed rather than yesterday's close.
+    from atr.api.price_sources import install_live_price_source
+
+    install_live_price_source()
+    _start_paper_runner()
     _warm_breadth_cache()
     _warm_instrument_master()
+
+
+def _start_paper_runner() -> None:
+    """Start the continuous paper-trading loop.
+
+    The runner is what turns the paper engine from something a request drives
+    into something that runs: without it, a deployment marked RUNNING evaluates
+    nothing and fills nothing, and the dashboard shows a live strategy that is
+    actually inert.
+
+    Best-effort, never fatal. A runner that cannot start must not take the API
+    down with it — the deployment routes and the health endpoint are how an
+    operator finds out what is wrong, and ``GET /api/v1/paper/runner`` reports
+    ``running: false`` rather than pretending the loop is up.
+    """
+    try:
+        from atr.services.runner import get_runner
+
+        get_runner().start()
+        logger.info("paper runner started")
+    except Exception as exc:  # noqa: BLE001 — the API must still serve
+        logger.warning("paper runner could not start: %s", exc)
 
 
 def _warm_instrument_master() -> None:

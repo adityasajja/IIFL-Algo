@@ -110,6 +110,35 @@ def _fail(exc: DeploymentError) -> HTTPException:
 
 
 # --------------------------------------------------------------------- routes
+@router.get("/runner", dependencies=[Depends(_READ)])
+def runner_status() -> dict[str, Any]:
+    """What the continuous paper loop is doing right now.
+
+    Read-only and deliberately not owner-scoped: the runner is a *platform*
+    process, not a user's resource. It reports only counts, timings and symbol
+    counts per deployment — never a position, a price or a P&L — so nothing here
+    crosses an ownership boundary. Per-deployment positions and P&L are on the
+    deployment routes, which are owner-scoped.
+
+    ``running: false`` is the honest answer when the API is serving requests but
+    the background task is not up, and it is the difference between "no signals
+    fired" and "nothing is watching for signals".
+    """
+    from atr.services.runner import get_runner
+
+    runner = get_runner()
+    status = runner.status()
+    status["in_market_hours"] = runner_in_market_hours()
+    return status
+
+
+def runner_in_market_hours() -> bool:
+    """Whether the cash session is open, from the runner's own definition."""
+    from atr.services.runner import in_market_hours
+
+    return in_market_hours()
+
+
 @router.post("/deployments", status_code=status.HTTP_201_CREATED)
 def create_deployment(
     body: DeploymentCreate, principal: Principal = Depends(_RUN)
