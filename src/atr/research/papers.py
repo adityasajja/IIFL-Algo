@@ -11,10 +11,10 @@ Implements battle-tested quantitative strategies and research paper models:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
-import numpy as np
 import pandas as pd
 
 from atr.strategy.indicators import atr, ema, rsi, sma

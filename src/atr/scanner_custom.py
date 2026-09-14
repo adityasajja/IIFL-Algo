@@ -34,8 +34,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from atr.strategy.indicators import atr as _atr, bollinger, ema, rsi as _rsi, sma
-
+from atr.strategy.indicators import atr as _atr
+from atr.strategy.indicators import bollinger, ema, sma
+from atr.strategy.indicators import rsi as _rsi
 
 # ---------------------------------------------------------------------------
 # Condition model (plain dict for JSON simplicity)

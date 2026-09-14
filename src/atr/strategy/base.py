@@ -128,11 +128,13 @@ class StrategyContext:
         submit: Callable[[Order], Order],
         portfolio_getter: Callable,
         window_size: int = 500,
+        cancel: Callable[[Order, str], None] | None = None,
     ) -> None:
         self.instruments = instruments
         self.frames = frames
         self._submit = submit
         self._portfolio = portfolio_getter
+        self._cancel = cancel
         self.now: datetime | None = None
         self.index: int = -1
         self.windows: dict[str, RollingWindow] = {
@@ -242,6 +244,20 @@ class StrategyContext:
         if abs(delta) < 1e-9:
             return None
         return self.order(symbol, delta, **kwargs)
+
+    def cancel(self, order: Order, reason: str = "cancelled") -> None:
+        """Withdraw a resting order.
+
+        Needed by any strategy that keeps a *live* protective stop: re-pricing a
+        trailing stop means cancelling the old one first, and without this the
+        only alternatives are a fixed stop (no trail) or stacking a new stop
+        every bar. Silently does nothing when the venue exposes no cancellation
+        — a backtest engine without it, for instance — so a strategy never
+        crashes on a context that cannot cancel.
+        """
+        if self._cancel is None:
+            return
+        self._cancel(order, reason)
 
     def close(self, symbol: str, tag: str = "exit") -> Order | None:
         pos = self.position(symbol)

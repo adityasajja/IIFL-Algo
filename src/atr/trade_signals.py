@@ -23,17 +23,16 @@ stop/target hit (monitored externally via positions)
 from __future__ import annotations
 
 import json
-import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import pandas as pd
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from atr.strategy.indicators import atr as _atr, rsi as _rsi, sma
+from atr.strategy.indicators import atr as _atr
 
 IST = timezone(timedelta(hours=5, minutes=30))
 QUEUE_PATH = Path("data/trade_signals/queue.json")
@@ -321,7 +320,7 @@ def format_telegram_preview(sig: TradeSignal) -> tuple[str, str]:
         f"• Qty:    {sig.quantity} shares\n"
         f"• Risk:   ₹{sig.risk_amount:,.0f} ({sig.rr_ratio:.1f}:1 R:R)\n"
         f"• RSI:    {sig.rsi:.0f}" if sig.rsi else ""
-        + f"\n\nOpen dashboard → Scanner → Trade Signals to execute."
+        + "\n\nOpen dashboard → Scanner → Trade Signals to execute."
     )
     return header, body
 

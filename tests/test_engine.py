@@ -6,7 +6,8 @@ conservation, cost attribution, and risk halting.
 
 from __future__ import annotations
 
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from atr.backtest.metrics import compute_metrics, max_drawdown
 from atr.backtest.portfolio import Portfolio
 from atr.core.enums import AssetClass, OrderStatus, OrderType, Side
 from atr.core.models import Bar, Fill, Instrument, MarketSnapshot, Order
+from atr.data.base import ListFeed
 from atr.data.synthetic import SyntheticConfig, SyntheticFeed
 from atr.execution.risk import RiskEngine, RiskLimits
 from atr.strategy.base import Strategy
@@ -152,11 +154,121 @@ def test_risk_daily_loss_halts():
     assert risk.halted
 
 
+def test_daily_loss_baseline_moves_with_the_day():
+    """A daily limit must measure today, not everything since inception.
+
+    `reset_daily` used to leave `day_start_equity` pinned to the first bar of
+    the run, so `max_daily_loss` silently became a cumulative-drawdown limit:
+    it tripped once, permanently, and the log reported a single-day loss that
+    never happened. In a backtest that truncates the sample; live, it would
+    halt the account for the rest of its life after one bad week.
+    """
+    portfolio = Portfolio(initial_cash=100_000)
+    risk = RiskEngine(RiskLimits(max_daily_loss=5_000))
+
+    risk.check(portfolio, datetime(2024, 1, 1))
+    portfolio.cash -= 4_000          # a 4k loss today — under the 5k limit
+    assert risk.check(portfolio, datetime(2024, 1, 1)).allowed
+
+    risk.reset_daily(portfolio.equity)   # new session, baseline = 96k
+    portfolio.cash -= 4_000              # another 4k, still under the limit
+    assert risk.check(portfolio, datetime(2024, 1, 2)).allowed
+    assert not risk.halted
+
+    # Cumulative loss is now 8k > 5k, but neither day exceeded the limit.
+    portfolio.cash -= 1_000              # today's loss reaches 5k
+    assert not risk.check(portfolio, datetime(2024, 1, 2)).allowed
+
+
+def test_daily_loss_limit_can_fire_on_daily_bars():
+    """Seeding the baseline after the mark makes the limit unfireable.
+
+    The engine marks the bar and *then* runs the risk check, so a baseline
+    seeded inside `check` is today's own closing equity and the comparison is
+    always zero. It has to come from the rollover.
+    """
+    # Distinct calendar days: `_snapshots` stamps every bar with one timestamp,
+    # so the engine would never see a session rollover and the baseline would
+    # never be seeded at all.
+    snaps = []
+    for i, price in enumerate([100.0, 100.0, 88.0, 88.0]):
+        ts = datetime(2024, 1, 1, 9, 30) + timedelta(days=i)
+        bar = Bar(ts=ts, open=price, high=price * 1.01, low=price * 0.99,
+                  close=price, volume=10_000)
+        snaps.append(MarketSnapshot(ts=ts, bars={"TEST": bar}))
+
+    class _BuyOnceHere(Strategy):
+        name = "buy_once_here"
+        done = False
+
+        def on_bar(self, ctx) -> None:
+            if not self.done:
+                self.done = True
+                ctx.order("TEST", 500, tag="entry")
+
+    config = BacktestConfig(
+        initial_cash=100_000,
+        risk=RiskLimits(max_daily_loss=5_000),
+        slippage=SlippageModel(bps=0.0),
+    )
+    engine = BacktestEngine(ListFeed(snaps, {"TEST": EQ}), _BuyOnceHere(), config)
+    result = engine.run()
+    # 500 shares at 100, marked down to 88 on day 3: a 6,000 loss in one session.
+    assert result.killed
+    assert "daily loss" in (result.kill_reason or "")
+
+
 def test_risk_blocks_short_when_disabled():
     portfolio = Portfolio(initial_cash=100_000)
     risk = RiskEngine(RiskLimits(allow_short=False))
     order = Order(instrument=EQ, side=Side.SELL, quantity=10)
     assert not risk.check_order(order, portfolio).allowed
+
+
+def test_marking_with_a_missing_price_keeps_the_last_known_one():
+    """A NaN price is not a price, and the damage does not stay local.
+
+    The feed writes NaN for a symbol with no bar on a given step. Assigning it
+    made `market_value` — and so `portfolio.equity` — NaN for that bar. The
+    equity curve recorded the NaN, every metric computed from it was NaN, and
+    strategies sizing off `ctx.equity` died later as `int(nan)` in an unrelated
+    symbol. It surfaced as "cannot convert float NaN to integer" three control
+    runs out of six.
+    """
+    portfolio = Portfolio(initial_cash=100_000)
+    portfolio.apply_fill(
+        Fill(order_id="1", instrument=EQ, side=Side.BUY, quantity=100, price=100.0,
+             ts=datetime(2024, 1, 1), commission=0.0)
+    )
+    portfolio.mark(datetime(2024, 1, 2), {"TEST": 110.0})
+    assert portfolio.equity == pytest.approx(101_000.0)
+
+    for bad in (float("nan"), None, 0.0, float("inf")):
+        portfolio.mark(datetime(2024, 1, 3), {"TEST": bad})
+        assert portfolio.equity == pytest.approx(101_000.0), f"{bad!r} leaked in"
+        assert not math.isnan(portfolio.equity)
+
+
+def test_equity_curve_has_no_nans_when_a_bar_is_missing():
+    snaps = []
+    for i, price in enumerate([100.0, 100.0, float("nan"), 105.0, 105.0]):
+        ts = datetime(2024, 1, 1, 9, 30) + timedelta(days=i)
+        bar = Bar(ts=ts, open=price, high=price, low=price, close=price, volume=1_000)
+        snaps.append(MarketSnapshot(ts=ts, bars={"TEST": bar}))
+
+    class _BuyOnceHere(Strategy):
+        name = "buy_once_here"
+        done = False
+
+        def on_bar(self, ctx) -> None:
+            if not self.done:
+                self.done = True
+                ctx.order("TEST", 100, tag="entry")
+
+    config = BacktestConfig(initial_cash=100_000, slippage=SlippageModel(bps=0.0))
+    result = BacktestEngine(ListFeed(snaps, {"TEST": EQ}), _BuyOnceHere(), config).run()
+    assert not result.equity.isna().any()
+    assert not math.isnan(result.metrics.sharpe)
 
 
 class _BuyOnce(Strategy):

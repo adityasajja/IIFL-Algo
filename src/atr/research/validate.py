@@ -286,8 +286,8 @@ class WalkForwardResult:
             f"OOS trades          : {self.oos_metrics.num_trades}",
             f"buy & hold return   : {self.benchmark_metrics.total_return_pct:.2f}%",
             f"buy & hold Sharpe   : {self.benchmark_metrics.sharpe:.2f}",
-            f"required Sharpe     : {self.required_sharpe:.4f} (hurdle for {self.n_trials} trials)",
-            f"deflated Sharpe     : {self.deflated_sharpe:.3f}",
+            f"Sharpe hurdle       : {self.required_sharpe:.4f} (max expected from {self.n_trials} trials)",
+            f"P(edge is real)     : {self.deflated_sharpe:.3f}  (need >= 0.95)",
             "",
             self.verdict.summary(),
         ]
@@ -502,9 +502,15 @@ def _verdict(
 
     ok = dsr >= cfg.min_confidence
     checks.append((
-        f"deflated Sharpe >= {cfg.min_confidence:.2f}",
+        f"P(edge is real) >= {cfg.min_confidence:.2f}",
         ok,
-        f"{dsr:.3f} vs required Sharpe {hurdle:.4f}",
+        # `dsr` is a probability in [0, 1]; `hurdle` is the Sharpe the best
+        # trial must beat, a different quantity on a different scale. Naming
+        # both as "Sharpe" made a clear failure read as a near-miss: it showed
+        # "0.753 vs required Sharpe 0.0456", inviting the conclusion that a
+        # Sharpe of 0.046 would have passed, when the bar was 0.95 probability.
+        f"{dsr:.3f} probability vs {cfg.min_confidence:.2f} required "
+        f"(multiple-testing hurdle = Sharpe {hurdle:.4f})",
     ))
 
     ok = oos.sharpe > 0

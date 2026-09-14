@@ -860,7 +860,7 @@ def _run_dev(args) -> int:
         ),
     ]
 
-    url = f"http://localhost:5173"
+    url = "http://localhost:5173"
     logger.info("dashboard (dev) at {}", url)
     if not args.no_browser:
         _open_browser(url)

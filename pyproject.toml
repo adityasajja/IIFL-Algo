@@ -6,12 +6,17 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 dependencies = [
+    "cryptography>=43",
     "fastapi>=0.115",
     "httpx>=0.28",
     "loguru>=0.7",
     "numpy>=2.1",
     "pandas>=2.2",
     "paho-mqtt>=2.1",
+    # Imported by atr/api/stream.py, atr/data/history.py and atr/signals/engine.py
+    # but previously undeclared — those paths only worked because polars happened
+    # to be present in the developer's environment.
+    "polars>=1.0",
     "psycopg[binary]>=3.2",
     "pyarrow>=18.0",
     "pydantic>=2.9",

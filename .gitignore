@@ -27,3 +27,25 @@ web/dist/
 # Chromium profiles they leave behind. Useful to look at, not to version —
 # they are regenerated in seconds and the profiles are megabytes of cache.
 /.workbuddy-ai/shots-*/
+# Anchored and given a trailing slash on purpose: a bare `cdp-profile` pattern
+# would also match any file of that name anywhere in the tree, and these are
+# only ever created at the repo root by the probe scripts.
+/.cdp-profile*
+# Scratch payloads written while probing the API.
+/.summary.json
+/.server.log
+
+# Throwaway control-plane stores and captured test output used by the smoke
+# scripts. `scripts/smoke_api.py` asserts the first-run state, so it needs an
+# empty store — a new database name is used per run rather than deleting one.
+/.smoke/
+/.boot.json
+/.full*.txt
+/.out.txt
+/.contract_out.txt
+
+# Captured pytest output and the JUnit report. The shell harness intercepts
+# pytest's own summary line, so the JUnit XML is the only trustworthy count.
+/.pytest_last.txt
+/.pytest_result.xml
+/.pytest-report.xml

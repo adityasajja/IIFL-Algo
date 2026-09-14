@@ -6,8 +6,8 @@ signals and research math can't drift apart.
 
 from __future__ import annotations
 
-from datetime import date
 import time
+from datetime import date
 
 import pandas as pd
 
@@ -29,7 +29,7 @@ SCAN_FROM = "01-Mar-2026"
 def resolve_conid(master: InstrumentMaster, symbol: str, exchange: str = "NSEEQ") -> str:
     """EQ-suffix aware lookup with a prefix-search fallback (renames/demergers)."""
     try:
-        return str(getattr(master.find(symbol, exchange), "conid"))
+        return str(master.find(symbol, exchange).conid)
     except KeyError:
         root = symbol.split("-")[0]
         hits = master.search(root, exchange=exchange, limit=10)

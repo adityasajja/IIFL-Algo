@@ -79,6 +79,30 @@ class Settings(BaseSettings):
     bt_fill_on_next_open: bool = True
     bt_equity_margin_ratio: float = 1.0
 
+    # ---------------- Application store (control plane) ----------------
+    #: Users, sessions, watchlists, audit. SQLite by default so a fresh clone
+    #: can log in with nothing installed; point at Postgres to share state.
+    app_db_url: str = "sqlite:///data/app.db"
+    #: Self-registration. Off by default — a trading platform should not accept
+    #: strangers. The first account is created through the bootstrap route.
+    allow_signup: bool = False
+    #: Session lifetime. A trading session is long, so this is generous.
+    session_ttl_hours: int = 24 * 14
+    #: Require a session for the API. Loopback requests in ``dev`` are exempt
+    #: while no account exists yet, so the single-operator workflow keeps working.
+    auth_required: bool = True
+    #: Key material for encrypting secrets at rest (broker credentials, TOTP
+    #: seeds). Read from ``ATR_SECRET_KEY``. Empty means a local key file is
+    #: generated under ``data/``.
+    atr_secret_key: str = ""
+    login_max_attempts: int = 8
+    login_lockout_minutes: int = 15
+    #: Require a second factor for admin/owner accounts. Off by default so a
+    #: fresh install is usable; turn it on for anything reachable off-host.
+    require_mfa_for_privileged: bool = False
+    rate_limit_per_minute: int = 240
+    rate_limit_login_per_minute: int = 10
+
     # ---------------- API ----------------
     api_host: str = "127.0.0.1"
     api_port: int = 8000

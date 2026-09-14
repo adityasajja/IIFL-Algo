@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -129,7 +129,7 @@ class SelfLearningEngine:
                     market_regime=mr,
                     strategies=strats,
                     total_cycles_trained=data.get("total_cycles_trained", 0),
-                    last_trained_at=data.get("last_trained_at", datetime.now(timezone.utc).isoformat()),
+                    last_trained_at=data.get("last_trained_at", datetime.now(UTC).isoformat()),
                     model_version=data.get("model_version", "v1.0.0"),
                 )
             except Exception as e:
@@ -141,13 +141,13 @@ class SelfLearningEngine:
             volatility_ratio=1.05,
             nifty_trend="UPTREND",
             confidence=0.85,
-            as_of=datetime.now(timezone.utc).isoformat(),
+            as_of=datetime.now(UTC).isoformat(),
         )
         return SelfLearningState(
             market_regime=default_mr,
             strategies=get_default_strategies(),
             total_cycles_trained=1,
-            last_trained_at=datetime.now(timezone.utc).isoformat(),
+            last_trained_at=datetime.now(UTC).isoformat(),
             model_version="v1.0.0-quant",
         )
 
@@ -212,7 +212,7 @@ class SelfLearningEngine:
             volatility_ratio=round(avg_vol_ratio, 2),
             nifty_trend="UPTREND" if breadth >= 50 else "DOWNTREND",
             confidence=0.90,
-            as_of=datetime.now(timezone.utc).isoformat(),
+            as_of=datetime.now(UTC).isoformat(),
         )
         self.state.market_regime = regime_info
         return regime_info
@@ -268,7 +268,7 @@ class SelfLearningEngine:
         frames = load_cached("NSEEQ")
         self.detect_regime(frames)
         self.state.total_cycles_trained += 1
-        self.state.last_trained_at = datetime.now(timezone.utc).isoformat()
+        self.state.last_trained_at = datetime.now(UTC).isoformat()
         self.update_bayesian_weights()
         self.save()
 

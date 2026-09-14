@@ -295,3 +295,75 @@ def test_to_frame_has_one_row_per_fold():
     assert len(frame) == len(result.folds)
     assert "param_fast" in frame.columns and "param_slow" in frame.columns
     assert "test_sharpe" in frame.columns
+
+
+# --------------------------------------------------------------------------
+# Report wording: a probability must not be labelled as a Sharpe ratio
+# --------------------------------------------------------------------------
+def _metrics(sharpe, total_return=20.0, max_dd=12.0, trades=200):
+    from atr.backtest.metrics import Metrics
+
+    return Metrics(
+        start_equity=100_000.0, end_equity=120_000.0,
+        total_return_pct=total_return, cagr_pct=10.0,
+        annualized_vol_pct=10.0, sharpe=sharpe, sortino=sharpe,
+        max_drawdown_pct=max_dd, max_drawdown_days=5.0, calmar=2.0,
+        num_trades=trades, win_rate_pct=50.0, profit_factor=1.1,
+        avg_trade=100.0, best_trade=900.0, worst_trade=-400.0,
+        avg_holding_days=6.0, total_commission=500.0, total_slippage=400.0,
+        exposure_pct=60.0, final_positions=0,
+    )
+
+
+def _verdict_for(dsr: float, hurdle: float):
+    """Build a Verdict from synthetic fold/metric stand-ins."""
+    from atr.research.validate import _verdict
+
+    return _verdict(
+        [],
+        _metrics(0.6),
+        _metrics(1.05, total_return=45.0, max_dd=20.0, trades=0),
+        dsr,
+        hurdle,
+        ValidationConfig(),
+    )
+
+
+def test_deflated_sharpe_check_is_not_labelled_as_a_sharpe():
+    """The PSR check must not name a probability as a Sharpe ratio.
+
+    Regression: the check read "deflated Sharpe >= 0.95" with detail
+    "0.753 vs required Sharpe 0.0456". Those are different quantities on
+    different scales -- a probability in [0,1] and the multiple-testing hurdle
+    -- so a clear failure looked like a near-miss against a Sharpe of 0.046.
+    """
+    verdict = _verdict_for(dsr=0.753, hurdle=0.0456)
+    names = [c[0] for c in verdict.checks]
+
+    # No check may call the probability a "Sharpe".
+    dsr_checks = [n for n in names if "0.95" in n]
+    assert dsr_checks, "the significance check must exist"
+    for name in dsr_checks:
+        assert "deflated Sharpe >=" not in name, f"misleading label: {name!r}"
+        assert "P(" in name or "probab" in name.lower(), f"unclear label: {name!r}"
+
+    detail = next(c[2] for c in verdict.checks if "0.95" in c[0])
+    # The hurdle is still reported, but explicitly named as the hurdle.
+    assert "0.0456" in detail
+    assert "hurdle" in detail.lower(), f"hurdle not identified: {detail!r}"
+    # And the probability is distinguished from it.
+    assert "0.753" in detail
+
+
+def test_high_probability_passes_the_significance_check():
+    """A genuine 0.99 probability must clear a 0.95 bar."""
+    verdict = _verdict_for(dsr=0.99, hurdle=0.02)
+    check = next(c for c in verdict.checks if "0.95" in c[0])
+    assert check[1]
+
+
+def test_low_probability_fails_the_significance_check():
+    """0.34 probability is a clear fail, and must read as one."""
+    verdict = _verdict_for(dsr=0.343, hurdle=0.1012)
+    check = next(c for c in verdict.checks if "0.95" in c[0])
+    assert not check[1]

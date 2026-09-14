@@ -136,6 +136,7 @@ class BacktestEngine:
             frames=self.frames,
             submit=self._submit,
             portfolio_getter=lambda: self.portfolio,
+            cancel=self.broker.cancel,
         )
         self.risk.reset()
         self.strategy.on_start(ctx)
@@ -148,7 +149,10 @@ class BacktestEngine:
                 self.strategy.on_session_end(ctx)
                 if self.config.square_off_eod:
                     ctx.close_all()
-                self.risk.reset_daily()
+                # Seed the daily-loss baseline from the previous close, before
+                # this bar is marked. Without it the baseline would be set after
+                # the mark and a daily limit could never fire on daily bars.
+                self.risk.reset_daily(self.portfolio.equity)
             current_day = snap.ts.date()
 
             # --- fills --------------------------------------------------
