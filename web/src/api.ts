@@ -921,6 +921,202 @@ export const upsertSavedScan = (id: string, scan: SavedScan) =>
 export const deleteSavedScan = (id: string) =>
   req<{ deleted: string }>(`/scanner/saved/${encodeURIComponent(id)}`, { method: "DELETE" });
 
+// ─── Screener (v1) ────────────────────────────────────────────────────────────
+//
+// The v1 screener is a different, stricter model than `/scanner/custom` above.
+// The meaningful differences the UI has to respect:
+//
+//  * Conditions are a *tree* (`{match, conditions}` groups nesting arbitrarily),
+//    not a flat list with one global AND/OR.
+//  * Every row carries `why` — the evidence for each passing leaf, with the
+//    measured value and the sentence explaining it. That is the feature.
+//  * Some indicators are declared but not computable (no fundamentals feed).
+//    They come back with `available: false` and a reason, so the builder greys
+//    them out instead of offering a filter that can never match.
+
+/** A condition node: either a group (`match` + `conditions`) or a leaf. */
+export interface ScreenerNode {
+  match?: "all" | "any";
+  conditions?: ScreenerNode[];
+  label?: string;
+  negate?: boolean;
+  // leaf fields
+  indicator?: string;
+  op?: string;
+  value?: number;
+  upper?: number;
+  period?: number;
+  rhs_indicator?: string;
+  rhs_period?: number;
+}
+
+export interface ScreenerEvidence {
+  label: string;
+  indicator: string;
+  period: number | null;
+  op: string;
+  value: number | null;
+  target: number | null;
+  target_indicator: string | null;
+  target_period: number | null;
+  upper: number | null;
+  /** True when the indicator could not be computed. Distinct from "did not
+   *  match": the test never happened, and the UI must not imply it failed. */
+  unmeasurable: boolean;
+  passed: boolean;
+  reason: string;
+  unit: string;
+}
+
+export interface ScreenerRow {
+  symbol: string;
+  ltp?: number;
+  change_pct?: number;
+  volume?: number;
+  rel_volume?: number;
+  rsi14?: number;
+  ema20?: number;
+  ema50?: number;
+  atr_pct?: number;
+  setup?: string;
+  /** Evidence for the leaves that actually passed. */
+  why: ScreenerEvidence[];
+  /** Evidence for every leaf, passed or not. */
+  evidence: ScreenerEvidence[];
+  [column: string]: unknown;
+}
+
+export interface ScreenerRunResponse {
+  as_of: string | null;
+  exchange: string;
+  universe: string;
+  universe_size: number;
+  scanned: number;
+  matched: number;
+  returned: number;
+  sort: string;
+  descending: boolean;
+  columns: string[];
+  conditions: { groups: number; leaves: number; summary: string };
+  elapsed_s: number;
+  rows: ScreenerRow[];
+  warnings: string[];
+  errors: { symbol: string; error: string }[];
+}
+
+export interface ScreenerUniverse {
+  name: string;
+  label: string;
+  size: number;
+  members: number;
+  missing_history: number;
+}
+
+export interface ScreenerIndicator {
+  key: string;
+  label: string;
+  group: string;
+  unit: string;
+  takes_period: boolean;
+  default_period: number | null;
+  available: boolean;
+  requires: string;
+  description: string;
+}
+
+export interface ScreenerColumn {
+  key: string;
+  label: string;
+  indicator: string;
+}
+
+export interface ScreenerSaved {
+  scan_id: string;
+  name: string;
+  description: string | null;
+  definition: {
+    universe?: string;
+    exchange?: string;
+    conditions?: ScreenerNode;
+    columns?: string[];
+    sort?: string;
+  };
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export const screenerUniverses = (exchange = "NSEEQ") =>
+  req<{ exchange: string; universes: ScreenerUniverse[] }>(
+    `/api/v1/screener/universes?exchange=${encodeURIComponent(exchange)}`,
+  );
+
+export const screenerIndicators = () =>
+  req<{
+    indicators: ScreenerIndicator[];
+    groups: string[];
+    available: string[];
+    unavailable: string[];
+  }>("/api/v1/screener/indicators");
+
+export const screenerColumns = () =>
+  req<{
+    columns: ScreenerColumn[];
+    sort_fields: { key: string; description: string }[];
+    default_sort: string;
+  }>("/api/v1/screener/columns");
+
+export const screenerValidate = (conditions: ScreenerNode) =>
+  req<{
+    valid: boolean;
+    error?: string;
+    code?: string;
+    /** Present only when valid — the human-readable form of the tree. */
+    summary?: string;
+    groups?: number;
+    leaves?: number;
+    warnings?: string[];
+  }>("/api/v1/screener/validate", {
+    method: "POST",
+    body: JSON.stringify({ conditions }),
+  });
+
+export const screenerRun = (body: {
+  universe?: string;
+  exchange?: string;
+  conditions: ScreenerNode;
+  columns?: string[];
+  sort?: string;
+  descending?: boolean;
+  limit?: number;
+}) =>
+  req<ScreenerRunResponse>("/api/v1/screener/run", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const screenerListSaved = () =>
+  req<{ scans: ScreenerSaved[] }>("/api/v1/screener/saved");
+
+export const screenerSave = (body: {
+  name: string;
+  description?: string;
+  definition: ScreenerSaved["definition"];
+}) =>
+  req<ScreenerSaved>("/api/v1/screener/saved", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const screenerDeleteSaved = (scanId: string) =>
+  req<{ deleted: string }>(`/api/v1/screener/saved/${encodeURIComponent(scanId)}`, {
+    method: "DELETE",
+  });
+
+export const screenerSavedResults = (scanId: string, limit = 50) =>
+  req<ScreenerRunResponse>(
+    `/api/v1/screener/saved/${encodeURIComponent(scanId)}/results?limit=${limit}`,
+  );
+
 // ─── Trade Signals (Semi-auto) ────────────────────────────────────────────────
 
 export interface TradeSignal {

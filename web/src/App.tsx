@@ -51,6 +51,7 @@ import EvidencePanel from "./EvidencePanel";
 import RiskPanel from "./RiskPanel";
 import StrategiesPanel from "./StrategiesPanel";
 import ScannerPanel from "./ScannerPanel";
+import ScreenerPanel from "./ScreenerPanel";
 import SystemPanel from "./SystemPanel";
 import {
   appLogout,
@@ -83,7 +84,7 @@ export type Tab =
   | "risk"
   | "system";
 
-export type MarketsSub = "scanner" | "custom" | "charts";
+export type MarketsSub = "scanner" | "custom" | "screener" | "charts";
 export type SignalsSub = "brief" | "alerts" | "queue";
 export type EvidenceSub = "research" | "measured" | "findings" | "backtest";
 export type TradingSub = "portfolio" | "mode";
@@ -234,11 +235,13 @@ function MarketsTabContainer({
         options={[
           { id: "scanner" as MarketsSub, label: "Momentum scan" },
           { id: "custom" as MarketsSub, label: "Custom scan" },
+          { id: "screener" as MarketsSub, label: "Screener" },
           { id: "charts" as MarketsSub, label: "Charts" },
         ]}
       />
       {sub === "scanner" && <ScannerPanel onOpenChart={onOpenChart} />}
       {sub === "custom" && <CustomScannerPanel onOpenChart={onOpenChart} />}
+      {sub === "screener" && <ScreenerPanel onOpenChart={onOpenChart} />}
       {sub === "charts" && <ChartsPanel theme={theme} />}
     </div>
   );

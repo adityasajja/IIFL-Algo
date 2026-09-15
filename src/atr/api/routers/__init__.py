@@ -17,6 +17,7 @@ from atr.api.routers import (
     paper,
     reconciliation,
     risk,
+    screener,
     watchlists,
 )
 
@@ -29,6 +30,7 @@ ROUTERS: tuple[APIRouter, ...] = (
     risk.router,
     paper.router,
     reconciliation.router,
+    screener.router,
 )
 
 

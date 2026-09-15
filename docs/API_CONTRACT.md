@@ -390,17 +390,43 @@ POST   /{id}/from-nl           natural language → rules (AI, returns a draft)
 
 ## Screener — `/api/v1/screener` (Phase 2)
 
+**Shipped 2026-09-14.** Implemented surface:
+
 ```
 GET    /universes              available universes and their sizes
-POST   /run                    { universe, conditions, limit } → ranked rows
+GET    /indicators              the indicator catalog (incl. unavailable ones)
+GET    /columns                 display-column registry + permitted sort keys
+POST   /run                    { universe, conditions, sort, limit } → ranked rows
 POST   /validate               validate a condition tree without running it
 GET    /saved                  saved scans
 POST   /saved                  save a scan
+GET    /saved/{id}              one saved scan
+PUT    /saved/{id}              edit a saved scan
 DELETE /saved/{id}
-POST   /saved/{id}/schedule    { cron | interval, enabled }
-GET    /saved/{id}/results     last results
-WS     /stream                 live scan results as events fire
+GET    /saved/{id}/results     run a saved scan (live, see note)
 ```
+
+**Not implemented, deliberately:**
+
+```
+POST   /saved/{id}/schedule    needs a real scheduler (missed windows, overlap,
+                               backfill after downtime) — not a stub endpoint
+WS     /stream                 live results as events fire
+```
+
+`GET /saved/{id}/results` runs the scan live rather than serving a cached last
+result. There is no result store behind it, and returning a stale result labelled
+"last results" would be worse than returning a fresh one.
+
+Condition trees are owned by `atr.screener.conditions`. A leaf is
+`{indicator, op, value|rhs_indicator, period?, rhs_period?, upper?}`; a group is
+`{match: "all"|"any", conditions: [...]}` and nests to 8 levels. The operator set
+is exactly `atr.screener.OPERATORS`.
+
+Every returned row carries `why` (evidence for the leaves that passed) and
+`evidence` (all leaves, including failures), each with the measured value, the
+target, and a sentence. An indicator that could not be computed sets
+`unmeasurable: true` — distinct from `passed: false`.
 
 ## Backtest — `/api/v1/backtests` (Phase 2)
 

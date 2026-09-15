@@ -50,6 +50,13 @@ def _reset_all() -> None:
     reset_auth_service()
     reset_rate_limiter()
     reset_instrument_master()
+    # The screener caches both a frame map and (historically) a database handle.
+    # Leaving it out of this list let one test's cached state survive into the
+    # next, which surfaced as a foreign-key failure on a row whose parent the
+    # previous test had created.
+    from atr.screener.service import reset_screener_service
+
+    reset_screener_service()
 
 
 @pytest.fixture()
