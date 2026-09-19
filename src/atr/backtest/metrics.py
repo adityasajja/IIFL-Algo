@@ -85,8 +85,25 @@ class Metrics:
     final_positions: int
 
     def as_dict(self) -> dict[str, float]:
-        return {k: (float(v) if isinstance(v, (int, float, np.floating)) else v)
-                for k, v in self.__dict__.items()}
+        """JSON-safe metrics. Counts stay integers; only reals are coerced.
+
+        ``int`` used to be swept up by the same ``float()`` as everything else,
+        so ``num_trades`` came out as ``12.0``. That is a count, and a UI that
+        renders "12.0 trades" (or a consumer that has to know to round it) is
+        being told something untrue about the type. ``bool`` is a subclass of
+        int, so it is excluded explicitly or the flags would become 0.0/1.0.
+        """
+        out: dict[str, float] = {}
+        for key, value in self.__dict__.items():
+            if isinstance(value, (bool, str, type(None))):
+                out[key] = value
+            elif isinstance(value, int):
+                out[key] = int(value)
+            elif isinstance(value, (float, np.floating)):
+                out[key] = float(value)
+            else:
+                out[key] = value
+        return out
 
     def summary(self) -> str:
         rows = [

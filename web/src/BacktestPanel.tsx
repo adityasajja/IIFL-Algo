@@ -8,15 +8,13 @@ import {
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
 import { EquityChart } from "./components/ui/equity-chart";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Callout, Stat, fmtNum, fmtPct } from "./components/ui/stat";
 import { Switch } from "./components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 
 type Source = "synthetic" | "history";
-
-const selectClass =
-  "h-11 w-full rounded-full border border-border bg-transparent px-3.5 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 [&>option]:bg-card";
 
 function fmt(v: number | string | boolean | null): string {
   if (v === null || v === undefined) return "—";
@@ -55,6 +53,7 @@ export default function BacktestPanel() {
     setSource(next);
     setResult(null);
     setError(null);
+    setRunState("idle");
     setSymbols(next === "history" ? "RELIANCE-EQ,INFY-EQ,TCS-EQ" : "AAPL,MSFT");
   }
 
@@ -127,20 +126,14 @@ export default function BacktestPanel() {
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <label className="px-1 text-sm font-medium text-foreground">Strategy</label>
-              <select
+              <Select
                 value={strategy}
-                onChange={(e) => setStrategy(e.target.value)}
-                className={selectClass}
-              >
-                {(strategies.length
+                onChange={setStrategy}
+                options={(strategies.length
                   ? strategies.map((s) => s.name)
                   : ["sma_crossover", "opening_range_breakout", "signals_entry"]
-                ).map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                ).map((s) => ({ value: s, label: s }))}
+              />
             </div>
             <Input
               label="Symbols (comma separated)"
