@@ -9,15 +9,16 @@ import {
 import { Button } from "./components/ui/button";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Switch } from "./components/ui/switch";
 import { useToast } from "./components/ui/toast-context";
+import { formatIst } from "./lib/format";
+import { ChevronDown } from "lucide-react";
+import { cn } from "./lib/utils";
 
 const SYNC_CMD = `schtasks /create /tn "ATR history sync" /tr "cmd /c cd /d D:\\ALGO && uv run atr history sync" /sc daily /st 16:00 /f`;
 const BRIEF_CMD = `schtasks /create /tn "ATR morning brief" /tr "cmd /c cd /d D:\\ALGO && uv run atr brief send" /sc daily /st 08:45 /f`;
-
-const selectClass =
-  "h-11 w-full rounded-full border border-border bg-transparent px-3.5 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 [&>option]:bg-card";
 
 export default function BriefingPanel() {
   const { toast } = useToast();
@@ -27,6 +28,7 @@ export default function BriefingPanel() {
   const [previewState, setPreviewState] = useState<ButtonState>("idle");
   const [sendState, setSendState] = useState<ButtonState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [showAutomation, setShowAutomation] = useState(false);
 
   async function refresh() {
     try {
@@ -119,31 +121,49 @@ export default function BriefingPanel() {
   }
 
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-4">
       <Card>
-        <CardHeader title="Briefing config" sub={lastSent ? `Last sent: ${lastSent}` : "Never sent"} />
+        <CardHeader
+          title="Morning brief"
+          sub={
+            lastSent
+              ? (() => {
+                  const [when, via] = lastSent.split(" via ");
+                  return `Last sent ${formatIst(when)}${via ? ` on ${via.charAt(0).toUpperCase()}${via.slice(1)}` : ""}`;
+                })()
+              : "Not sent yet"
+          }
+        />
         <div className="grid gap-3.5 p-5 sm:grid-cols-2 lg:grid-cols-4">
-          <Input label="Long ideas" type="number" value={String(cfg.top_n)} onChange={(v) => set("top_n", Number(v))} />
-          <Input label="Avoid list" type="number" value={String(cfg.avoid_n)} onChange={(v) => set("avoid_n", Number(v))} />
-          <Input label="Min price ₹" type="number" value={String(cfg.min_price)} onChange={(v) => set("min_price", Number(v))} />
-          <Input label="Min day value ₹L" type="number" value={String(cfg.min_day_value_lakh)} onChange={(v) => set("min_day_value_lakh", Number(v))} />
-          <Input label="Min ATR %" type="number" value={String(cfg.min_atr_pct)} onChange={(v) => set("min_atr_pct", Number(v))} />
+          <Input label="Stocks to buy" type="number" value={String(cfg.top_n)} onChange={(v) => set("top_n", Number(v))} />
+          <Input label="Stocks to avoid" type="number" value={String(cfg.avoid_n)} onChange={(v) => set("avoid_n", Number(v))} />
+          <Input label="Minimum price (₹)" type="number" value={String(cfg.min_price)} onChange={(v) => set("min_price", Number(v))} />
+          <Input label="Minimum daily trading (₹ lakh)" type="number" value={String(cfg.min_day_value_lakh)} onChange={(v) => set("min_day_value_lakh", Number(v))} />
+          <Input label="Minimum daily swing (%)" type="number" value={String(cfg.min_atr_pct)} onChange={(v) => set("min_atr_pct", Number(v))} />
           <div className="flex flex-col gap-1.5">
             <label className="px-1 text-sm font-medium text-foreground">Ranking</label>
-            <select value={cfg.ranking} onChange={(e) => set("ranking", e.target.value)} className={selectClass}>
-              <option value="vs_high">vs 63d high (grid-tested)</option>
-              <option value="score">ret_1m + vs_high (old)</option>
-            </select>
+            <Select
+              value={cfg.ranking}
+              onChange={(v) => set("ranking", v)}
+              options={[
+                { value: "vs_high", label: "Closest to 3-month high" },
+                { value: "score", label: "1-month return (older method)" },
+              ]}
+            />
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="px-1 text-sm font-medium text-foreground">Universe</label>
-            <select value={cfg.universe} onChange={(e) => set("universe", e.target.value)} className={selectClass}>
-              <option value="all">All NSE (cached)</option>
-              <option value="watchlist">Watchlist only</option>
-            </select>
+            <Select
+              value={cfg.universe}
+              onChange={(v) => set("universe", v)}
+              options={[
+                { value: "all", label: "All NSE stocks" },
+                { value: "watchlist", label: "Watchlist only" },
+              ]}
+            />
           </div>
           <div className="flex items-end pb-2">
-            <Switch checked={cfg.send_enabled} onCheckedChange={(v) => set("send_enabled", v)} label="Sending enabled" />
+            <Switch checked={cfg.send_enabled} onCheckedChange={(v) => set("send_enabled", v)} label="Send automatically" />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2.5 px-5 pb-5">
@@ -172,29 +192,38 @@ export default function BriefingPanel() {
       </Card>
 
       <Card>
-        <CardHeader
-          title="Daily automation"
-          sub="Windows Task Scheduler · machine must be on"
-        />
-        <div className="space-y-3 p-5 text-[13px]">
-          <div>
-            <Hint>1 · Refresh data after close (4 PM):</Hint>
-            <code className="mt-1 block overflow-x-auto rounded-xl border border-border bg-background p-3 font-mono text-xs">
-              {SYNC_CMD}
-            </code>
+        <button
+          type="button"
+          onClick={() => setShowAutomation((v) => !v)}
+          aria-expanded={showAutomation}
+          className="flex w-full items-center justify-between px-5 py-4 text-left"
+        >
+          <span>
+            <span className="block text-sm font-semibold tracking-tight">Send it every morning</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">One-time setup on Windows</span>
+          </span>
+          <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", showAutomation && "rotate-180")} />
+        </button>
+        {showAutomation ? (
+          <div className="space-y-3 border-t border-border p-5 text-[13px]">
+            <div>
+              <Hint>1 · Refresh data after the market closes (4 PM):</Hint>
+              <code className="mt-1 block overflow-x-auto rounded-xl border border-border bg-background p-3 font-mono text-xs">
+                {SYNC_CMD}
+              </code>
+            </div>
+            <div>
+              <Hint>2 · Send the brief before the market opens (8:45 AM):</Hint>
+              <code className="mt-1 block overflow-x-auto rounded-xl border border-border bg-background p-3 font-mono text-xs">
+                {BRIEF_CMD}
+              </code>
+            </div>
+            <Hint>
+              Run each once in an admin terminal, and keep the computer on. The morning brief needs no
+              broker login. The 4 PM refresh does, so log in once each morning.
+            </Hint>
           </div>
-          <div>
-            <Hint>2 · Telegram the brief before open (8:45 AM):</Hint>
-            <code className="mt-1 block overflow-x-auto rounded-xl border border-border bg-background p-3 font-mono text-xs">
-              {BRIEF_CMD}
-            </code>
-          </div>
-          <Hint>
-            Run each once in an admin terminal. The 8:45 AM brief needs no IIFL login (cache +
-            Telegram only). The 4 PM sync needs that day&apos;s session — log in once each morning
-            and everything downstream works till midnight IST.
-          </Hint>
-        </div>
+        ) : null}
       </Card>
     </div>
   );

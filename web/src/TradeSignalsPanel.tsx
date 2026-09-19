@@ -18,12 +18,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Loader2,
   RefreshCw,
   Settings,
-  TrendingDown,
-  TrendingUp,
-  X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -41,10 +37,23 @@ import {
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
+import { ButtonLoader } from "./components/ui/loading";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
+import { humanizeSentence } from "./lib/format";
 import { cn } from "./lib/utils";
+import { setVisibleInterval } from "./lib/visibleInterval";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** `BEAR_TREND` -> "Falling market". The model's regime names are internal. */
+function marketWord(regime: string): string {
+  const r = regime.toUpperCase();
+  if (r.includes("BEAR")) return "Falling market";
+  if (r.includes("BULL")) return "Rising market";
+  if (r.includes("SIDE") || r.includes("RANGE")) return "Sideways market";
+  return `${humanizeSentence(regime)} market`;
+}
 
 function fmt(n: number, decimals = 2) {
   return n.toLocaleString("en-IN", {
@@ -64,13 +73,49 @@ function timeLeft(iso: string | null): string {
   if (!iso) return "";
   const diff = (new Date(iso).getTime() - Date.now()) / 1000;
   if (diff <= 0) return "Expired";
-  if (diff < 60) return `${Math.round(diff)}s left`;
-  return `${Math.round(diff / 60)}m left`;
+  if (diff < 3600) return `${Math.max(1, Math.round(diff / 60))}m left`;
+  return `${Math.round(diff / 3600)}h left`;
 }
 
-// ─── Signal card (Pending) ────────────────────────────────────────────────────
+// ─── The trade plan on one bar: stop, entry, target ───────────────────────────
 
-function PendingCard({
+/** Risk (red) and reward (green) either side of the entry, in proportion. */
+function PlanBar({ sig }: { sig: TradeSignal }) {
+  const prices = [sig.stop_loss, sig.entry_price, sig.target];
+  const lo = Math.min(...prices);
+  const span = Math.max(...prices) - lo || 1;
+  const x = (p: number) => ((p - lo) / span) * 100;
+  const seg = (a: number, b: number) => ({ left: `${x(Math.min(a, b))}%`, width: `${Math.abs(x(a) - x(b))}%` });
+  const labels = [
+    { k: "Stop", p: sig.stop_loss, cls: "text-destructive" },
+    { k: "Entry", p: sig.entry_price, cls: "text-foreground" },
+    { k: "Target", p: sig.target, cls: "text-emerald-500" },
+  ].sort((a, b) => a.p - b.p);
+
+  return (
+    <div>
+      <div className="relative h-2 rounded-full bg-muted">
+        <div className="absolute inset-y-0 rounded-full bg-rose-500/60" style={seg(sig.stop_loss, sig.entry_price)} />
+        <div className="absolute inset-y-0 rounded-full bg-emerald-500/60" style={seg(sig.entry_price, sig.target)} />
+        <div
+          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground"
+          style={{ left: `${x(sig.entry_price)}%` }}
+        />
+      </div>
+      <div className="mt-1.5 flex justify-between text-[11px] tabular-nums">
+        {labels.map((l) => (
+          <span key={l.k} className={l.cls}>
+            {l.k} ₹{fmt(l.p)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Pending signal row ───────────────────────────────────────────────────────
+
+function PendingRow({
   sig,
   onExecute,
   onSkip,
@@ -84,6 +129,7 @@ function PendingCard({
   const [executing, setExecuting] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const isBuy = sig.action === "BUY";
 
   const handleExecute = async () => {
@@ -100,144 +146,116 @@ function PendingCard({
 
   const handleSkip = async () => {
     setSkipping(true);
+    setErr(null);
     try {
       await onSkip(sig.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setSkipping(false);
     }
   };
 
+  const hasDetails = !!(sig.thesis || sig.paper_citation || sig.rsi !== null || sig.vol_x !== null);
+
   return (
-    <Card
-      className={cn(
-        "relative overflow-hidden border-l-4 p-5 space-y-4",
-        isBuy ? "border-l-emerald-500" : "border-l-destructive",
-      )}
-    >
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold",
-              isBuy
-                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                : "bg-destructive/15 text-destructive",
-            )}
+    <div className="px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1 basis-56">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                isBuy ? "bg-emerald-500/10 text-emerald-500" : "bg-destructive/10 text-destructive",
+              )}
+            >
+              {isBuy ? "Buy" : "Sell"}
+            </span>
+            <button
+              type="button"
+              onClick={() => onOpenChart?.(sig.symbol)}
+              className="text-base font-semibold hover:underline"
+              title="Open chart"
+            >
+              {sig.symbol.replace("-EQ", "")}
+            </button>
+            <span className="text-xs text-muted-foreground">{sig.setup}</span>
+          </div>
+          <div className="mt-1 truncate text-xs text-muted-foreground" title={sig.reason}>
+            {sig.reason}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => void handleSkip()} disabled={executing || skipping} className="text-muted-foreground">
+            {skipping ? <ButtonLoader /> : null}
+            Skip
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void handleExecute()}
+            disabled={executing || skipping}
+            title="Places the entry, stop-loss and target orders together"
+            className={cn("gap-1.5 text-white", isBuy ? "bg-emerald-600 hover:bg-emerald-700" : "bg-destructive hover:bg-destructive/90")}
           >
-            {isBuy ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-          </span>
-          <div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onOpenChart?.(sig.symbol)}
-                className="text-base font-bold hover:underline cursor-pointer text-left"
-                title="Open chart"
-              >
-                {sig.symbol.replace("-EQ", "")}
-              </button>
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                  isBuy
-                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : "bg-destructive/10 text-destructive",
-                )}
-              >
-                {sig.action}
-              </span>
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                {sig.setup}
-              </span>
+            {executing ? <ButtonLoader size={14} /> : <Check className="h-3.5 w-3.5" />}
+            {executing ? "Placing…" : isBuy ? "Buy" : "Sell"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <PlanBar sig={sig} />
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>
+          <span className="font-medium text-foreground">{sig.quantity}</span> shares
+        </span>
+        <span>
+          Risking <span className="font-medium text-destructive">₹{fmt(sig.risk_amount, 0)}</span>
+        </span>
+        <span>
+          Reward is <span className="font-medium text-emerald-500">{sig.rr_ratio.toFixed(1)}x</span> the risk
+        </span>
+        <span className="ml-auto flex items-center gap-3">
+          <span>{timeAgo(sig.created_at)}</span>
+          {sig.expires_at ? <span className="text-amber-500">{timeLeft(sig.expires_at)}</span> : null}
+          {hasDetails ? (
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              aria-label={open ? "Hide details" : "Show details"}
+              className="grid size-6 place-items-center rounded-full hover:bg-muted hover:text-foreground"
+            >
+              <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
+            </button>
+          ) : null}
+        </span>
+      </div>
+
+      {open && (
+        <div className="mt-3 space-y-2 rounded-xl bg-muted/30 p-3 text-xs">
+          {sig.paper_citation ? (
+            <div className="flex items-center gap-1.5 font-medium text-primary">
+              <BookOpen className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{sig.paper_citation}</span>
             </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">{sig.reason}</p>
-          </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-xs text-muted-foreground">{timeAgo(sig.created_at)}</div>
-          {sig.expires_at && (
-            <div className="text-[11px] text-amber-500">{timeLeft(sig.expires_at)}</div>
-          )}
-        </div>
-      </div>
-
-      {/* Price grid */}
-      <div className="grid grid-cols-3 gap-3 rounded-lg bg-muted/30 p-3 text-center">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Entry</div>
-          <div className="mt-1 text-base font-bold tabular-nums">₹{fmt(sig.entry_price)}</div>
-        </div>
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-destructive/80">Stop Loss</div>
-          <div className="mt-1 text-base font-bold tabular-nums text-destructive">₹{fmt(sig.stop_loss)}</div>
-        </div>
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Target</div>
-          <div className="mt-1 text-base font-bold tabular-nums text-emerald-600 dark:text-emerald-400">₹{fmt(sig.target)}</div>
-        </div>
-      </div>
-
-      {/* Academic Paper & Quant Thesis Badge */}
-      {sig.paper_citation && (
-        <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs">
-          <div className="flex items-center gap-1.5 font-semibold text-primary">
-            <BookOpen className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{sig.paper_citation}</span>
-            {sig.expected_value !== null && sig.expected_value !== undefined && (
-              <span className="ml-auto rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                EV +{sig.expected_value}R
-              </span>
+          ) : null}
+          {sig.thesis ? <p className="leading-relaxed text-muted-foreground">{sig.thesis}</p> : null}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+            {sig.confidence_score !== null && sig.confidence_score !== undefined && (
+              <span>Confidence <span className="font-medium text-foreground">{Math.round(sig.confidence_score * 100)}%</span></span>
             )}
+            {sig.rsi !== null && <span>RSI <span className="font-medium text-foreground">{sig.rsi.toFixed(0)}</span></span>}
+            {sig.vol_x !== null && <span>Volume <span className="font-medium text-foreground">{sig.vol_x.toFixed(1)}x</span></span>}
           </div>
-          {sig.thesis && <p className="mt-1 text-muted-foreground leading-relaxed">{sig.thesis}</p>}
         </div>
       )}
 
-      {/* Meta row */}
-      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-        <span><span className="font-semibold text-foreground">{sig.quantity}</span> shares</span>
-        <span>Risk <span className="font-semibold text-destructive">₹{fmt(sig.risk_amount, 0)}</span></span>
-        <span>R:R <span className="font-semibold text-foreground">{sig.rr_ratio.toFixed(1)}:1</span></span>
-        {sig.confidence_score !== null && sig.confidence_score !== undefined && (
-          <span>Confidence <span className="font-semibold text-primary">{Math.round(sig.confidence_score * 100)}%</span></span>
-        )}
-        {sig.rsi !== null && <span>RSI <span className="font-semibold">{sig.rsi.toFixed(0)}</span></span>}
-        {sig.vol_x !== null && <span>Vol <span className="font-semibold">{sig.vol_x.toFixed(1)}×</span></span>}
-      </div>
-
-      {err && <ErrorBox>{err}</ErrorBox>}
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={() => void handleExecute()}
-          disabled={executing || skipping}
-          className={cn(
-            "flex-1 gap-2 font-bold",
-            isBuy
-              ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-              : "bg-destructive hover:bg-destructive/90 text-white",
-          )}
-        >
-          {executing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Check className="h-4 w-4" />
-          )}
-          {executing ? "Placing orders…" : `Execute ${sig.action}`}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => void handleSkip()}
-          disabled={executing || skipping}
-          className="gap-1.5 text-muted-foreground"
-        >
-          {skipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-          Skip
-        </Button>
-      </div>
-    </Card>
+      {err && <div className="mt-3"><ErrorBox>{err}</ErrorBox></div>}
+    </div>
   );
 }
 
@@ -307,14 +325,15 @@ function SettingsPanel({
         <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Stop method
         </label>
-        <select
+        <Select
           value={settings.stop_method}
-          onChange={(e) => onChange({ stop_method: e.target.value as "atr" | "pct" })}
-          className="w-full rounded-md border border-border/60 bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          <option value="atr">ATR-based</option>
-          <option value="pct">Fixed %</option>
-        </select>
+          onChange={(v) => onChange({ stop_method: v as "atr" | "pct" })}
+          options={[
+            { value: "atr", label: "ATR-based" },
+            { value: "pct", label: "Fixed %" },
+          ]}
+          className="w-full"
+        />
       </div>
       {settings.stop_method === "atr" ? (
         <div>
@@ -370,14 +389,15 @@ function SettingsPanel({
         <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Product
         </label>
-        <select
+        <Select
           value={settings.product}
-          onChange={(e) => onChange({ product: e.target.value })}
-          className="w-full rounded-md border border-border/60 bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          <option value="CNC">CNC (Delivery)</option>
-          <option value="MIS">MIS (Intraday)</option>
-        </select>
+          onChange={(v) => onChange({ product: v })}
+          options={[
+            { value: "CNC", label: "CNC (Delivery)" },
+            { value: "MIS", label: "MIS (Intraday)" },
+          ]}
+          className="w-full"
+        />
       </div>
     </div>
   );
@@ -401,6 +421,8 @@ export default function TradeSignalsPanel({
   const [localSettings, setLocalSettings] = useState<TradeSignalSettings | null>(null);
   const [learningStatus, setLearningStatus] = useState<SelfLearningStatus | null>(null);
   const [training, setTraining] = useState(false);
+  const [sideFilter, setSideFilter] = useState<"ALL" | "BUY" | "SELL">("ALL");
+  const [showAllPending, setShowAllPending] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -410,8 +432,10 @@ export default function TradeSignalsPanel({
         getSelfLearningStatus().catch(() => null),
       ]);
       setSignals(sq.signals);
+      // Seed the edit copy only when it is untouched; the poll must not wipe
+      // whatever the user is mid-way through typing into the settings form.
       setSettings(ss);
-      setLocalSettings(ss);
+      setLocalSettings((cur) => (cur === null ? ss : cur));
       if (ls) setLearningStatus(ls);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -420,7 +444,7 @@ export default function TradeSignalsPanel({
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 10_000);
+    const t = setVisibleInterval(() => void refresh(), 10_000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -464,15 +488,23 @@ export default function TradeSignalsPanel({
   const handleSaveSettings = async () => {
     if (!localSettings) return;
     setSavingSettings(true);
+    setError(null);
     try {
       const saved = await saveTradeSignalSettings(localSettings);
       setSettings(saved);
+      setLocalSettings(saved);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingSettings(false);
     }
   };
 
   const pending  = signals.filter((s) => s.status === "PENDING");
+  const buyCount = pending.filter((s) => s.action === "BUY").length;
+  const sellCount = pending.length - buyCount;
+  const filteredPending = sideFilter === "ALL" ? pending : pending.filter((s) => s.action === sideFilter);
+  const visiblePending = showAllPending ? filteredPending : filteredPending.slice(0, 8);
   const active   = signals.filter((s) => s.status === "ACTIVE");
   const history  = signals.filter((s) => s.status === "DONE" || s.status === "SKIPPED");
 
@@ -483,58 +515,30 @@ export default function TradeSignalsPanel({
 
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
-        {/* Capital summary pills */}
         {settings && (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="rounded-full border border-border/60 bg-muted/30 px-3 py-1 font-medium">
-              Capital ₹{(settings.capital / 1e5).toFixed(1)}L
-            </span>
-            <span className="rounded-full border border-border/60 bg-muted/30 px-3 py-1 font-medium">
-              Risk ₹{fmt(maxRisk, 0)}/trade
-            </span>
-            <span className="rounded-full border border-border/60 bg-muted/30 px-3 py-1 font-medium">
-              {settings.stop_method === "atr" ? `SL ${settings.stop_atr_mult}×ATR` : `SL ${settings.stop_pct}%`}
-            </span>
-            <span className="rounded-full border border-border/60 bg-muted/30 px-3 py-1 font-medium">
-              R:R {settings.rr_ratio}:1
-            </span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowSettings((v) => !v)}
+            title="Change position sizing and risk"
+            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            ₹{(settings.capital / 1e5).toFixed(1)}L capital · risking ₹{fmt(maxRisk, 0)} a trade
+          </button>
         )}
         <div className="ml-auto flex items-center gap-2">
           {learningStatus && (
-            <div className="hidden sm:flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs">
-              <BrainCircuit className="h-3.5 w-3.5 text-primary" />
-              <span className="font-semibold text-primary">
-                {learningStatus.market_regime.regime.replace("_", " ")}
-              </span>
-              <span className="text-muted-foreground">
-                ({learningStatus.market_regime.breadth_pct}% breadth)
-              </span>
-            </div>
+            <span
+              title={`${learningStatus.market_regime.breadth_pct}% of stocks are above their average`}
+              className="hidden items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs text-muted-foreground sm:inline-flex"
+            >
+              {marketWord(learningStatus.market_regime.regime)}
+            </span>
           )}
-          <Button
-            variant="outline"
-            onClick={() => void handleTrain()}
-            disabled={training}
-            className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
-            title="Retrain AI quant models across 2,654+ stock history"
-          >
-            {training ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
-            {training ? "Training AI…" : "Retrain Models"}
-          </Button>
-          <Button
-            onClick={() => void handleScan()}
-            disabled={scanning}
-            className="gap-2"
-          >
-            {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          <Button onClick={() => void handleScan()} disabled={scanning} className="gap-2">
+            {scanning ? <ButtonLoader size={16} /> : <RefreshCw className="h-4 w-4" />}
             {scanning ? "Scanning…" : "Scan now"}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => setShowSettings((v) => !v)}
-            className="gap-1.5"
-          >
+          <Button variant="outline" onClick={() => setShowSettings((v) => !v)} className="gap-1.5" aria-label="Settings">
             <Settings className="h-4 w-4" />
             Settings
           </Button>
@@ -556,7 +560,7 @@ export default function TradeSignalsPanel({
                 disabled={savingSettings}
                 className="gap-1.5"
               >
-                {savingSettings ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                {savingSettings ? <ButtonLoader /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                 Save
               </Button>
             </div>
@@ -565,39 +569,84 @@ export default function TradeSignalsPanel({
             settings={localSettings}
             onChange={(patch) => setLocalSettings((s) => s ? { ...s, ...patch } : s)}
           />
-          <p className="text-xs text-muted-foreground">
-            Stop-loss and target are calculated automatically at scan time.
-            Changes only affect new signals.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+            <span className="text-xs text-muted-foreground">Changes apply to new signals only.</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleTrain()}
+              disabled={training}
+              title="Retrain the signal model on the stock history"
+              className="gap-1.5"
+            >
+              {training ? <ButtonLoader size={14} /> : <BrainCircuit className="h-3.5 w-3.5" />}
+              {training ? "Retraining…" : "Retrain model"}
+            </Button>
+          </div>
         </Card>
       )}
 
       {/* ── Pending signals ─────────────────────────────────────────────── */}
       <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">Pending signals</span>
-          {pending.length > 0 && (
-            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">
-              {pending.length}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">Waiting for you</span>
+            {pending.length > 0 && (
+              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">
+                {pending.length}
+              </span>
+            )}
+          </div>
+          {buyCount > 0 && sellCount > 0 ? (
+            <div className="flex gap-2">
+              {([
+                ["ALL", `All ${pending.length}`],
+                ["BUY", `Buy ${buyCount}`],
+                ["SELL", `Sell ${sellCount}`],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSideFilter(key)}
+                  aria-pressed={sideFilter === key}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs transition-colors",
+                    sideFilter === key
+                      ? "border-primary/40 bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         {pending.length === 0 ? (
-          <Hint>
-            No pending signals. Click <strong>Scan now</strong> to look for setups, or the Intelligent Monitor will surface them automatically.
-          </Hint>
+          <Hint>Nothing waiting. Press Scan now to look for setups.</Hint>
         ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {pending.map((s) => (
-              <PendingCard
-                key={s.id}
-                sig={s}
-                onExecute={handleExecute}
-                onSkip={handleSkip}
-                onOpenChart={onOpenChart}
-              />
-            ))}
-          </div>
+          <>
+            <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+              {visiblePending.map((s) => (
+                <PendingRow
+                  key={s.id}
+                  sig={s}
+                  onExecute={handleExecute}
+                  onSkip={handleSkip}
+                  onOpenChart={onOpenChart}
+                />
+              ))}
+            </div>
+            {filteredPending.length > 8 ? (
+              <button
+                type="button"
+                onClick={() => setShowAllPending((v) => !v)}
+                className="mx-auto block rounded-full border border-border px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {showAllPending ? "Show fewer" : `Show ${filteredPending.length - 8} more`}
+              </button>
+            ) : null}
+          </>
         )}
       </div>
 

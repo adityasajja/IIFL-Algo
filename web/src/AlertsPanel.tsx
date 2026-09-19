@@ -18,6 +18,7 @@ import {
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Switch } from "./components/ui/switch";
 import { useToast } from "./components/ui/toast-context";
@@ -52,9 +53,6 @@ const KINDS = [
 const THRESHOLD_KINDS = new Set([
   "price_above", "price_below", "day_drop_pct", "day_gain_pct", "rsi_below", "rsi_above",
 ]);
-
-const selectClass =
-  "h-10 w-full rounded-xl border border-border bg-[#131722] px-3 text-xs text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60";
 
 export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: string) => void }) {
   const { toast } = useToast();
@@ -235,16 +233,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
       {/* ------------------------------------------------------------- */}
       {/* 1. INTELLIGENT TRIGGER ENGINE BANNER & CONTROL BAR            */}
       {/* ------------------------------------------------------------- */}
-      <Card className="border-[#2a2e39] bg-gradient-to-r from-[#131722] via-[#1a1f2c] to-[#131722] p-5 shadow-xl">
+      <Card className="border-border bg-gradient-to-r from-[#131722] via-[#1a1f2c] to-[#131722] p-5 shadow-xl">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/20">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-foreground shadow-lg shadow-indigo-500/20">
               <Sparkles size={22} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-wide">
-                  Intelligent Periodic Buy & Sell Engine
+                <h2 className="text-base font-bold text-foreground tracking-wide">
+                  Smart alerts
                 </h2>
                 <span
                   className={cn(
@@ -260,11 +258,11 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                       intelConfig?.enabled ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"
                     )}
                   />
-                  {intelConfig?.enabled ? "Auto Monitor Active" : "Paused"}
+                  {intelConfig?.enabled ? "On" : "Paused"}
                 </span>
               </div>
-              <p className="text-xs text-[#787b86]">
-                Automated multi-factor evaluation of trend breakdowns, overbought/oversold RSI, and trailing stops with Telegram alerts.
+              <p className="text-xs text-muted-foreground">
+                Watches your stocks and messages you on Telegram when something needs attention.
               </p>
             </div>
           </div>
@@ -274,16 +272,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               variant="secondary"
               size="sm"
               onClick={() => void testTelegram()}
-              className="border border-[#2a2e39] bg-[#1e222d] text-xs hover:bg-[#2a2e39]"
+              className="border border-border bg-card text-xs hover:bg-muted"
             >
               <Send size={13} className="mr-1.5 text-blue-400" />
-              Test Telegram
+              Send test message
             </Button>
             <Button
               size="sm"
               disabled={evaluating}
               onClick={() => void handleEvaluateNow()}
-              className="bg-indigo-600 text-white hover:bg-indigo-500 font-semibold shadow-md shadow-indigo-600/20 text-xs h-9 px-3.5"
+              className="bg-indigo-600 text-foreground hover:bg-indigo-500 font-semibold shadow-md shadow-indigo-600/20 text-xs h-9 px-3.5"
             >
               {evaluating ? (
                 <>
@@ -293,7 +291,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               ) : (
                 <>
                   <Play size={13} className="mr-1.5 fill-current" />
-                  Run Evaluation Now
+                  Check now
                 </>
               )}
             </Button>
@@ -302,12 +300,12 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
 
         {/* Engine Config Strip */}
         {intelConfig && (
-          <div className="mt-5 grid grid-cols-1 gap-3 border-t border-[#2a2e39]/80 pt-4 sm:grid-cols-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 border-t border-border/80 pt-4 sm:grid-cols-3">
             {/* Master Switch */}
-            <div className="flex items-center justify-between rounded-xl bg-[#1e222d]/70 p-3 border border-[#2a2e39]/60">
+            <div className="flex items-center justify-between rounded-xl bg-card/70 p-3 border border-border/60">
               <div>
-                <div className="text-xs font-semibold text-white">Automated Background Engine</div>
-                <div className="text-[11px] text-[#787b86]">Runs in background during market hours</div>
+                <div className="text-xs font-semibold text-foreground">Run automatically</div>
+                <div className="text-[11px] text-muted-foreground">During market hours</div>
               </div>
               <Switch
                 checked={intelConfig.enabled}
@@ -316,10 +314,10 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             </div>
 
             {/* Universe Selector */}
-            <div className="flex flex-col gap-1.5 rounded-xl bg-[#1e222d]/70 p-3 border border-[#2a2e39]/60">
-              <div className="flex items-center justify-between text-xs font-semibold text-white">
+            <div className="flex flex-col gap-1.5 rounded-xl bg-card/70 p-3 border border-border/60">
+              <div className="flex items-center justify-between text-xs font-semibold text-foreground">
                 <span className="flex items-center gap-1.5">
-                  <Layers size={13} className="text-indigo-400" /> Target Universe
+                  <Layers size={13} className="text-indigo-400" /> Watch
                 </span>
               </div>
               <div className="flex gap-1 pt-1">
@@ -331,8 +329,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                     className={cn(
                       "flex-1 rounded-lg py-1 text-[11px] font-semibold capitalize transition-colors",
                       intelConfig.universe === u
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "bg-[#131722] text-[#787b86] hover:text-white"
+                        ? "bg-indigo-600 text-foreground shadow-sm"
+                        : "bg-background text-muted-foreground hover:text-foreground"
                     )}
                   >
                     {u === "both" ? "Both" : u}
@@ -342,12 +340,12 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             </div>
 
             {/* Check Frequency */}
-            <div className="flex flex-col gap-1.5 rounded-xl bg-[#1e222d]/70 p-3 border border-[#2a2e39]/60">
-              <div className="flex items-center justify-between text-xs font-semibold text-white">
+            <div className="flex flex-col gap-1.5 rounded-xl bg-card/70 p-3 border border-border/60">
+              <div className="flex items-center justify-between text-xs font-semibold text-foreground">
                 <span className="flex items-center gap-1.5">
-                  <Clock size={13} className="text-emerald-400" /> Check Interval
+                  <Clock size={13} className="text-emerald-400" /> Check every
                 </span>
-                <span className="text-[11px] text-[#787b86]">Every {intelConfig.interval_min}m</span>
+                <span className="text-[11px] text-muted-foreground">Every {intelConfig.interval_min}m</span>
               </div>
               <div className="flex gap-1 pt-1">
                 {[1, 3, 5, 15].map((m) => (
@@ -358,8 +356,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                     className={cn(
                       "flex-1 rounded-lg py-1 text-[11px] font-semibold transition-colors",
                       intelConfig.interval_min === m
-                        ? "bg-emerald-600 text-white shadow-sm"
-                        : "bg-[#131722] text-[#787b86] hover:text-white"
+                        ? "bg-emerald-600 text-foreground shadow-sm"
+                        : "bg-background text-muted-foreground hover:text-foreground"
                     )}
                   >
                     {m}m
@@ -377,14 +375,14 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
       {intelConfig && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* SELL (EXIT) TRIGGERS */}
-          <Card className="border-[#2a2e39] bg-[#131722] p-4">
-            <div className="flex items-center gap-2 border-b border-[#2a2e39] pb-3">
+          <Card className="border-border bg-background p-4">
+            <div className="flex items-center gap-2 border-b border-border pb-3">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400">
                 <TrendingDown size={16} />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white">Intelligent Sell / Exit Triggers</h3>
-                <p className="text-[11px] text-[#787b86]">Alerts you when it is time to sell or take profit</p>
+                <h3 className="text-sm font-bold text-foreground">When to sell</h3>
+                <p className="text-[11px] text-muted-foreground">Warnings that it may be time to exit</p>
               </div>
             </div>
 
@@ -392,8 +390,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Trend Breakdown (SMA 20) */}
               <div className="flex items-center justify-between py-2.5">
                 <div>
-                  <div className="text-xs font-semibold text-white">Trend Breakdown (SMA20)</div>
-                  <div className="text-[11px] text-[#787b86]">Trigger sell warning when price falls below 20-day SMA</div>
+                  <div className="text-xs font-semibold text-foreground">Falls below its 20-day average</div>
+                  <div className="text-[11px] text-muted-foreground">The trend may be turning down</div>
                 </div>
                 <Switch
                   checked={intelConfig.sell_sma_breakdown}
@@ -404,16 +402,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* RSI Overbought Reversal */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-white">RSI Overbought Warning</div>
-                  <div className="text-[11px] text-[#787b86]">Alert when momentum hits extreme overbought</div>
+                  <div className="text-xs font-semibold text-foreground">Looks overbought</div>
+                  <div className="text-[11px] text-muted-foreground">Price has run up hard and may pull back</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-[#787b86]">RSI ≥</span>
+                  <span className="text-[11px] text-muted-foreground">RSI ≥</span>
                   <input
                     type="number"
                     value={intelConfig.sell_rsi_threshold}
                     onChange={(e) => void updateConfigField("sell_rsi_threshold", Number(e.target.value) || 75)}
-                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                    className="h-7 w-14 rounded-lg border border-border bg-card px-2 text-center text-xs text-foreground"
                   />
                   <Switch
                     checked={intelConfig.sell_rsi_overbought}
@@ -425,16 +423,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Trailing Stop Drop from Peak */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-white">Dynamic Trailing Stop</div>
-                  <div className="text-[11px] text-[#787b86]">Alert when stock drops by % from its 20-day peak</div>
+                  <div className="text-xs font-semibold text-foreground">Drops from its recent high</div>
+                  <div className="text-[11px] text-muted-foreground">Falls this much from its 20-day high</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-[#787b86]">Drop %</span>
+                  <span className="text-[11px] text-muted-foreground">Drop %</span>
                   <input
                     type="number"
                     value={intelConfig.sell_trailing_stop_pct}
                     onChange={(e) => void updateConfigField("sell_trailing_stop_pct", Number(e.target.value) || 3)}
-                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                    className="h-7 w-14 rounded-lg border border-border bg-card px-2 text-center text-xs text-foreground"
                   />
                   <Switch
                     checked={intelConfig.sell_trailing_stop_enabled}
@@ -446,16 +444,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Take-Profit Target */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-white">Target Profit Lock</div>
-                  <div className="text-[11px] text-[#787b86]">Alert to book gains when portfolio holding hits +% target</div>
+                  <div className="text-xs font-semibold text-foreground">Profit target reached</div>
+                  <div className="text-[11px] text-muted-foreground">A holding is up this much</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-[#787b86]">+%</span>
+                  <span className="text-[11px] text-muted-foreground">+%</span>
                   <input
                     type="number"
                     value={intelConfig.sell_take_profit_pct}
                     onChange={(e) => void updateConfigField("sell_take_profit_pct", Number(e.target.value) || 8)}
-                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                    className="h-7 w-14 rounded-lg border border-border bg-card px-2 text-center text-xs text-foreground"
                   />
                   <Switch
                     checked={intelConfig.sell_take_profit_enabled}
@@ -467,16 +465,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Stop-Loss Cut */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-white">Max Loss Protection</div>
-                  <div className="text-[11px] text-[#787b86]">Alert to cut position if holding drops past -% loss</div>
+                  <div className="text-xs font-semibold text-foreground">Loss limit reached</div>
+                  <div className="text-[11px] text-muted-foreground">A holding is down this much</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-[#787b86]">-%</span>
+                  <span className="text-[11px] text-muted-foreground">-%</span>
                   <input
                     type="number"
                     value={intelConfig.sell_stop_loss_pct}
                     onChange={(e) => void updateConfigField("sell_stop_loss_pct", Number(e.target.value) || 4)}
-                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                    className="h-7 w-14 rounded-lg border border-border bg-card px-2 text-center text-xs text-foreground"
                   />
                   <Switch
                     checked={intelConfig.sell_stop_loss_enabled}
@@ -488,14 +486,14 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
           </Card>
 
           {/* BUY (ENTRY) TRIGGERS */}
-          <Card className="border-[#2a2e39] bg-[#131722] p-4">
-            <div className="flex items-center gap-2 border-b border-[#2a2e39] pb-3">
+          <Card className="border-border bg-background p-4">
+            <div className="flex items-center gap-2 border-b border-border pb-3">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
                 <TrendingUp size={16} />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white">Intelligent Buy / Entry Triggers</h3>
-                <p className="text-[11px] text-[#787b86]">Alerts you when momentum or dips offer high-probability entry</p>
+                <h3 className="text-sm font-bold text-foreground">When to buy</h3>
+                <p className="text-[11px] text-muted-foreground">Signs of a possible entry</p>
               </div>
             </div>
 
@@ -503,8 +501,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Golden Cross */}
               <div className="flex items-center justify-between py-2.5">
                 <div>
-                  <div className="text-xs font-semibold text-white">Golden Cross (SMA 20 × 50)</div>
-                  <div className="text-[11px] text-[#787b86]">SMA20 crosses above SMA50 within the last 3 trading bars</div>
+                  <div className="text-xs font-semibold text-foreground">Short-term average crosses above long-term</div>
+                  <div className="text-[11px] text-muted-foreground">The 20-day average just moved above the 50-day</div>
                 </div>
                 <Switch
                   checked={intelConfig.buy_golden_cross}
@@ -515,16 +513,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Oversold Dip Bounce */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-white">Oversold Dip (RSI)</div>
-                  <div className="text-[11px] text-[#787b86]">Alert when price cools into extreme oversold territory</div>
+                  <div className="text-xs font-semibold text-foreground">Looks oversold</div>
+                  <div className="text-[11px] text-muted-foreground">Price has dropped hard and may bounce</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-[#787b86]">RSI ≤</span>
+                  <span className="text-[11px] text-muted-foreground">RSI ≤</span>
                   <input
                     type="number"
                     value={intelConfig.buy_rsi_threshold}
                     onChange={(e) => void updateConfigField("buy_rsi_threshold", Number(e.target.value) || 32)}
-                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                    className="h-7 w-14 rounded-lg border border-border bg-card px-2 text-center text-xs text-foreground"
                   />
                   <Switch
                     checked={intelConfig.buy_rsi_oversold}
@@ -536,8 +534,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Breakout with Volume */}
               <div className="flex items-center justify-between py-2.5">
                 <div>
-                  <div className="text-xs font-semibold text-white">Breakout + Volume Surge</div>
-                  <div className="text-[11px] text-[#787b86]">Price breaks 20-day high with &gt; 1.5x average volume</div>
+                  <div className="text-xs font-semibold text-foreground">Breakout on heavy trading</div>
+                  <div className="text-[11px] text-muted-foreground">Hits a 20-day high on unusually heavy volume</div>
                 </div>
                 <Switch
                   checked={intelConfig.buy_breakout_vol}
@@ -548,17 +546,17 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Alert Cooldown */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-white">Signal Cooldown Silence</div>
-                  <div className="text-[11px] text-[#787b86]">Prevents Telegram spam: minimum minutes before re-alerting same stock</div>
+                  <div className="text-xs font-semibold text-foreground">Don't repeat within</div>
+                  <div className="text-[11px] text-muted-foreground">Avoids repeat messages about the same stock</div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
                     value={intelConfig.cooldown_min}
                     onChange={(e) => void updateConfigField("cooldown_min", Number(e.target.value) || 45)}
-                    className="h-7 w-14 rounded-lg border border-[#2a2e39] bg-[#1e222d] px-2 text-center text-xs text-white"
+                    className="h-7 w-14 rounded-lg border border-border bg-card px-2 text-center text-xs text-foreground"
                   />
-                  <span className="text-[11px] text-[#787b86]">min</span>
+                  <span className="text-[11px] text-muted-foreground">min</span>
                 </div>
               </div>
             </div>
@@ -569,13 +567,13 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
       {/* ------------------------------------------------------------- */}
       {/* 3. RECENT INTELLIGENT SIGNALS & DISPATCH HISTORY             */}
       {/* ------------------------------------------------------------- */}
-      <Card className="border-[#2a2e39] bg-[#131722] p-4">
-        <div className="flex items-center justify-between border-b border-[#2a2e39] pb-3">
+      <Card className="border-border bg-background p-4">
+        <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2">
             <Activity size={16} className="text-indigo-400" />
-            <h3 className="text-sm font-bold text-white">Recent Intelligent Signals & Telegram Firings</h3>
+            <h3 className="text-sm font-bold text-foreground">Recent alerts</h3>
           </div>
-          <span className="text-[11px] text-[#787b86]">
+          <span className="text-[11px] text-muted-foreground">
             Last evaluated: {intelStatus?.last_run ? <RelativeTime value={intelStatus.last_run} /> : "Ready"}
           </span>
         </div>
@@ -600,16 +598,16 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                     </span>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-white">{sig.symbol.replace("-EQ", "")}</span>
-                        <span className="text-[11px] text-[#787b86]">₹{sig.price.toLocaleString("en-IN")}</span>
+                        <span className="text-xs font-bold text-foreground">{sig.symbol.replace("-EQ", "")}</span>
+                        <span className="text-[11px] text-muted-foreground">₹{sig.price.toLocaleString("en-IN")}</span>
                         <span className={cn("text-[11px] font-semibold", sig.day_chg_pct >= 0 ? "text-emerald-400" : "text-rose-400")}>
                           {sig.day_chg_pct >= 0 ? `+${sig.day_chg_pct}%` : `${sig.day_chg_pct}%`}
                         </span>
-                        <span className="rounded bg-[#1e222d] px-1.5 py-0.5 text-[10px] text-[#787b86]">
+                        <span className="rounded bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground">
                           {sig.metric}
                         </span>
                       </div>
-                      <p className="mt-0.5 text-xs text-[#d1d4dc]">{sig.reason}</p>
+                      <p className="mt-0.5 text-xs text-foreground">{sig.reason}</p>
                     </div>
                   </div>
 
@@ -618,11 +616,11 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                       size="sm"
                       variant="ghost"
                       onClick={() => openChart(sig.symbol)}
-                      className="h-7 text-xs text-indigo-400 hover:bg-[#1e222d]"
+                      className="h-7 text-xs text-indigo-400 hover:bg-card"
                     >
                       Chart
                     </Button>
-                    <span className="text-[11px] text-[#787b86]">
+                    <span className="text-[11px] text-muted-foreground">
                       <RelativeTime value={sig.ts} lead="relative" absolute={false} />
                     </span>
                   </div>
@@ -630,8 +628,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               );
             })
           ) : (
-            <div className="py-6 text-center text-xs text-[#787b86]">
-              No intelligent signals triggered yet. Click <strong>"Run Evaluation Now"</strong> to scan active stocks!
+            <div className="py-6 text-center text-xs text-muted-foreground">
+              No alerts yet.
             </div>
           )}
         </div>
@@ -640,11 +638,11 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
       {/* ------------------------------------------------------------- */}
       {/* 4. CUSTOM MANUAL ALERTS (OPTIONAL SPECIFIC PRICE/INDICATOR)   */}
       {/* ------------------------------------------------------------- */}
-      <Card className="border-[#2a2e39] bg-[#131722] p-4">
-        <div className="flex items-center justify-between border-b border-[#2a2e39] pb-3">
+      <Card className="border-border bg-background p-4">
+        <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2">
-            <Bell size={16} className="text-[#787b86]" />
-            <h3 className="text-sm font-bold text-white">Custom Manual Alerts</h3>
+            <Bell size={16} className="text-muted-foreground" />
+            <h3 className="text-sm font-bold text-foreground">Your own price alerts</h3>
           </div>
           <StatefulButton
             state={checkState}
@@ -654,7 +652,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             errorText="Failed"
             className="h-7 text-xs"
           >
-            Check Manual Rules
+            Check now
           </StatefulButton>
         </div>
 
@@ -662,13 +660,12 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
           <Input label="Symbol" value={symbol} onChange={setSymbol} placeholder="RELIANCE-EQ" />
           <div className="flex flex-col gap-1.5">
             <label className="px-1 text-xs font-medium text-foreground">Condition</label>
-            <select value={kind} onChange={(e) => setKind(e.target.value)} className={selectClass}>
-              {KINDS.map((k) => (
-                <option key={k.v} value={k.v}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
+            <Select
+              size="sm"
+              value={kind}
+              onChange={setKind}
+              options={KINDS.map((k) => ({ value: k.v, label: k.label }))}
+            />
           </div>
           <Input
             label={`Level ${kindInfo?.needs ? "" : "(unused)"}`}
@@ -691,12 +688,12 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
         )}
 
         {rules.length > 0 && (
-          <div className="mt-4 divide-y divide-[#2a2e39]/60 border-t border-[#2a2e39] pt-2">
+          <div className="mt-4 divide-y divide-[#2a2e39]/60 border-t border-border pt-2">
             {rules.map((r) => (
               <div key={r.id} className="flex items-center justify-between py-2 text-xs">
                 <div className="flex items-center gap-2">
-                  <strong className="text-white">{r.symbol}</strong>
-                  <span className="text-[#787b86]">· {r.kind.replace(/_/g, " ")}</span>
+                  <strong className="text-foreground">{r.symbol}</strong>
+                  <span className="text-muted-foreground">· {r.kind.replace(/_/g, " ")}</span>
                   {THRESHOLD_KINDS.has(r.kind) && <span className="tabular-nums text-indigo-400">@ {r.threshold}</span>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -714,18 +711,18 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
         )}
 
         {events.length > 0 && (
-          <div className="mt-4 border-t border-[#2a2e39] pt-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#787b86] mb-2">
-              Manual Trigger History ({events.length})
+          <div className="mt-4 border-t border-border pt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              Alert history ({events.length})
             </div>
             <div className="max-h-40 overflow-y-auto divide-y divide-[#2a2e39]/40">
               {events.slice(0, 10).map((e) => (
                 <div key={e.id} className="flex items-center justify-between py-1.5 text-xs">
                   <div>
-                    <span className="font-semibold text-white">{e.rule}</span>
-                    <span className="ml-2 text-[#787b86]">{e.message}</span>
+                    <span className="font-semibold text-foreground">{e.rule}</span>
+                    <span className="ml-2 text-muted-foreground">{e.message}</span>
                   </div>
-                  <span className="text-[10px] text-[#787b86]">
+                  <span className="text-[10px] text-muted-foreground">
                     <RelativeTime value={e.ts} lead="relative" absolute={false} />
                   </span>
                 </div>
