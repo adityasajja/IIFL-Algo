@@ -68,12 +68,37 @@ logger = logging.getLogger("atr.services.paper")
 class PriceSource(Protocol):
     """Where a paper fill gets its reference price.
 
-    A callable rather than a broker so the paper engine can be driven by the local
-    daily cache, by the live quote feed, or by a bar series in a test — the
-    matching rules are the same and are worth testing without any of them.
+    Can return a raw float price or a :class:`TickPrice` dataclass carrying timestamp
+    and age metadata.
     """
 
-    def __call__(self, symbol: str, exchange: str) -> float | None: ...
+    def __call__(self, symbol: str, exchange: str) -> float | TickPrice | None: ...
+
+
+@dataclass(frozen=True)
+class TickPrice:
+    """A price measurement coupled with its observation timestamp.
+
+    Guarantees that price age is observable and stale prices can be audited and rejected.
+    """
+
+    price: float
+    timestamp: datetime | None = None
+    age_seconds: float | None = None
+
+    def get_age_seconds(self, now: datetime | None = None) -> float | None:
+        if self.age_seconds is not None:
+            return self.age_seconds
+        if self.timestamp is not None:
+            now_dt = now or utcnow()
+            # Ensure timezone awareness matches
+            ts = self.timestamp
+            if ts.tzinfo is None and now_dt.tzinfo is not None:
+                ts = ts.replace(tzinfo=now_dt.tzinfo)
+            elif ts.tzinfo is not None and now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=ts.tzinfo)
+            return max(0.0, (now_dt - ts).total_seconds())
+        return None
 
 
 # ===========================================================================
@@ -132,32 +157,40 @@ def live_tick_source(
     broadcaster: Any | None = None,
     *,
     resolve: Callable[[], Any] | None = None,
-) -> Callable[[str, str], float | None]:
-    """The live tick stream's last traded price.
+    clock: Callable[[], datetime] | None = None,
+) -> Callable[[str, str], TickPrice | None]:
+    """The live tick stream's last traded price and timestamp.
 
-    This is the difference between a paper account that trades and one that only
-    pretends to: with the daily cache as the price source, a paper fill happens at
-    yesterday's close and a resting limit order is re-evaluated against a price
-    that does not move. Every one of those orders either fills immediately or
-    never, and neither is what the order would have done at the exchange.
-
-    The broadcaster is **injected**, never imported. ``services`` sits below
-    ``api`` in this codebase's layering and ``tests/test_architecture.py`` enforces
-    that a service must not import the transport layer — so this module cannot
-    reach for :mod:`atr.api.stream` itself, not even inside a function. The API
-    layer owns that wiring (``atr.api.price_sources``) and passes the result in.
-
-    ``resolve`` is a zero-argument callable returning the broadcaster, for callers
-    that hold a *hook* to one rather than the object itself.
+    Returns a :class:`TickPrice` containing the ltp, tick timestamp, and calculated age.
     """
-    def source(symbol: str, exchange: str) -> float | None:  # noqa: ARG001
+    now_fn = clock or utcnow
+
+    def source(symbol: str, exchange: str) -> TickPrice | None:  # noqa: ARG001
         try:
-            if broadcaster is not None:
-                return broadcaster.latest_price(symbol)
-            if resolve is not None:
-                target = resolve()
-                return target.latest_price(symbol) if target is not None else None
-            return None
+            b = broadcaster
+            if b is None and resolve is not None:
+                b = resolve()
+            if b is None:
+                return None
+
+            # Prefer latest_price_and_time if available
+            if hasattr(b, "latest_price_and_time"):
+                price, ts = b.latest_price_and_time(symbol)
+            else:
+                price = b.latest_price(symbol)
+                ts = None
+
+            if price is None or not (price == price and price > 0):
+                return None
+
+            now = now_fn()
+            age: float | None = None
+            if ts is not None:
+                ts_aware = ts if ts.tzinfo else ts.replace(tzinfo=now.tzinfo)
+                now_aware = now if now.tzinfo else now.replace(tzinfo=ts_aware.tzinfo)
+                age = max(0.0, (now_aware - ts_aware).total_seconds())
+
+            return TickPrice(price=float(price), timestamp=ts, age_seconds=age)
         except Exception:  # noqa: BLE001 - a missing stream is "no price"
             logger.debug("live tick lookup failed for %s", symbol)
             return None
@@ -166,23 +199,27 @@ def live_tick_source(
 
 
 def fallback_price_source(
-    primary: Callable[[str, str], float | None],
-    secondary: Callable[[str, str], float | None],
-) -> Callable[[str, str], float | None]:
+    primary: Callable[[str, str], Any],
+    secondary: Callable[[str, str], Any],
+    *,
+    only_outside_market: bool = True,
+) -> Callable[[str, str], Any]:
     """Try ``primary``; use ``secondary`` only when it has no price.
 
-    The live source alone would refuse every fill outside market hours, which is
-    when most paper strategies are actually started. Falling back to the cache
-    keeps the account usable after the close, and the *order event* records the
-    price actually used, so a fill is never ambiguous about which source priced
-    it. Outside hours this is yesterday's close and the account behaves as it did
-    before the live feed existed — which is the correct degradation, not a
-    silent one.
+    If ``only_outside_market`` is True, fallback to cached close is disallowed
+    when the market is actively open, ensuring a live paper run never silently
+    fills against old-session cached close prices during trading hours.
     """
-    def source(symbol: str, exchange: str) -> float | None:
+    from atr.market_calendar import is_market_open
+
+    def source(symbol: str, exchange: str) -> Any:
         price = primary(symbol, exchange)
         if price is not None:
             return price
+        # When during session hours, do NOT silently fall back to daily cache!
+        if only_outside_market and is_market_open():
+            logger.debug("session is open but primary live tick is absent for %s; refusing cache fallback", symbol)
+            return None
         return secondary(symbol, exchange)
 
     return source
@@ -285,7 +322,7 @@ class PaperVenue:
     repo exists to avoid.
     """
 
-    prices: Callable[[str, str], float | None]
+    prices: Callable[[str, str], float | TickPrice | None]
     instruments: Callable[[str, str], Instrument] | None = None
     slippage: SlippageModel = field(default_factory=SlippageModel)
     costs: CommissionModel = field(default_factory=IndianDeliveryCosts)
@@ -294,11 +331,32 @@ class PaperVenue:
     #: thing that only happens in live trading.
     fill_ratio: float = 1.0
     clock: Callable[[], datetime] = field(default=utcnow)
+    #: Maximum allowable age for a reference tick in seconds. If exceeded, orders are rejected.
+    max_tick_age_seconds: float | None = 60.0
 
     def submit(self, draft: Any) -> VenueOutcome:
         """Fill or rest. See :func:`match_order` for the rules."""
         instrument = self._instrument(draft)
-        reference = self._price(draft)
+        raw_reference = self._price_raw(draft.symbol, draft.exchange)
+        reference, tick_ts, price_age = self._extract_price_and_age(raw_reference)
+
+        # Freshness check: reject stale prices
+        if self.max_tick_age_seconds is not None and price_age is not None:
+            if price_age > self.max_tick_age_seconds:
+                return VenueOutcome(
+                    status=VENUE_REJECTED,
+                    reject_reason=(
+                        f"stale price for {draft.symbol}: tick age {price_age:.1f}s exceeds "
+                        f"max acceptable {self.max_tick_age_seconds:.1f}s"
+                    ),
+                    raw={
+                        "reference_price": reference,
+                        "price_timestamp": tick_ts.isoformat() if tick_ts else None,
+                        "price_age_seconds": price_age,
+                        "stale": True,
+                    },
+                )
+
         decision = match_order(
             order_type=draft.order_type,
             side=draft.side,
@@ -321,10 +379,17 @@ class PaperVenue:
             return VenueOutcome(
                 status=VENUE_ACCEPTED,
                 broker_order_id=f"PAPER-{draft.symbol}-resting",
-                raw={"reference_price": reference, "resting_reason": decision.reason},
+                raw={
+                    "reference_price": reference,
+                    "price_timestamp": tick_ts.isoformat() if tick_ts else None,
+                    "price_age_seconds": price_age,
+                    "resting_reason": decision.reason,
+                },
             )
 
-        return self._fill(draft, instrument, decision.price or reference or 0.0, reference)
+        return self._fill(
+            draft, instrument, decision.price or reference or 0.0, reference, tick_ts, price_age
+        )
 
     def match(self, order: dict[str, Any]) -> VenueOutcome:
         """Re-evaluate a resting order against the current price.
@@ -332,7 +397,23 @@ class PaperVenue:
         This is what makes a paper LIMIT or STOP order behave like one that is
         actually live, rather than one that fills instantly and always.
         """
-        reference = self._price_from(order["symbol"], order["exchange"])
+        raw_reference = self._price_raw(order["symbol"], order["exchange"])
+        reference, tick_ts, price_age = self._extract_price_and_age(raw_reference)
+
+        # Freshness check on resting match
+        if self.max_tick_age_seconds is not None and price_age is not None:
+            if price_age > self.max_tick_age_seconds:
+                return VenueOutcome(
+                    status=VENUE_ACCEPTED,
+                    broker_order_id=order.get("broker_order_id"),
+                    raw={
+                        "reference_price": reference,
+                        "price_timestamp": tick_ts.isoformat() if tick_ts else None,
+                        "price_age_seconds": price_age,
+                        "resting_reason": f"stale tick ({price_age:.1f}s)",
+                    },
+                )
+
         decision = match_order(
             order_type=order["order_type"],
             side=order["side"],
@@ -344,7 +425,12 @@ class PaperVenue:
             return VenueOutcome(
                 status=VENUE_ACCEPTED,
                 broker_order_id=order.get("broker_order_id"),
-                raw={"reference_price": reference, "resting_reason": decision.reason},
+                raw={
+                    "reference_price": reference,
+                    "price_timestamp": tick_ts.isoformat() if tick_ts else None,
+                    "price_age_seconds": price_age,
+                    "resting_reason": decision.reason,
+                },
             )
         instrument = self._instrument_from(order["symbol"], order["exchange"])
         # The remaining quantity, not the original: an order that partially filled
@@ -356,11 +442,18 @@ class PaperVenue:
                 broker_order_id=order.get("broker_order_id"),
                 raw={"resting_reason": "nothing left to fill"},
             )
-        return self._fill_from(order, instrument, decision.price or reference or 0.0,
-                              reference, outstanding)
+        return self._fill_from(
+            order, instrument, decision.price or reference or 0.0, reference, outstanding, tick_ts, price_age
+        )
 
     def _fill(
-        self, draft: Any, instrument: Instrument, raw_price: float, reference: float
+        self,
+        draft: Any,
+        instrument: Instrument,
+        raw_price: float,
+        reference: float,
+        tick_ts: datetime | None = None,
+        price_age: float | None = None,
     ) -> VenueOutcome:
         side = Side.BUY if draft.side.strip().upper() == "BUY" else Side.SELL
         price = self.slippage.apply(raw_price, side, instrument)
@@ -370,19 +463,25 @@ class PaperVenue:
                 status=VENUE_ACCEPTED, raw={"resting_reason": "fill_ratio produced no size"}
             )
         commission = float(self.costs.compute(quantity, price, instrument, side))
+        raw_payload: dict[str, Any] = {
+            "reference_price": reference,
+            "fill_price": price,
+            "commission": commission,
+            "slippage_bps": _bps(reference, price, side),
+            "venue": "paper",
+        }
+        if tick_ts is not None:
+            raw_payload["price_timestamp"] = tick_ts.isoformat()
+        if price_age is not None:
+            raw_payload["price_age_seconds"] = round(price_age, 3)
+
         return VenueOutcome(
             status=VENUE_FILLED,
             broker_order_id=f"PAPER-{draft.symbol}",
             filled_qty=quantity,
             filled_price=price,
             commission=commission,
-            raw={
-                "reference_price": reference,
-                "fill_price": price,
-                "commission": commission,
-                "slippage_bps": _bps(reference, price, side),
-                "venue": "paper",
-            },
+            raw=raw_payload,
         )
 
     def _fill_from(
@@ -392,30 +491,55 @@ class PaperVenue:
         raw_price: float,
         reference: float,
         quantity: float,
+        tick_ts: datetime | None = None,
+        price_age: float | None = None,
     ) -> VenueOutcome:
         side = Side.BUY if order["side"].strip().upper() == "BUY" else Side.SELL
         price = self.slippage.apply(raw_price, side, instrument)
         commission = float(self.costs.compute(quantity, price, instrument, side))
+        raw_payload: dict[str, Any] = {
+            "reference_price": reference,
+            "fill_price": price,
+            "commission": commission,
+            "slippage_bps": _bps(reference, price, side),
+            "venue": "paper",
+            "matched_resting_order": True,
+        }
+        if tick_ts is not None:
+            raw_payload["price_timestamp"] = tick_ts.isoformat()
+        if price_age is not None:
+            raw_payload["price_age_seconds"] = round(price_age, 3)
+
         return VenueOutcome(
             status=VENUE_FILLED,
             broker_order_id=order.get("broker_order_id") or f"PAPER-{order['symbol']}",
             filled_qty=float(order.get("filled_quantity") or 0.0) + quantity,
             filled_price=price,
             commission=commission,
-            raw={
-                "reference_price": reference,
-                "fill_price": price,
-                "commission": commission,
-                "slippage_bps": _bps(reference, price, side),
-                "venue": "paper",
-                "matched_resting_order": True,
-            },
+            raw=raw_payload,
         )
 
+    def _extract_price_and_age(
+        self, raw_val: float | TickPrice | None
+    ) -> tuple[float | None, datetime | None, float | None]:
+        if raw_val is None:
+            return None, None, None
+        if isinstance(raw_val, TickPrice):
+            return raw_val.price, raw_val.timestamp, raw_val.get_age_seconds(now=self.clock())
+        try:
+            return float(raw_val), None, None
+        except (ValueError, TypeError):
+            return None, None, None
+
     def _price(self, draft: Any) -> float | None:
-        return self._price_from(draft.symbol, draft.exchange)
+        p, _, _ = self._extract_price_and_age(self._price_raw(draft.symbol, draft.exchange))
+        return p
 
     def _price_from(self, symbol: str, exchange: str) -> float | None:
+        p, _, _ = self._extract_price_and_age(self._price_raw(symbol, exchange))
+        return p
+
+    def _price_raw(self, symbol: str, exchange: str) -> Any:
         try:
             return self.prices(symbol, exchange)
         except Exception:  # noqa: BLE001 - a broken source is "no price"
@@ -635,19 +759,28 @@ class PaperLedger:
         }
 
     def _marks(self, portfolio: Any) -> dict[str, float]:
-        """Last close for every held symbol, from the local daily cache.
+        """Live prices when available, falling back to cached close.
 
-        Only the symbols actually held: reading 2,654 parquet files to value a
-        three-position paper account would take about a minute.
+        Prioritizes live tick stream for real-time P&L. Only falls back to
+        cached close when no live price is available.
         """
+        # Try live tick source first
+        live_source = default_live_source()
         source = cached_close_source()
         marks: dict[str, float] = {}
         for position in portfolio.positions.values():
             if position.is_flat:
                 continue
-            price = source(position.instrument.symbol, position.instrument.exchange)
-            if price is not None:
-                marks[position.instrument.symbol] = price
+            symbol = position.instrument.symbol
+            # Prefer live price
+            live_price = live_source(symbol, position.instrument.exchange)
+            if live_price is not None:
+                marks[symbol] = live_price.price
+            else:
+                # Fall back to cached close
+                price = source(symbol, position.instrument.exchange)
+                if price is not None:
+                    marks[symbol] = price
         return marks
 
 
@@ -763,6 +896,51 @@ def install_live_source(source: Callable[[str, str], float | None] | None) -> No
     _LIVE_SOURCE[0] = source
 
 
+#: Set once by the API layer, alongside ``_LIVE_SOURCE``. A callable that asks
+#: the tick stream to *carry* a set of symbols, which is a different job from
+#: reading a price out of it — and the one that was missing.
+_LIVE_SUBSCRIBER: list[Callable[..., Any] | None] = [None]
+
+
+def install_live_subscriber(subscriber: Callable[..., Any] | None) -> None:
+    """Register the function that puts symbols on the live feed.
+
+    Injected for the same reason the price source is: ``services`` sits below
+    ``api``, so this module cannot reach the broadcaster itself and the API layer
+    owns the wiring.
+    """
+    _LIVE_SUBSCRIBER[0] = subscriber
+
+
+def ensure_live_symbols(
+    symbols: Any, exchange: str = "NSEEQ"
+) -> dict[str, list[str]] | None:
+    """Ask the live feed to carry ``symbols``, so their ticks exist to be read.
+
+    **Reading the feed is not the same as being on it.** A symbol only reaches
+    the broadcaster's tick store if somebody subscribed to it, and the only
+    subscriber used to be a browser. So a paper deployment with no dashboard open
+    read ``None`` from every price lookup, and ``default_price_source`` fell
+    through to the daily cache — meaning the deployment was priced at yesterday's
+    close, or not priced at all, while reporting itself as running. A paper
+    account in that state produces either no forward observation or a wrong one,
+    and both are worse than an honest refusal.
+
+    Returns the subscriber's report, or ``None`` when no subscriber is installed.
+    ``None`` is not an error: in a CLI run, in a test, or when the stream failed
+    to start, the venue keeps pricing off the daily cache — the documented
+    degradation rather than a crash or a fabricated price.
+    """
+    subscriber = _LIVE_SUBSCRIBER[0]
+    if subscriber is None:
+        return None
+    try:
+        return subscriber(symbols, exchange)
+    except Exception:  # noqa: BLE001 - a missing feed must not stop the loop
+        logger.exception("paper: could not subscribe the deployment universe")
+        return None
+
+
 def paper_venue(
     prices: Callable[[str, str], float | None] | None = None, **kwargs: Any
 ) -> PaperVenue:
@@ -812,7 +990,66 @@ class DeploymentService:
         broker_account: str | None = None,
         config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Allocate capital to an immutable strategy version.
+
+        **The pinned version is checked before the row is written**, and only when
+        the strategy is one of the caller's saved strategies. Two refusals:
+
+        * the version does not exist;
+        * the version exists but resolves to no live entry/exit rules.
+
+        Both would otherwise produce a deployment that reports itself ``RUNNING``,
+        shows up on the monitor, and never places an order — the runner refuses to
+        trade a version it cannot resolve, correctly, because the alternative is
+        stamping a strategy's name onto rules it never ran. That refusal is honest
+        and it is also indistinguishable from a quiet market on the screen, so it
+        is better raised here where the operator is still looking.
+
+        A ``strategy_id`` that is **not** one of the caller's saved strategies is
+        left alone. That path is deliberate and tested (``tests/
+        test_paper_deployment.py``): a deployment may name a bare registry key, and
+        the runner reports the refusal on the status surface when it cannot be
+        resolved. Widening the check to reject unknown ids would change behaviour
+        those tests pin, and it would not catch a mistake it does not already
+        catch — a typo in a *saved* strategy's id is caught by the version check.
+        """
+        from atr.appdb.repositories import StrategyRepository
+        from atr.strategy.definition import parse_definition, resolve_rules
+
         with self.db.session() as session:
+            strategy = StrategyRepository.get(session, strategy_id, user_id)
+            if strategy is not None:
+                row = StrategyRepository.version(session, strategy_id, int(strategy_version))
+                if row is None:
+                    raise DeploymentError(
+                        f"strategy {strategy_id} has no version {strategy_version}, so "
+                        "there is nothing to deploy",
+                        code="version_not_found",
+                        status=422,
+                    )
+                definition, _reason = parse_definition(row.get("definition"))
+                resolution = resolve_rules(definition) if definition is not None else None
+                if not (resolution and resolution.ok):
+                    why = resolution.reason if resolution else "the definition is unreadable"
+                    raise DeploymentError(
+                        f"strategy version {strategy_id}#{strategy_version} cannot be "
+                        f"deployed: {why}",
+                        code="version_not_deployable",
+                        status=422,
+                    )
+
+            from atr.services.portfolio import check_strategy_capital
+
+            ok, reason = check_strategy_capital(
+                user_id, strategy_id, float(capital), db=self.db
+            )
+            if not ok:
+                raise DeploymentError(
+                    reason or "capital allocation exceeds strategy cap",
+                    code="strategy_capital_cap_exceeded",
+                    status=422,
+                )
+
             return DeploymentRepository.create(
                 session,
                 user_id=user_id,
@@ -823,6 +1060,121 @@ class DeploymentService:
                 broker_account=broker_account,
                 config=config,
             )
+
+    def launch_challenger(
+        self,
+        user_id: str,
+        *,
+        strategy_id: str,
+        champion_deployment_id: str,
+        challenger_version: int,
+    ) -> dict[str, Any]:
+        """Launch a challenger version against a running champion, same conditions.
+
+        The challenger inherits the champion's capital, universe and full
+        deployment config — the only thing that differs is the strategy
+        version, which is what makes the comparison a comparison rather than
+        two unrelated books. Market data, venue, trading costs and the
+        slippage model are shared structurally (one runner, one venue), so
+        they cannot differ; capital and universe are copied here, so they
+        cannot drift through a hand-typed form either.
+
+        Refusals, each with its own code rather than a bare 422:
+
+        * the champion deployment is not the caller's, not PAPER, or not
+          RUNNING — a challenger needs live conditions to be compared against;
+        * the challenger version equals the champion's — that is the same arm
+          twice, and two loops on one version would even share idempotency
+          keys, so the second loop's orders would collapse into the first's;
+        * the challenger version does not exist or resolves to no rules
+          (via :meth:`create`, which owns those checks);
+        * a RUNNING PAPER deployment already exists for the challenger version
+          — for the same idempotency reason: one version, one loop.
+
+        Returns the challenger deployment row plus a ``parity`` statement
+        naming what was copied from which champion, so the identical-conditions
+        claim is auditable rather than asserted.
+        """
+        champion = self.get(user_id, champion_deployment_id)
+        if str(champion.get("strategy_id") or "") != str(strategy_id):
+            raise DeploymentError(
+                "the champion deployment does not belong to "
+                f"strategy {strategy_id}",
+                code="champion_mismatch",
+                status=422,
+            )
+        if str(champion.get("mode") or "").upper() != "PAPER":
+            raise DeploymentError(
+                "a challenger can only be launched against a PAPER champion",
+                code="champion_not_paper",
+                status=422,
+            )
+        if str(champion.get("status") or "").upper() != "RUNNING":
+            raise DeploymentError(
+                "a challenger can only be launched against a RUNNING champion; "
+                "start it first so both arms observe live conditions",
+                code="champion_not_running",
+                status=409,
+            )
+        if int(challenger_version) == int(champion.get("strategy_version") or 0):
+            raise DeploymentError(
+                f"version {challenger_version} is already the champion; a "
+                "challenger must be a different version",
+                code="challenger_is_champion",
+                status=422,
+            )
+        with self.db.session() as session:
+            clashes = DeploymentRepository.list_for_user(
+                session, user_id, status="RUNNING"
+            )
+        for row in clashes:
+            if str(row.get("strategy_id") or "") == str(strategy_id) and int(
+                row.get("strategy_version") or 0
+            ) == int(challenger_version):
+                raise DeploymentError(
+                    f"version {challenger_version} already has a RUNNING PAPER "
+                    f"deployment ({row.get('deployment_id')}); one version runs "
+                    "one loop, because two loops on one version share "
+                    "idempotency keys",
+                    code="challenger_already_running",
+                    status=409,
+                )
+
+        import copy
+        import json as _json
+
+        raw_config = champion.get("config")
+        if isinstance(raw_config, str):
+            try:
+                config = _json.loads(raw_config)
+            except ValueError:
+                config = None
+        elif isinstance(raw_config, dict):
+            config = copy.deepcopy(raw_config)
+        else:
+            config = None
+
+        created = self.create(
+            user_id,
+            strategy_id=strategy_id,
+            strategy_version=int(challenger_version),
+            capital=float(champion.get("capital") or 0.0),
+            mode="PAPER",
+            broker_account=champion.get("broker_account"),
+            config=config,
+        )
+        created["parity"] = {
+            "champion_deployment_id": champion.get("deployment_id"),
+            "capital_copied": float(champion.get("capital") or 0.0),
+            "config_copied": config,
+            "venue_shared": True,
+            "note": (
+                "market data, trading costs and the slippage model are shared "
+                "structurally: both loops fill against the runner's single "
+                "venue. Capital and universe were copied from the champion row."
+            ),
+        }
+        return created
 
     def list(self, user_id: str, *, status: str | None = None) -> list[dict[str, Any]]:
         with self.db.session() as session:
@@ -977,6 +1329,7 @@ __all__ = [
     "PaperLedger",
     "PaperVenue",
     "PriceSource",
+    "TickPrice",
     "cached_close_source",
     "default_price_source",
     "fixed_price_source",

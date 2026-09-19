@@ -44,6 +44,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -57,35 +58,46 @@ from atr.appdb.engine import utcnow
 from atr.appdb.repositories import DeploymentRepository
 from atr.core.enums import OrderType, Side
 from atr.execution.oms import OrderDraft
-from atr.services.paper import PaperLedger, PaperVenue, default_price_source
+from atr.market_calendar import (
+    MARKET_CLOSE,
+    MARKET_OPEN,
+    NSEMarketCalendar,
+    get_market_calendar,
+    is_market_open as _cal_is_market_open,
+)
+from atr.services.paper import (
+    PaperLedger,
+    PaperVenue,
+    TickPrice,
+    default_price_source,
+)
+
+from atr.strategy.definition import parse_definition, resolve_rules
 
 logger = logging.getLogger("atr.services.runner")
 
 IST = ZoneInfo("Asia/Kolkata")
-
-#: The Indian cash-market session. A signal is only acted on inside it, because a
-#: paper fill at 20:15 IST is a fill at a price no exchange offered.
-MARKET_OPEN = clock_time(9, 15)
-MARKET_CLOSE = clock_time(15, 30)
 
 #: How long a signal stays actionable. Beyond this it is dropped rather than
 #: filled late: a rule that fired at 10:02 was true of the market at 10:02.
 SIGNAL_TTL_SECONDS = 300
 
 
+class RunnerDeploymentState:
+    WAITING_FOR_MARKET = "WAITING_FOR_MARKET"
+    WAITING_FOR_TICKS = "WAITING_FOR_TICKS"
+    RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    ERROR = "ERROR"
+
+
 def in_market_hours(now: datetime | None = None) -> bool:
     """Whether the NSE/BSE regular session is open.
 
-    Weekends are excluded. Public holidays are *not* — the platform has no market
-    calendar yet (``docs/DATA_MODEL.md`` §2 specifies one), and on a holiday the
-    live feed simply delivers no ticks, so a deployment evaluates nothing. That is
-    the same observable behaviour as a correct calendar for this purpose, and
-    inventing a holiday list would be a guess presented as a fact.
+    Backed by the market calendar abstraction: respects weekends, holidays,
+    and exchange session bounds (09:15 to 15:30 IST).
     """
-    now = now.astimezone(IST) if now else datetime.now(IST)
-    if now.weekday() >= 5:
-        return False
-    return MARKET_OPEN <= now.time() <= MARKET_CLOSE
+    return get_market_calendar().is_market_open(now)
 
 
 @dataclass
@@ -115,6 +127,7 @@ class RunnerConfig:
     #: Trailing stop applied to every paper position, as the exit rules would.
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
+    sizing: dict[str, Any] | None = None
 
     @classmethod
     def from_deployment(cls, row: dict[str, Any]) -> RunnerConfig:
@@ -150,6 +163,7 @@ class RunnerConfig:
             max_open_positions=int(raw.get("max_open_positions") or 10),
             stop_loss_pct=raw.get("stop_loss_pct"),
             take_profit_pct=raw.get("take_profit_pct"),
+            sizing=raw.get("sizing") if isinstance(raw.get("sizing"), dict) else None,
         )
 
 
@@ -168,9 +182,13 @@ class DeploymentLoop:
     #: deployment's own folded portfolio. A callable rather than two objects
     #: because the portfolio is rebuilt from the log on every pass — see
     #: ``PaperRunner.order_service``.
-    wiring: Callable[["DeploymentLoop"], tuple[Any, Any]]
+    wiring: Callable[[DeploymentLoop], tuple[Any, Any]]
     ledger: PaperLedger
     venue: PaperVenue
+    #: Resolves this deployment's (entry, exit) rules, or ``None`` when they
+    #: cannot be resolved. Injected rather than imported so the runner does not
+    #: reach into the strategy-version store itself.
+    rules_for: Callable[[DeploymentLoop], tuple[Any, Any] | None] | None = None
     features: Any = None
     #: symbol -> daily frame, loaded once and appended to as bars close.
     frames: dict[str, pd.DataFrame] = field(default_factory=dict)
@@ -182,8 +200,25 @@ class DeploymentLoop:
     #: Set when rules emitted but nothing was traded, for the status surface.
     last_pass: dict[str, Any] = field(default_factory=dict)
     started_at: datetime = field(default_factory=utcnow)
+    #: Why this deployment is not trading, when it is not. ``None`` means it
+    #: resolved its rules and is evaluating normally.
+    blocked_reason: str | None = None
     #: (execution, orders) for the current pass, set by ``bind``.
     _bound: tuple[Any, Any] | None = None
+
+    # Observability state and metrics
+    state: str = field(default=RunnerDeploymentState.RUNNING)
+    last_tick_time: datetime | None = None
+    last_tick_age_seconds: float | None = None
+    last_strategy_evaluation: datetime | None = None
+    last_signal: dict[str, Any] | None = None
+    last_risk_decision: dict[str, Any] | None = None
+    last_order: dict[str, Any] | None = None
+    last_fill: dict[str, Any] | None = None
+    last_sizing: dict[str, Any] | None = None
+    skipped_evaluations_count: int = 0
+    skipped_fills_count: int = 0
+    skipped_reason: str | None = None
 
     @property
     def user_id(self) -> str:
@@ -288,23 +323,62 @@ class DeploymentLoop:
 
         return append_live_bar(frame, price)
 
-    def _price(self, symbol: str) -> float | None:
-        return self.venue.prices(symbol, self.config.exchange)
+    def _price_with_meta(
+        self, symbol: str, now: datetime | None = None
+    ) -> tuple[float | None, datetime | None, float | None]:
+        """Return (price, timestamp, age_seconds) for a symbol."""
+        try:
+            val = self.venue.prices(symbol, self.config.exchange)
+        except Exception:
+            return None, None, None
+
+        if val is None:
+            return None, None, None
+        if isinstance(val, TickPrice):
+            clock_time = now or self.venue.clock()
+            age = val.get_age_seconds(now=clock_time)
+            return val.price, val.timestamp, age
+        try:
+            p = float(val)
+            if p == p and p > 0:
+                clock_time = now or self.venue.clock()
+                return p, clock_time, 0.0
+            return None, None, None
+        except (ValueError, TypeError):
+            return None, None, None
+
+    def _price(self, symbol: str, now: datetime | None = None) -> float | None:
+        p, _, _ = self._price_with_meta(symbol, now=now)
+        return p
 
     # ------------------------------------------------------------------
     # evaluation
     # ------------------------------------------------------------------
-    def _rules(self) -> tuple[Any, Any]:
-        """The entry/exit rules this deployment runs.
+    def _rules(self) -> tuple[Any, Any] | None:
+        """The entry/exit rules this deployment runs, or ``None`` if unresolvable."""
+        if self.rules_for is not None:
+            try:
+                resolved = self.rules_for(self)
+            except Exception as exc:  # noqa: BLE001 — a broken store must not trade
+                self.blocked_reason = f"could not resolve strategy rules: {exc}"
+                self.state = RunnerDeploymentState.ERROR
+                logger.exception(
+                    "runner %s: rule resolution failed; not trading",
+                    self.deployment_id[:8],
+                )
+                return None
+            if resolved is not None:
+                self.blocked_reason = None
+                return resolved
+            if self.blocked_reason is None:
+                self.blocked_reason = (
+                    f"strategy {self.row.get('strategy_id')!r} version "
+                    f"{self.row.get('strategy_version')!r} could not be resolved"
+                )
+            self.state = RunnerDeploymentState.ERROR
+            return None
 
-        Sourced from the strategy registry via the deployment's ``strategy_id``,
-        so paper runs the *same* rule definitions as a backtest of the same
-        strategy. A deployment whose strategy is not in the registry is skipped
-        rather than defaulted — silently running someone else's rules would be
-        worse than not running.
-        """
-        from atr.signals.models import EntryRules, ExitRules
-
+        # No resolver injected (a bare loop in a unit test).
         key = self.row.get("strategy_id")
         try:
             from atr.strategy.strategies import STRATEGIES
@@ -313,37 +387,128 @@ class DeploymentLoop:
             rules = getattr(meta, "signal_rules", None) if meta else None
             if callable(rules):
                 entry, exit_rules = rules()
+                self.blocked_reason = None
                 return entry, exit_rules
             if isinstance(rules, tuple) and len(rules) == 2:
+                self.blocked_reason = None
                 return rules
-        except Exception:  # noqa: BLE001 - fall back to defaults, never crash the loop
+        except Exception:  # noqa: BLE001
             logger.debug("runner %s: no registry rules for %s", self.deployment_id[:8], key)
 
-        entry = EntryRules()
-        exit_rules = ExitRules()
-        if self.config.stop_loss_pct is not None:
-            exit_rules = ExitRules(
-                stop_loss_pct=float(self.config.stop_loss_pct),
-                take_profit_pct=self.config.take_profit_pct,
-            )
-        return entry, exit_rules
+        self.blocked_reason = (
+            f"no rule definition for strategy {key!r}; refusing to trade on "
+            "unrelated defaults"
+        )
+        self.state = RunnerDeploymentState.ERROR
+        logger.warning(
+            "runner %s: %s", self.deployment_id[:8], self.blocked_reason
+        )
+        return None
 
-    def evaluate(self) -> list[dict[str, Any]]:
+    def evaluate(self, now: datetime | None = None) -> list[dict[str, Any]]:
         """Run the rules over every symbol with a live price.
 
-        Returns the *acted-on* signals, not every signal: a rule that is still
-        true on the next pass is the same signal, and re-emitting it is how a loop
-        like this places the same order sixty times a minute.
+        Observability and freshness rules:
+        - Verifies the market calendar.
+        - Verifies live tick existence and age against max_tick_age_seconds.
+        - Skips evaluation if ticks are stale or absent.
+        - Updates deployment state (WAITING_FOR_MARKET, WAITING_FOR_TICKS, RUNNING, ERROR).
+        - Records last_strategy_evaluation, last_signal, last_order, skipped counts.
         """
+        from atr.market_calendar import get_market_calendar
         from atr.signals.rules import eval_entry, eval_exit, primary_exit
 
-        entry_rules, exit_rules = self._rules()
+        eval_time = now or utcnow()
+        cal = get_market_calendar()
+
+        resolved = self._rules()
+        if resolved is None:
+            self.state = RunnerDeploymentState.ERROR
+            self.skipped_reason = self.blocked_reason or "rule resolution error"
+            self.skipped_evaluations_count += 1
+            self.last_pass = {
+                "at": eval_time.isoformat(),
+                "signals": 0,
+                "orders": 0,
+                "state": self.state,
+                "blocked": self.blocked_reason,
+            }
+            return []
+
+        if not cal.is_market_open(eval_time):
+            self.state = RunnerDeploymentState.WAITING_FOR_MARKET
+            reason = cal.reason_closed(eval_time) or "market is closed"
+            self.skipped_reason = reason
+            self.skipped_evaluations_count += 1
+            self.last_pass = {
+                "at": eval_time.isoformat(),
+                "signals": 0,
+                "orders": 0,
+                "state": self.state,
+                "skipped_reason": reason,
+            }
+            return []
+
+        entry_rules, exit_rules = resolved
         opened: list[dict[str, Any]] = []
+        max_age = getattr(self.venue, "max_tick_age_seconds", 60.0)
+
+        # Check universe prices and freshness
+        valid_symbols_count = 0
+        latest_tick_dt: datetime | None = None
+        min_age: float | None = None
 
         for symbol in self.config.symbols:
-            price = self._price(symbol)
+            price, ts, age = self._price_with_meta(symbol, now=eval_time)
+            if ts is not None:
+                if latest_tick_dt is None or ts > latest_tick_dt:
+                    latest_tick_dt = ts
+            if age is not None:
+                if min_age is None or age < min_age:
+                    min_age = age
+
             if price is None:
                 continue
+
+            # Stale tick check
+            if max_age is not None and age is not None and age > max_age:
+                continue
+
+            valid_symbols_count += 1
+
+        self.last_tick_time = latest_tick_dt
+        self.last_tick_age_seconds = min_age
+
+        if valid_symbols_count == 0:
+            self.state = RunnerDeploymentState.WAITING_FOR_TICKS
+            why = "no fresh live ticks available" if min_age is not None else "no live ticks received"
+            self.skipped_reason = why
+            self.skipped_evaluations_count += 1
+            self.last_pass = {
+                "at": eval_time.isoformat(),
+                "signals": 0,
+                "orders": 0,
+                "state": self.state,
+                "skipped_reason": why,
+            }
+            return []
+
+        self.state = RunnerDeploymentState.RUNNING
+
+        # Fresh ticks available and rules resolved: deployment is RUNNING
+        self.state = RunnerDeploymentState.RUNNING
+        self.skipped_reason = None
+        self.last_strategy_evaluation = eval_time
+
+        for symbol in self.config.symbols:
+            price, ts, age = self._price_with_meta(symbol, now=eval_time)
+            if price is None:
+                self.skipped_fills_count += 1
+                continue
+            if max_age is not None and age is not None and age > max_age:
+                self.skipped_fills_count += 1
+                continue
+
             frame = self.live_frame(symbol)
             if frame is None or len(frame) < 2:
                 continue
@@ -351,9 +516,6 @@ class DeploymentLoop:
             position = self._position_quantity(symbol)
 
             # --- exits first -------------------------------------------------
-            # A position that should close is closed in the same pass the signal
-            # appears, not one pass later. Ordering it the other way round is how
-            # a stop-loss gets missed for a full interval while the price runs.
             if position != 0:
                 entry_price = self._entry_price(symbol)
                 exit_signals = eval_exit(
@@ -365,6 +527,13 @@ class DeploymentLoop:
                 )
                 chosen = primary_exit(exit_signals)
                 if chosen is not None:
+                    self.last_signal = {
+                        "symbol": symbol,
+                        "rule": str(chosen.rule),
+                        "reason": chosen.reason,
+                        "side": "SELL" if position > 0 else "BUY",
+                        "at": eval_time.isoformat(),
+                    }
                     key = (symbol, str(chosen.rule), self._bar_key(symbol))
                     if key not in self.acted:
                         self.acted.add(key)
@@ -389,12 +558,21 @@ class DeploymentLoop:
             if not signals:
                 continue
             chosen = signals[0]
+            self.last_signal = {
+                "symbol": symbol,
+                "rule": str(chosen.rule),
+                "reason": chosen.reason,
+                "side": "BUY",
+                "at": eval_time.isoformat(),
+            }
             key = (symbol, str(chosen.rule), self._bar_key(symbol))
             if key in self.acted:
                 continue
             self.acted.add(key)
 
-            quantity = self._size(price)
+            quantity = self._size(
+                price, symbol=symbol, frame=frame, entry_rules=entry_rules
+            )
             if quantity <= 0:
                 continue
             result = self._trade(
@@ -403,9 +581,13 @@ class DeploymentLoop:
                 quantity=quantity,
                 reason=f"{chosen.rule}: {chosen.reason}",
                 signal=chosen,
+                sizing=self.last_sizing,
             )
             if result:
                 opened.append(result)
+
+        if not opened and self.skipped_reason is None:
+            self.skipped_reason = "Strategy produced no signal"
 
         return opened
 
@@ -417,24 +599,83 @@ class DeploymentLoop:
         """
         return f"{symbol}:{datetime.now(IST).date().isoformat()}"
 
-    def _size(self, price: float) -> int:
-        """How many shares a signal buys. Whole shares, and never more than cash."""
+    def _size(
+        self,
+        price: float,
+        symbol: str | None = None,
+        frame: pd.DataFrame | None = None,
+        entry_rules: Any = None,
+    ) -> int:
+        """How many shares a signal buys, calculated via PositionSizingEngine."""
         if price <= 0:
-            return 0
-        value = self.config.order_value
-        if value is None:
-            value = float(self.row.get("capital") or 0.0) / max(
-                self.config.max_open_positions, 1
-            )
-        if value <= 0:
+            self.last_sizing = None
             return 0
 
         portfolio = self._portfolio()
-        # Leave 2% for costs, so a full-size order does not fail the cash check
-        # by the price of its own brokerage.
-        affordable = portfolio.cash * 0.98
-        value = min(float(value), max(affordable, 0.0))
-        return int(value // price)
+        capital = float(self.row.get("capital") or 0.0)
+        available_capital = float(portfolio.cash)
+
+        from atr.strategy.sizing import PositionSizingEngine, SizingConfig, SizingMethod
+
+        raw_sizing = self.config.sizing
+        if not raw_sizing and isinstance(self.row.get("definition"), dict):
+            raw_sizing = self.row["definition"].get("sizing")
+
+        if raw_sizing and isinstance(raw_sizing, dict):
+            sizing_cfg = SizingConfig.from_dict(raw_sizing)
+        elif self.config.order_value is not None:
+            sizing_cfg = SizingConfig(
+                method=SizingMethod.FIXED_RUPEE_VALUE,
+                fixed_rupee_value=float(self.config.order_value),
+            )
+        else:
+            fraction = 1.0 / max(self.config.max_open_positions, 1)
+            sizing_cfg = SizingConfig(
+                method=SizingMethod.PERCENT_OF_CAPITAL,
+                capital_fraction=fraction,
+                risk_per_trade_pct=self.config.stop_loss_pct or 1.0,
+            )
+
+        # Extract stop loss
+        stop_loss_pct = self.config.stop_loss_pct
+        if stop_loss_pct is None and entry_rules is not None:
+            stop_loss_pct = getattr(entry_rules, "stop_loss_pct", None)
+
+        # Extract ATR
+        atr_val: float | None = None
+        if frame is not None and not frame.empty and len(frame) >= 15:
+            try:
+                from atr.strategy.indicators import atr as calc_atr
+                high = frame["high"] if "high" in frame.columns else frame["close"]
+                low = frame["low"] if "low" in frame.columns else frame["close"]
+                close = frame["close"]
+                atr_series = calc_atr(high, low, close)
+                val = float(atr_series.dropna().iloc[-1])
+                if math.isfinite(val) and val > 0:
+                    atr_val = val
+            except Exception:
+                atr_val = None
+
+        current_stock_exposure = 0.0
+        if symbol:
+            pos = portfolio.position(symbol)
+            if pos and not pos.is_flat:
+                current_stock_exposure = abs(float(pos.quantity) * price)
+
+        result = PositionSizingEngine.calculate(
+            sizing_cfg,
+            entry_price=price,
+            capital=capital,
+            available_capital=available_capital,
+            stop_loss_pct=stop_loss_pct,
+            atr=atr_val,
+            current_stock_exposure=current_stock_exposure,
+            current_portfolio_exposure=float(portfolio.gross_exposure),
+        )
+
+        res_dict = result.as_dict()
+        self.last_sizing = res_dict
+        return result.final_quantity
 
     # ------------------------------------------------------------------
     # the fold
@@ -468,15 +709,26 @@ class DeploymentLoop:
         return float(getattr(position, "avg_price", 0.0) or 0.0)
 
     def _open_position_count(self) -> int:
+        """How many positions this deployment holds, across its whole book.
+
+        **Every non-flat position, not only the configured universe.** The
+        previous version iterated ``config.symbols``, which made the count depend
+        on a list that is editable while the deployment runs: drop a symbol from
+        the universe while holding it and the position becomes invisible to
+        ``max_open_positions``, so the deployment can open its way past the cap
+        while the risk surface reports the limit as enforced. A position consumes
+        capital whether or not the loop still evaluates its symbol, so it is
+        counted.
+
+        The fold is the source, not a counter held here — see the module
+        docstring.
+        """
         portfolio = self._portfolio()
-        count = 0
-        for symbol in self.config.symbols:
-            position = portfolio.position(symbol)
-            if position is not None and float(position.quantity) != 0:
-                count += 1
-        # Positions outside the configured universe are counted too: they consume
-        # capital even though this deployment no longer evaluates them.
-        return count
+        return sum(
+            1
+            for position in portfolio.positions.values()
+            if not position.is_flat
+        )
 
     # ------------------------------------------------------------------
     # trading
@@ -489,6 +741,7 @@ class DeploymentLoop:
         quantity: float,
         reason: str,
         signal: Any = None,
+        sizing: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Route one signal through the shared path: risk, OMS, venue, fill.
 
@@ -509,22 +762,43 @@ class DeploymentLoop:
             deployment_id=self.deployment_id,
             strategy_id=self.row.get("strategy_id"),
             strategy_version=self.row.get("strategy_version"),
+            # The bar this signal belongs to, so the order is traceable back to
+            # the context recorded against the same bar (see
+            # ``_record_signal_context``). Idempotency is unchanged: the key is
+            # still derived independently in ``_idempotency_key``.
+            signal_id=self._bar_key(symbol),
             tag="paper-runner",
+            # The rule's own words, carried onto the order's NEW event. This is
+            # what lets the monitoring timeline answer "why did this order
+            # exist?" instead of showing a fill with no antecedent.
+            signal_reason=reason,
         )
         # A signal-driven order gets a key, so a retry after a dropped response
         # returns the existing order rather than placing a second one. It is
         # derived from the bar, so re-evaluating the same bar is a no-op.
         key = self._idempotency_key(draft, symbol, side)
 
+        now_iso = utcnow().isoformat()
         try:
             result = self.execution.place(draft, idempotency_key=key)
-        except Exception:  # noqa: BLE001 - one bad order must not stop the loop
+        except Exception as exc:  # noqa: BLE001 - one bad order must not stop the loop
             logger.exception(
                 "runner %s: placing %s %s failed",
                 self.deployment_id[:8],
                 side,
                 symbol,
             )
+            self.skipped_fills_count += 1
+            self.skipped_reason = f"System error: {exc}"
+            self.last_risk_decision = {
+                "symbol": symbol,
+                "side": side,
+                "quantity": float(quantity),
+                "approved": False,
+                "reason": f"System error placing order: {exc}",
+                "rule": reason,
+                "at": now_iso,
+            }
             return None
 
         logger.info(
@@ -536,14 +810,88 @@ class DeploymentLoop:
             result.status,
             reason,
         )
-        return {
+        order_info = {
             "symbol": symbol,
             "side": side,
             "quantity": quantity,
             "status": result.status,
             "order_id": result.order_id,
             "reason": reason,
+            "sizing": sizing or self.last_sizing,
         }
+        self.last_order = order_info
+
+        # Track risk decision and fill state
+        is_risk_rejected = (result.status == "REJECTED") and (
+            not getattr(result, "broker_order_id", None)
+            or "risk" in (result.reject_reason or "").lower()
+            or "limit" in (result.reject_reason or "").lower()
+            or "exposure" in (result.reject_reason or "").lower()
+        )
+        if is_risk_rejected:
+            self.last_risk_decision = {
+                "symbol": symbol,
+                "side": side,
+                "quantity": float(quantity),
+                "approved": False,
+                "reason": result.reject_reason or "Rejected by risk engine",
+                "rule": reason,
+                "at": now_iso,
+            }
+            self.skipped_fills_count += 1
+            self.skipped_reason = f"Risk rejected signal: {result.reject_reason or 'Risk limit exceeded'}"
+        else:
+            self.last_risk_decision = {
+                "symbol": symbol,
+                "side": side,
+                "quantity": float(quantity),
+                "approved": True,
+                "reason": "Approved by risk engine",
+                "rule": reason,
+                "at": now_iso,
+            }
+            if result.status == "REJECTED":
+                self.skipped_fills_count += 1
+                self.skipped_reason = f"Order rejected: {result.reject_reason or 'Venue rejected order'}"
+            elif result.status == "FILLED":
+                self.last_fill = order_info
+                self.skipped_reason = "Paper fill completed"
+            else:
+                self.skipped_reason = "Order waiting for fill"
+        self._record_signal_context(symbol=symbol, side=side)
+        return order_info
+
+    def _record_signal_context(self, *, symbol: str, side: str) -> None:
+        """Annotate the just-raised signal with its market/sector/stock context.
+
+        Best-effort and strictly post-hoc: it runs *after* the order has been
+        placed (so a slow market scan can never delay or block a signal), and any
+        failure is swallowed — the context record is an annotation, never a gate.
+
+        The ``signal_id`` is the bar key, matching ``OrderDraft.signal_id``, so
+        the recorded context and the order agree on the signal they describe and
+        the analytics layer can resolve one against the other.
+        """
+        try:
+            from atr.signal_context.service import get_signal_context_service
+
+            get_signal_context_service().enrich_live(
+                user_id=self.user_id,
+                symbol=symbol,
+                action="SELL" if str(side).upper() in ("SELL", "S") else "BUY",
+                signal_ts=utcnow().isoformat(),
+                signal_id=self._bar_key(symbol),
+                strategy_id=self.row.get("strategy_id"),
+                strategy_version=self.row.get("strategy_version"),
+                signal_source="PAPER",
+            )
+        except Exception as exc:  # noqa: BLE001 — context is not a gate
+            logger.debug(
+                "runner %s: signal context for %s skipped: %s",
+                self.deployment_id[:8],
+                symbol,
+                exc,
+            )
 
     def _idempotency_key(self, draft: OrderDraft, symbol: str, side: str) -> str:
         """One key per (deployment, bar, symbol, side).
@@ -713,6 +1061,10 @@ class PaperRunner:
         self._execution: ExecutionService | None = None
         self._order_services: dict[str, Any] = {}
         self._loops: dict[str, DeploymentLoop] = {}
+        #: (strategy_id, version) -> resolved (entry, exit) rules or the
+        #: ``_UNRESOLVED`` sentinel. A version is immutable, so once read it
+        #: cannot change; caching is correct and keeps the pass off the database.
+        self._rules_cache: dict[tuple[str, int], Any] = {}
         self._task: asyncio.Task | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -742,6 +1094,90 @@ class PaperRunner:
     # ------------------------------------------------------------------
     # deployment tracking
     # ------------------------------------------------------------------
+    def resolve_rules(self, loop: DeploymentLoop) -> tuple[Any, Any] | None:
+        """Read the deployment's *version* and turn it into entry/exit rules.
+
+        This is the seam that makes "select an immutable version" mean something.
+        A deployment stores ``(strategy_id, strategy_version)``; the version's
+        canonical ``definition`` is the subject, and it is read by exact number
+        — never "latest" — for the same reason the backtest service does it: a
+        run whose subject can change after the fact is not reproducible, and a
+        deployment is a run that lasts months.
+
+        Accepted definition shapes, in the order they are tried:
+
+        * ``{"entry": {...}, "exit": {...}}`` — flat rule blocks, the natural
+          shape for a version authored from the rule layer.
+        * ``{"rules": {"entry": ..., "exit": ...}}`` — the same, nested, which is
+          what ``DATA_MODEL.md`` describes when it calls the column
+          "canonical JSON of rules / params / code".
+        * ``engine_key`` naming a registry strategy with a ``signal_rules()``
+          classmethod — resolved through the registry.
+
+        Returns ``None`` when none of those yield a rule pair. ``None`` is not
+        "use the defaults": see ``DeploymentLoop._rules`` for why a named
+        strategy must never silently run somebody else's rules.
+        """
+        strategy_id = loop.row.get("strategy_id")
+        version = loop.row.get("strategy_version")
+        if not strategy_id or version is None:
+            return None
+
+        key = (str(strategy_id), int(version))
+        if key in self._rules_cache:
+            return self._rules_cache[key]
+
+        resolved = self._read_version_rules(key)
+        # A version is immutable, so a resolved pair is safe to keep forever; an
+        # unresolved one is cached too, because re-reading the store every pass
+        # to reach the same refusal is pure cost.
+        self._rules_cache[key] = resolved
+        return resolved
+
+    def _read_version_rules(self, key: tuple[str, int]) -> tuple[Any, Any] | None:
+        """Load one version definition and coerce it to an (entry, exit) pair."""
+        from atr.appdb.repositories import StrategyRepository
+
+        strategy_id, version = key
+        try:
+            with self.db.session() as session:
+                row = StrategyRepository.version(session, strategy_id, version)
+        except Exception:  # noqa: BLE001 — a broken store must not trade
+            logger.exception(
+                "runner: could not read strategy version %s#%s", strategy_id[:8], version
+            )
+            return None
+        if row is None:
+            logger.warning(
+                "runner: strategy version %s#%s does not exist; not trading",
+                strategy_id[:8],
+                version,
+            )
+            return None
+
+        raw = row.get("definition")
+        definition, reason = parse_definition(raw)
+        if definition is None:
+            logger.warning(
+                "runner: strategy version %s#%s %s; not trading",
+                strategy_id[:8],
+                version,
+                reason,
+            )
+            return None
+
+        resolution = resolve_rules(definition)
+        if not resolution.ok:
+            logger.warning(
+                "runner: strategy version %s#%s cannot be traded — %s (keys: %s)",
+                strategy_id[:8],
+                version,
+                resolution.reason,
+                sorted(definition),
+            )
+            return None
+        return resolution.entry, resolution.exit_rules
+
     def order_service(self, loop: DeploymentLoop) -> tuple[Any, Any]:
         """The pipeline bound to *this deployment's* folded portfolio.
 
@@ -764,14 +1200,23 @@ class PaperRunner:
         """
         from atr.services.execution import ExecutionService
         from atr.services.orders import get_order_service
+        from atr.services.portfolio import portfolio_gate_for
 
+        live_prices = loop.live_prices()
         portfolio = self.ledger.portfolio(
             loop.user_id,
             deployment_id=loop.deployment_id,
             initial_cash=float(loop.row.get("capital") or 0.0),
-            prices=loop.live_prices(),
+            prices=live_prices,
         )
-        orders = get_order_service(portfolio=portfolio)
+        port_gate = portfolio_gate_for(
+            loop.user_id,
+            loop.deployment_id,
+            ledger=self.ledger,
+            prices=live_prices,
+            db=self.db,
+        )
+        orders = get_order_service(portfolio=portfolio, portfolio_gate=port_gate)
         return ExecutionService(orders=orders, venue=self.venue), orders
 
     def running_deployments(self) -> list[dict[str, Any]]:
@@ -791,6 +1236,26 @@ class PaperRunner:
                 deployments.c.mode == "PAPER",
             )
             return [dict(row) for row in session.execute(stmt).mappings().all()]
+
+    def _journal(self, *, now: datetime | None = None) -> None:
+        """Bring the trade journal into agreement with each attached book.
+
+        Failure is logged and never raised: journaling is reporting, and a
+        reporting fault must not stop the execution loop that produced the trades
+        it is trying to describe.
+        """
+        from atr.services.journal import TradeJournalService
+
+        if not self._loops:
+            return
+        service = TradeJournalService(db=self.db, ledger=self.ledger)
+        for loop in list(self._loops.values()):
+            try:
+                service.reconcile(loop.user_id, loop.deployment_id)
+            except Exception:  # noqa: BLE001 - one bad book must not stop the rest
+                logger.exception(
+                    "runner: journal reconcile failed for %s", loop.deployment_id[:8]
+                )
 
     def sync_loops(self) -> None:
         """Start a loop for each new deployment, drop the ones that stopped."""
@@ -831,6 +1296,60 @@ class PaperRunner:
                                 deployment_id[:8])
                     self._loops.pop(deployment_id, None)
 
+        # After the loop set is settled, so the statement covers exactly the
+        # deployments that are running now.
+        self._ensure_feed_subscriptions()
+
+    def _ensure_feed_subscriptions(self) -> None:
+        """Put every running deployment's universe on the live tick feed.
+
+        Requirement 2, and the hole in it. The paper engine reads its prices from
+        the broadcaster — but a symbol only reaches the broadcaster's tick store
+        when somebody *subscribes* to it, and the only subscriber was a browser.
+        With no dashboard open, ``latest_price`` returned ``None`` for every
+        symbol, and ``default_price_source`` fell through to the daily cache: the
+        deployment was priced off yesterday's close, or not priced at all, while
+        reporting itself as running. Either way it produces no forward
+        observation, or a wrong one.
+
+        Declared from the runner because the runner is the only thing that knows
+        the current universe — a deployment's symbol list can change while it
+        runs, and a stopped one should stop consuming feed bandwidth.
+
+        Never fatal. A feed that cannot be subscribed leaves the venue on the
+        cache, which is the pre-existing behaviour rather than an outage.
+        """
+        from atr.services.paper import ensure_live_symbols
+
+        universe: dict[str, list[str]] = {}
+        for loop in self._loops.values():
+            universe.setdefault(loop.config.exchange, []).extend(loop.config.symbols)
+        if not universe:
+            return
+
+        report = ensure_live_symbols(universe)
+        if not report:
+            # No subscriber installed: a CLI run, a test, or a stream that failed
+            # to start. The venue prices off the cache and nothing here is wrong.
+            return
+        if report.get("added") or report.get("removed"):
+            logger.info(
+                "runner: feed universe updated (+%d/-%d symbols)",
+                len(report.get("added") or []),
+                len(report.get("removed") or []),
+            )
+        unresolved = report.get("unresolved") or []
+        if unresolved:
+            # Named, because a symbol with no contract can never be priced from
+            # live ticks: its deployment would trade on the daily cache forever
+            # and look perfectly healthy doing it.
+            logger.warning(
+                "runner: %d symbol(s) could not be put on the feed and will not "
+                "be priced from live ticks: %s",
+                len(unresolved),
+                ", ".join(sorted(unresolved)[:10]),
+            )
+
     def _make_loop(self, row: dict[str, Any]) -> DeploymentLoop | None:
         config = RunnerConfig.from_deployment(row)
         if not config.symbols:
@@ -847,6 +1366,7 @@ class PaperRunner:
             wiring=self.order_service,
             ledger=self.ledger,
             venue=self.venue,
+            rules_for=self.resolve_rules,
         )
 
     # ------------------------------------------------------------------
@@ -879,29 +1399,53 @@ class PaperRunner:
         # New entries and exits only inside the session. A signal outside it is a
         # signal about a market that is not open, and acting on one would fill at
         # a price no exchange offered.
-        if in_market_hours(now):
+        market_is_open = in_market_hours(now)
+        if market_is_open:
             for loop in list(self._loops.values()):
                 try:
                     loop.bind()
-                    acted = loop.evaluate()
+                    acted = loop.evaluate(now=now)
                 except Exception:  # noqa: BLE001 - one deployment must not stop the others
                     logger.exception("runner: evaluation failed for %s",
                                      loop.deployment_id[:8])
                     continue
-                signals += len(acted)
-                orders += sum(
+                # Per-deployment, not the running total. ``loop.last_pass`` is what
+                # the status surface shows for *this* deployment, and a cumulative
+                # figure would report the sum across every deployment as this
+                # one's own — a number that grows with somebody else's activity.
+                loop_orders = sum(
                     1 for a in acted if a.get("status") not in ("REJECTED", None)
                 )
+                signals += len(acted)
+                orders += loop_orders
                 loop.last_pass = {
                     "at": now.isoformat(),
                     "signals": len(acted),
-                    "orders": orders,
+                    "orders": loop_orders,
+                    "state": loop.state,
+                }
+        else:
+            for loop in list(self._loops.values()):
+                loop.state = RunnerDeploymentState.WAITING_FOR_MARKET
+                loop.skipped_reason = "market closed or outside market hours"
+                loop.last_pass = {
+                    "at": now.isoformat(),
+                    "signals": 0,
+                    "orders": 0,
+                    "state": loop.state,
+                    "skipped_reason": loop.skipped_reason,
                 }
 
         with self._lock:
             self.passes += 1
             self.signals_total += signals
             self.orders_total += orders
+
+        # Journal after the trades, not during them. The journal is a projection
+        # of the position fold, so it must see the fills this pass produced —
+        # reconciling first would lag by one pass and reconcile before the very
+        # fills it is meant to record.
+        self._journal(now=now)
 
         tick = RunnerTick(
             at=now,
@@ -975,6 +1519,18 @@ class PaperRunner:
                         "deployment_id": loop.deployment_id,
                         "strategy_id": loop.row.get("strategy_id"),
                         "symbols": len(loop.config.symbols),
+                        "state": loop.state,
+                        "blocked_reason": loop.blocked_reason,
+                        "skipped_reason": loop.skipped_reason,
+                        "last_tick_time": loop.last_tick_time.isoformat() if loop.last_tick_time else None,
+                        "last_tick_age_seconds": loop.last_tick_age_seconds,
+                        "last_strategy_evaluation": loop.last_strategy_evaluation.isoformat() if loop.last_strategy_evaluation else None,
+                        "last_signal": loop.last_signal,
+                        "last_risk_decision": loop.last_risk_decision,
+                        "last_order": loop.last_order,
+                        "last_fill": loop.last_fill,
+                        "skipped_evaluations_count": loop.skipped_evaluations_count,
+                        "skipped_fills_count": loop.skipped_fills_count,
                         "last_pass": loop.last_pass,
                     }
                     for loop in loops

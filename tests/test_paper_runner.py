@@ -702,3 +702,114 @@ def test_get_runner_is_a_singleton(fresh_env):
     reset_runner()
     assert get_runner() is get_runner()
     reset_runner()
+
+
+# ---------------------------------------------------------------------------
+# 11. the open-position cap counts the whole book, not the current universe
+# ---------------------------------------------------------------------------
+def test_the_open_position_cap_counts_positions_outside_the_universe(
+    wired, deployment
+):
+    """A position consumes capital whether or not its symbol is still evaluated.
+
+    The count used to iterate ``config.symbols``, which makes it depend on a list
+    that can be edited while the deployment runs: drop a held symbol from the
+    universe and the position becomes invisible to ``max_open_positions``, so the
+    deployment opens its way past the cap while the risk surface reports the
+    limit as enforced. That is a limit that silently does not apply, which is
+    worse than no limit because the dashboard says it is.
+    """
+    runner, _feed = wired()
+    loop = _loop(runner, deployment)
+    runner.pass_once(now=SESSION)
+    assert loop._portfolio().position(SYMBOL).quantity > 0
+
+    # The symbol leaves the universe while the position is still held.
+    loop.config.symbols = ()
+
+    assert loop._open_position_count() == 1, "a held position became invisible"
+    assert loop._portfolio().position(SYMBOL).quantity > 0, "the position is still real"
+
+
+def test_the_cap_refuses_a_new_entry_when_a_position_is_held_outside_the_universe(
+    wired, deployment
+):
+    """The consequence of the count above, asserted on the behaviour.
+
+    One position is held in a symbol that has since left the universe, and the
+    cap is one. An entry in a symbol that *is* still evaluated must be refused:
+    the capital is already committed.
+    """
+    runner, feed = wired()
+    feed.prices["TCS"] = 1000.0
+    loop = _loop(runner, deployment)
+    loop.config.symbols = (SYMBOL, "TCS")
+    loop.config.max_open_positions = 1
+    # Both symbols need a warmed frame and a live price, or the second would be
+    # skipped for want of either and the cap would never be consulted.
+    loop.warmup()
+
+    runner.pass_once(now=SESSION)
+    assert loop._portfolio().position(SYMBOL).quantity > 0
+    assert loop._portfolio().position("TCS").quantity == 0, "the cap let a second in"
+
+    # The held symbol leaves the universe; the cap must not forget it.
+    loop.config.symbols = ("TCS",)
+    loop.acted.clear()
+
+    tick = runner.pass_once(now=SESSION + timedelta(minutes=1))
+    assert tick.orders == 0, (
+        "a position outside the universe stopped counting against the cap"
+    )
+    assert loop._portfolio().position("TCS").quantity == 0
+
+
+def test_the_open_count_follows_the_fold_not_the_universe(wired, deployment):
+    """The count is a property of the book, so editing the universe cannot
+    change it while the book is unchanged."""
+    runner, _feed = wired()
+    loop = _loop(runner, deployment)
+    runner.pass_once(now=SESSION)
+    assert loop._open_position_count() == 1
+
+    for universe in ((), ("INFY",), (SYMBOL,)):
+        loop.config.symbols = universe
+        assert loop._open_position_count() == 1
+
+
+# ---------------------------------------------------------------------------
+# 12. the status surface reports each deployment's own figures
+# ---------------------------------------------------------------------------
+def test_last_pass_orders_is_per_deployment_not_a_running_total(wired, deployment, app_db):
+    """``last_pass`` is what the dashboard shows *for that deployment*.
+
+    A cumulative figure there reports the sum across every deployment as this
+    one's own — a number that grows with somebody else's activity, which is the
+    kind of wrong that looks like success.
+    """
+    from atr.appdb.repositories import DeploymentRepository
+
+    with app_db.session() as session:
+        DeploymentRepository.create(
+            session,
+            user_id="u1",
+            strategy_id="sma_pullback",
+            strategy_version=1,
+            mode="PAPER",
+            capital=200_000.0,
+            status="RUNNING",
+            config={"symbols": [SYMBOL], "exchange": "NSEEQ"},
+        )
+
+    runner, _feed = wired()
+    tick = runner.pass_once(now=SESSION)
+
+    assert len(runner._loops) == 2, "the second deployment was not picked up"
+    assert tick.orders == 2, "both deployments should have placed one order"
+    for loop in runner._loops.values():
+        assert loop.last_pass["orders"] == 1, (
+            f"deployment {loop.deployment_id[:8]} reported "
+            f"{loop.last_pass['orders']} orders of its own"
+        )
+        assert loop.last_pass["signals"] == 1
+

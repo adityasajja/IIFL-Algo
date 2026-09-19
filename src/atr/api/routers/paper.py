@@ -64,6 +64,22 @@ class ResetRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=255)
 
 
+class ChallengerLaunch(BaseModel):
+    """Launch a challenger version against a running champion.
+
+    Only the two version pins are supplied. Capital, universe and the full
+    deployment config are copied from the champion by the service, so the two
+    arms run under identical conditions by construction rather than by the
+    operator copying fields correctly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy_id: str = Field(min_length=1, max_length=32)
+    champion_deployment_id: str = Field(min_length=1, max_length=32)
+    challenger_version: int = Field(ge=1)
+
+
 class MarkRequest(BaseModel):
     """Optional explicit marks, for valuing without the local cache."""
 
@@ -149,6 +165,12 @@ def create_deployment(
     version, which is what makes per-strategy P&L and per-strategy risk limits
     meaningful. Without one the ledger reports zero rather than a number somebody
     chose.
+
+    A pinned version that is one of the caller's own saved strategies is checked
+    here: a version that does not exist, or one that resolves to no live
+    entry/exit rules, is refused with 422 rather than stored. The alternative is a
+    deployment that reports itself ``RUNNING`` and never trades, which on the
+    screen looks exactly like a quiet market.
     """
     try:
         return _service().create(
@@ -160,11 +182,68 @@ def create_deployment(
             broker_account=body.broker_account,
             config=body.config,
         )
+    except DeploymentError as exc:
+        raise _fail(exc) from exc
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail={"detail": str(exc), "code": "invalid_deployment"},
         ) from exc
+
+
+@router.post("/challengers", status_code=status.HTTP_201_CREATED)
+def launch_challenger(
+    body: ChallengerLaunch, principal: Principal = Depends(_RUN)
+) -> dict[str, Any]:
+    """Launch a challenger version against a running PAPER champion.
+
+    The challenger inherits the champion's capital, universe and config; only
+    the strategy version differs. Market data, trading costs and slippage are
+    shared structurally (one runner, one venue). This creates an arm — it
+    never promotes one: there is no promotion route, and the comparison
+    surface only ever reports readiness verdicts.
+    """
+    try:
+        from atr.services.champions import ChampionService
+
+        return ChampionService().launch_challenger(
+            principal.user_id,
+            strategy_id=body.strategy_id,
+            champion_deployment_id=body.champion_deployment_id,
+            challenger_version=body.challenger_version,
+        )
+    except DeploymentError as exc:
+        raise _fail(exc) from exc
+
+
+@router.get("/champions/compare", dependencies=[Depends(_READ)])
+def compare_champion_challenger(
+    strategy_id: str,
+    champion_version: int | None = None,
+    challenger_version: int | None = None,
+    refresh: bool = False,
+    principal: Principal = Depends(_READ),
+) -> dict[str, Any]:
+    """Side-by-side forward evidence for a champion and a challenger version.
+
+    Read-only. Each arm reports its own closed forward trades, summary
+    statistics, context-score performance, regime/sector splits and recent
+    form; the verdict says only whether the comparison can be read yet
+    (INSUFFICIENT EVIDENCE / EARLY EVIDENCE / COMPARISON READY) — never which
+    arm wins, and nothing here promotes, pauses, edits or deploys.
+    """
+    try:
+        from atr.services.champions import ChampionService
+
+        return ChampionService().compare(
+            principal.user_id,
+            strategy_id,
+            champion_version=champion_version,
+            challenger_version=challenger_version,
+            refresh=refresh,
+        )
+    except DeploymentError as exc:
+        raise _fail(exc) from exc
 
 
 @router.get("/deployments", dependencies=[Depends(_READ)])
@@ -379,8 +458,15 @@ def place_paper_order(
             side=body.side,
         )
 
+    from atr.services.portfolio import portfolio_gate_for
+
+    port_gate = portfolio_gate_for(
+        principal.user_id,
+        deployment_id,
+        ledger=ledger,
+    )
     service = ExecutionService(
-        orders=get_order_service(portfolio=portfolio),
+        orders=get_order_service(portfolio=portfolio, portfolio_gate=port_gate),
         # Resolved per request through the service's named seam, so the price
         # source can be substituted without patching the venue's constructor.
         venue=paper_service.paper_venue(paper_service.default_price_source()),
