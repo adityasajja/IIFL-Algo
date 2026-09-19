@@ -50,6 +50,33 @@ async def _on_startup() -> None:
     _warm_market_intel()
     _warm_instrument_master()
     asyncio.create_task(_insights_loop())
+    asyncio.create_task(_eod_refresh_loop())
+
+
+async def _eod_refresh_loop() -> None:
+    """Top the tracked names up from public daily bars once a day, after the close.
+
+    Runs without a broker session, so the price history keeps moving when the login lapses.
+    """
+    from atr.data.eod_refresh import due, refresh
+    from atr.market_intel.service import DATA_ROOT, get_market_intel_service
+
+    def run() -> None:
+        if not due(DATA_ROOT):
+            return
+        summary = refresh(DATA_ROOT, get_market_intel_service().get_universe_symbols())
+        if summary["ok"]:
+            # New bars exist: the next read must recompute instead of serving the old day.
+            get_market_intel_service().invalidate()
+            _SCAN_CACHE["data"] = None
+
+    await asyncio.sleep(60)  # let startup finish first
+    while True:
+        try:
+            await asyncio.to_thread(run)
+        except Exception:  # noqa: BLE001 - a failed refresh must not stop the loop
+            logger.exception("end-of-day refresh failed")
+        await asyncio.sleep(1800)
 
 
 async def _insights_loop() -> None:

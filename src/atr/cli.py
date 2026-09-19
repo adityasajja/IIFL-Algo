@@ -120,7 +120,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ------------------------------------------------------------------
     hist = sub.add_parser("history", help="bulk history cache + full-market scan")
-    hist.add_argument("action", choices=["sync", "scan-all"])
+    hist.add_argument("action", choices=["sync", "scan-all", "refresh-eod"])
     hist.add_argument("--exchange", default="NSEEQ")
     hist.add_argument("--interval", default="1d")
     hist.add_argument("--from", dest="from_date", default=None)
@@ -749,6 +749,14 @@ def _run_history(args) -> int:
 
     from atr.data.history import load_cached, sync_all
     from atr.scanner import score_frame
+
+    if args.action == "refresh-eod":
+        # No broker session needed: tops up the tracked names from public daily bars.
+        from atr.data.eod_refresh import refresh
+        from atr.market_intel.service import DATA_ROOT, get_market_intel_service
+
+        print(refresh(DATA_ROOT, get_market_intel_service().get_universe_symbols()))
+        return 0
 
     if args.action == "sync":
         sync_all(args.exchange, args.interval, args.from_date, args.to_date,

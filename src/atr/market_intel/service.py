@@ -222,6 +222,11 @@ class MarketIntelService:
                     return self._cached_summary, self._cached_sectors, self._cached_stocks
             return self._compute_all_uncached(force_refresh=force_refresh)
 
+    def invalidate(self) -> None:
+        """Drop the cached pass (new price bars arrived), and the universe-independent frames."""
+        with self._lock:
+            self._cache_time = 0.0
+
     def _maybe_refresh_index(self) -> None:
         """Keep the cached Nifty 50 current, once a day.
 
