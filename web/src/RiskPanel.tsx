@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { getRiskStatus, setKillSwitch, type RiskStatus } from "./api";
 import { Button } from "./components/ui/button";
-import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { Card, CardHeader, ErrorBox } from "./components/ui/card";
 import { AnimatedNumber } from "./components/ui/animated-number";
 import { NumberTicker } from "./components/ui/number-ticker";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
@@ -127,7 +127,7 @@ export default function RiskPanel() {
               </div>
               <div className="text-xs text-muted-foreground">
                 {on
-                  ? "Every new order is rejected until you clear this."
+                  ? "New orders are blocked."
                   : risk?.live_orders_allowed
                     ? `Environment is ${risk?.env} — orders will reach the broker.`
                     : `Environment is ${risk?.env} — orders are refused regardless.`}
@@ -194,7 +194,7 @@ export default function RiskPanel() {
           value={
             lim ? <AnimatedNumber value={lim.capital} format={(n) => fmtMoney(n)} /> : "—"
           }
-          hint="Base for every sizing calculation"
+          hint={undefined}
         />
         <Kpi
           icon={<Target className="h-3.5 w-3.5" />}
@@ -212,7 +212,7 @@ export default function RiskPanel() {
           icon={<Gauge className="h-3.5 w-3.5" />}
           label="Max concurrent"
           value={lim ? <NumberTicker value={lim.max_active} /> : "—"}
-          hint="Open signals allowed at once"
+          hint={undefined}
         />
         <Kpi
           icon={<IndianRupee className="h-3.5 w-3.5" />}
@@ -226,14 +226,13 @@ export default function RiskPanel() {
               "—"
             )
           }
-          hint={risk?.margin_error ? "broker unreachable" : "reported by IIFL"}
+          hint={risk?.margin_error ? "Broker not connected" : undefined}
         />
       </div>
 
       <Card>
         <CardHeader
           title="Enforced limits"
-          sub="Read from the same settings the engine uses — not a copy"
           action={lim ? <Badge tone="flat">{lim.product}</Badge> : null}
         />
         <div className="grid gap-x-6 gap-y-3 p-5 pt-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -244,7 +243,7 @@ export default function RiskPanel() {
                 label="Stop distance"
                 value={lim.stop_method === "atr" ? `${fmtNum(lim.stop_atr_mult, 1)} × ATR` : `${fmtNum(lim.stop_pct, 2)}%`}
               />
-              <Row label="Reward : risk" value={`${fmtNum(lim.rr_ratio, 1)} : 1`} />
+              <Row label="Reward to risk" value={`${fmtNum(lim.rr_ratio, 1)} : 1`} />
               <Row
                 label="Worst case per trade"
                 value={fmtMoney(riskPerTrade)}
@@ -258,12 +257,6 @@ export default function RiskPanel() {
               <Row label="Product" value={lim.product === "CNC" ? "CNC (delivery)" : `${lim.product} (intraday)`} />
             </>
           )}
-        </div>
-        <div className="px-5 pb-4">
-          <Hint>
-            The two "worst case" figures assume every position hits its stop at the same time and
-            none are closed early — the pessimistic floor, not a forecast.
-          </Hint>
         </div>
       </Card>
 

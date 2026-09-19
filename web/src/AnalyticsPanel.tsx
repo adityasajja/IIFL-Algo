@@ -32,7 +32,6 @@
 
 import {
   Activity,
-  AlertTriangle,
   BarChart3,
   Crosshair,
   Filter,
@@ -198,12 +197,9 @@ function OverviewTab({ summary }: { summary: AnalyticsSummary }) {
 
   if (empty) {
     return (
-      <Callout tone="info" title="Nothing to summarise yet">
-        No trade has been attributed for this account. An attribution row is
-        written for a closed trade that has a journal episode, so this is empty
-        until a live or paper deployment has traded and closed. Every figure on
-        this screen would be a blank, not a zero.
-      </Callout>
+      <div className="py-10 text-center text-sm text-muted-foreground">
+        No closed trades yet. They appear here once a paper or live strategy has traded and closed.
+      </div>
     );
   }
 
@@ -1136,7 +1132,6 @@ export default function AnalyticsPanel() {
       <Card className="px-5 py-4">
         <CardHeader
           title="Post-trade attribution"
-          sub="What actually happened to each closed trade, why, and how well it was executed."
           action={
             <div className="flex items-center gap-2">
               <button
@@ -1354,16 +1349,6 @@ export default function AnalyticsPanel() {
           </div>
         </Tabs>
       )}
-
-      <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/30 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
-        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-        <div>
-          Every figure here is descriptive. Nothing on this screen changes a
-          strategy, promotes a version, or places an order; the attribution layer
-          is a reader, and it holds no method that acts on what it reads. Indian
-          cash equities only — no F&amp;O.
-        </div>
-      </div>
     </div>
   );
 }
