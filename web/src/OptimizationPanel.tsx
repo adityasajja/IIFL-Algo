@@ -157,7 +157,7 @@ export const OptimizationPanel: React.FC = () => {
         >
           <TabsList>
             <TabsTrigger value="lab">Strategy Experiment Lab</TabsTrigger>
-            <TabsTrigger value="recommendations">Controlled Recommendations</TabsTrigger>
+            <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>

@@ -21,7 +21,6 @@ import {
   CheckCircle2,
   XCircle,
   Play,
-  ShieldCheck,
   History,
   AlertTriangle,
   FlaskConical,
@@ -282,7 +281,6 @@ export const StrategyExperimentLab: React.FC = () => {
     }
   };
 
-  const currentStrategy = strategies.find((s) => s.strategy_id === selectedStrategyId);
 
   // Status color helper
   const getStatusBadge = (status: string) => {
@@ -435,7 +433,7 @@ export const StrategyExperimentLab: React.FC = () => {
         <div className="flex items-center gap-2.5">
           <FlaskConical className="size-4 text-primary" />
           <p className="text-[13px] text-muted-foreground">
-            Current strategy vs learned candidate vs baseline &bull; statistical gating &bull; immutable versioning
+            Compare your strategy with a candidate and a baseline. No orders are placed.
           </p>
         </div>
 
@@ -461,18 +459,6 @@ export const StrategyExperimentLab: React.FC = () => {
         </div>
       </div>
 
-      {/* Safety Notice Banner */}
-      <div className="my-4 p-3.5 bg-card border border-border rounded-lg flex items-center justify-between gap-4 text-xs text-foreground">
-        <div className="flex items-center gap-3">
-          <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
-          <div>
-            <span className="font-semibold text-foreground">Strict Verification Protocol:</span> Candidate strategies run under identical dates, universe, capital, slippage, and costs. No orders are placed; strategy versions are strictly immutable.
-          </div>
-        </div>
-        <div className="text-muted-foreground hidden sm:block">
-          Active Strategy: <span className="font-mono text-emerald-400">{currentStrategy?.name || selectedStrategyId.slice(0, 8)}</span>
-        </div>
-      </div>
 
       {/* Alerts */}
       {error && (
@@ -511,13 +497,13 @@ export const StrategyExperimentLab: React.FC = () => {
               <div className="py-12 text-center text-muted-foreground text-sm">Loading experiments...</div>
             ) : experiments.length === 0 ? (
               <div className="py-10 text-center text-muted-foreground text-sm">
-                No experiments found for this strategy.
+                No experiments yet.
                 <div className="mt-2">
                   <button
                     onClick={() => setShowCreateModal(true)}
                     className="text-emerald-400 hover:underline text-xs"
                   >
-                    + Create your first experiment
+                    Create an experiment
                   </button>
                 </div>
               </div>
@@ -568,7 +554,7 @@ export const StrategyExperimentLab: React.FC = () => {
               <FlaskConical className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <div className="text-base font-medium text-foreground">No Experiment Selected</div>
               <p className="text-sm mt-1 text-muted-foreground">
-                Select an experiment from the history list or create a new experiment to begin side-by-side evaluation.
+                Pick an experiment on the left, or create one.
               </p>
             </div>
           ) : (

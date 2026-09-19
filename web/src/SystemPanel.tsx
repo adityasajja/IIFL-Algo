@@ -112,7 +112,7 @@ export default function SystemPanel() {
       <Card>
         <CardHeader
           title="Session & engine"
-          sub="The IIFL JWT dies at midnight IST, so logging in is a daily step."
+          sub="Broker login resets every day at midnight."
           action={
             auth?.session_active ? (
               <StatefulButton
@@ -143,7 +143,7 @@ export default function SystemPanel() {
               value={health ? health.env : "…"}
               tone={health ? "good" : "warn"}
               sub={health ? health.status : "probing"}
-              hint="Order placement is blocked unless this is paper or live."
+              hint={undefined}
             />
             <Stat
               label="Broker session"
@@ -155,7 +155,7 @@ export default function SystemPanel() {
               label="Database"
               value={health?.database ? "up" : "off"}
               tone={health?.database ? "good" : "warn"}
-              sub="optional — Postgres"
+              sub="not used"
             />
             <Stat
               label="Session expires"
@@ -183,7 +183,7 @@ export default function SystemPanel() {
       <Card>
         <CardHeader
           title="Daily history cache"
-          sub="Parquet files the scanner, backtester and validator read. No broker session needed."
+          sub="Price history used by the scanner and backtests."
           action={
             history ? (
               <Badge tone={history.total_symbols ? "good" : "warn"}>
@@ -226,20 +226,13 @@ export default function SystemPanel() {
               </table>
             </div>
           )}
-          {history && (
-            <Hint className="mt-3">
-              <code className="font-mono">{history.cache_root}</code> — refresh nightly
-              with <code className="font-mono">atr history sync</code>. Files written today
-              are skipped, so a cron stays incremental.
-            </Hint>
-          )}
         </div>
       </Card>
 
       <Card>
         <CardHeader
           title="Instrument master"
-          sub="Contract files per segment, used to resolve symbols to instrument IDs."
+          sub="Used to find each stock by name."
           action={
             instruments ? (
               <Badge>{instruments.total_contracts.toLocaleString("en-IN")} contracts</Badge>
@@ -275,17 +268,13 @@ export default function SystemPanel() {
               </table>
             </div>
           )}
-          <Hint className="mt-3">
-            Note: <code className="font-mono">marketquotes</code> is not served for BSECURR
-            or MCXCOMM — they resolve but return no prices.
-          </Hint>
         </div>
       </Card>
 
       <Card>
         <CardHeader
           title="Symbol lookup"
-          sub="Served from the cached contract files, so no session is required."
+          sub={undefined}
         />
         <div className="space-y-3.5 p-5 pt-3">
           <div className="grid gap-3.5 sm:grid-cols-[2fr_1fr_auto]">

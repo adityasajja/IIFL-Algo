@@ -169,9 +169,9 @@ const TITLES: Record<Tab, { title: string; sub: string }> = {
   evidence: { title: "Evidence", sub: "Proof on prices the strategy has never seen" },
   learning: { title: "Learning", sub: "What the trade history says — findings only, never changes" },
   analytics: { title: "Attribution", sub: "What happened to each closed trade, why, and how well it was executed" },
-  optimization: { title: "Optimization", sub: "Controlled adaptation, walk-forward OOS gating & robustness plateaus" },
+  optimization: { title: "Optimization", sub: "Test improved versions of your strategies" },
   risk: { title: "Risk", sub: "Live limits, exposure and the kill switch" },
-  system: { title: "System", sub: "History cache, contract files, broker session" },
+  system: { title: "System", sub: "Data, broker session and health" },
 };
 
 /** Avatar tint per role, so authority is legible at a glance in the sidebar. */
