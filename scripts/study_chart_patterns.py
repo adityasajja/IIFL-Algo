@@ -19,15 +19,14 @@ from __future__ import annotations
 
 import json
 from math import sqrt
-from pathlib import Path
 from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
 
-from atr.research.hunt import STOCK_COSTS, stock_universe
+from atr.research.hunt import STOCK_COSTS, STOCKS, stock_universe
 
-OUT = Path("data/research/chart_patterns.json")
+OUT = STOCKS.parents[2] / "research" / "chart_patterns.json"
 HIT = 0.02  # the weekly gain being asked for
 ROUND_TRIP = STOCK_COSTS.round_trip_pct() / 100
 
@@ -66,13 +65,14 @@ def features(close: pd.DataFrame, high: pd.DataFrame, low: pd.DataFrame, vol: pd
     }, ret.rolling(20).std() * np.sqrt(5)  # expected weekly move, from the last month
 
 
-def main() -> None:
+def build() -> tuple[pd.DataFrame, dict[str, pd.Series], object]:
+    """Stock-weeks with their outcome, one boolean pattern column each, and the midpoint date."""
     names = stock_universe(min_bars=1500)
     frames = {}
     for kind, column in (("close", "close"), ("high", "high"), ("low", "low"), ("volume", "volume")):
         cols = []
         for s in names:
-            df = pd.read_parquet(Path("data/iifl_daily/NSEEQ") / f"{s}.parquet", columns=["ts", column]).dropna()
+            df = pd.read_parquet(STOCKS / f"{s}.parquet", columns=["ts", column]).dropna()
             df = df[df[column] > 0].drop_duplicates("ts").set_index("ts")[column].rename(s)
             cols.append(df)
         frames[kind] = pd.concat(cols, axis=1, sort=True).loc["2015-01-01":]
@@ -96,7 +96,6 @@ def main() -> None:
 
     # A stock-week counts only when both the flags and the outcome are defined.
     valid = fwd.notna() & move.notna()
-    base = float((fwd[valid] >= HIT).mean().mean())
     stacked = pd.DataFrame({"fwd": fwd.where(valid).stack(), "move": move.where(valid).stack()})
     stacked["hit"] = stacked["fwd"] >= HIT
     stacked["date"] = stacked.index.get_level_values(0)
@@ -105,12 +104,23 @@ def main() -> None:
     # What volatility alone predicts: the hit rate of stocks that move about this much.
     stacked["expected_hit"] = stacked.groupby("vol_bucket")["hit"].transform("mean")
     mid = stacked["date"].sort_values().iloc[len(stacked) // 2]
+    columns = {
+        name: flag.loc[fridays].where(valid).stack().reindex(stacked.index).fillna(False).astype(bool)
+        for name, flag in flags.items()
+    }
+    return stacked, columns, mid
+
+
+def main() -> None:
+    stacked, columns, mid = build()
+    base = float(stacked["hit"].mean())
+    flags = columns
     n_tests = len(flags)
     z_needed = NormalDist().inv_cdf(1 - 0.05 / (2 * n_tests))  # Bonferroni over the patterns tried
 
     rows = []
     for name, flag in flags.items():
-        f = flag.loc[fridays].where(valid).stack().reindex(stacked.index).fillna(False).astype(bool)
+        f = flag
         sel = stacked[f]
         if len(sel) < 500:
             continue
