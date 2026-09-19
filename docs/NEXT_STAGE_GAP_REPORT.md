@@ -55,8 +55,8 @@ safety relevant** (§4). One was fixed during this audit.
 | Strategy ABC + registry | IMPLEMENTED | `atr/strategy/base.py`, 17 registered strategies | — | shipped |
 | Shared rule layer | IMPLEMENTED | `atr/signals/rules.py` `eval_entry`/`eval_exit` used by scanner *and* backtest | — | shipped |
 | Out-of-sample validation | IMPLEMENTED | `atr/research/validate.py` — walk-forward, deflated Sharpe | — | shipped |
-| Strategy persistence | MISSING | `DATA_MODEL.md` §4 says "Shipped today: nothing persisted" — still true | P1 | Phase 2 |
-| Immutable versions | MISSING | no `strategy_versions` table or repository | P1 | Phase 2 |
+| Strategy persistence | IMPLEMENTED | `strategies` + `strategy_versions` + `StrategyRepository`, and as of 2026-09-16 the write routes: `POST /api/v1/strategies`, `POST /{id}/versions`, `GET /{id}/versions[/{v}]`, `POST /{id}/validate`, `POST /seed` (`api/routers/strategies.py`, `services/strategies.py`). Plus `atr strategy seed` for a fresh install. | — | shipped |
+| Immutable versions | IMPLEMENTED | Immutable by construction (PK on `(strategy_id, version)`, no update method, duplicate-definition guard) and by the absence of any write route — asserted by `tests/test_strategy_authoring.py`. Creation refuses a structurally broken definition unless `force`, and `POST /paper/deployments` refuses to pin a version that is missing or cannot resolve to live rules | — | shipped |
 | No-code / nested rule trees | PARTIALLY | `CustomScannerPanel` has a **flat** list with one AND/OR flag | P2 | Phase 3 |
 | Natural-language generation | MISSING | not attempted | P4 | later |
 | **BACKTESTING** | | | | |
@@ -72,7 +72,7 @@ safety relevant** (§4). One was fixed during this audit.
 | **OMS / order state machine** | **MISSING** | `Order.status` is one mutable field (`core/models.py:167`); no `order_events` | **P0** | Phase 2 |
 | **Durable idempotency** | **MISSING** | no `order_intents`; a retried signal places a second order | **P0** | Phase 2 |
 | Partial fills | PARTIALLY | `Order.filled_quantity`/`avg_fill_price` exist; no lifecycle to record them | P0 | Phase 2 |
-| Paper trading engine | PARTIALLY | `execution_mode` is a **gate**, not an engine. No simulated matching, no paper positions | **P0** | Phase 2 |
+| Paper trading engine | IMPLEMENTED | `services/paper.py` (venue + ledger), `services/runner.py` (the clock), `services/monitoring.py`, and the Paper tab | — | shipped |
 | Live execution | IMPLEMENTED | `atr/live/runner.py` (LiveRunner), `POST /orders`, signal execute | — | shipped |
 | Reconciliation | MISSING | `store.py:351` mentions it in a docstring only; no table, no code | P1 | Phase 2 |
 | Execution latency capture | MISSING | no ack/fill timestamps anywhere | P2 | Phase 2 |
@@ -85,17 +85,27 @@ safety relevant** (§4). One was fixed during this audit.
 | **ANALYTICS** | | | | |
 | Portfolio P&L | IMPLEMENTED | `GET /portfolio`, `GET /dashboard/summary` | — | shipped |
 | Strategy attribution | MISSING | no per-strategy P&L | P2 | Phase 3 |
-| Trade journal | MISSING | `trade_journal` specified, not built; no MFE/MAE anywhere | P2 | Phase 3 |
-| Live-vs-backtest comparison | MISSING | not implemented | P2 | Phase 3 |
-| Market regime | PARTIALLY | `research/self_learning.py` classifies a regime from breadth/vol; methodology is in-repo but not surfaced as a product feature | P3 | Phase 3 |
+| Trade journal | IMPLEMENTED | `services/journal.py` + `trade_journal`, reconciled from the position fold. MFE/MAE, `slippage_bps` (mean of the measurable legs) and `exit_reason` (the closing order's own reason) are all recorded as of 2026-09-16 | — | shipped |
+| Live-vs-backtest comparison | IMPLEMENTED | `research/learning_drift.py` — per-metric drift with a sample size and a `status` of `insufficient` rather than a zero delta | — | shipped |
+| Market regime | PARTIALLY | `research/self_learning.py` classifies a regime from breadth/vol; methodology is in-repo but not surfaced as a product feature. The learning dataset recomputes a **point-in-time** regime from the benchmark instead, because the breadth classifier reads the universe as of *now* | P3 | Phase 3 |
+| **LEARNING** | | | | |
+| Evidence vocabulary | IMPLEMENTED | `research/learning_evidence.py` — one home for `evidence_class` (BACKTEST/IN_SAMPLE/PAPER_FORWARD/LIVE_FORWARD) and `evidence_grade` (`forward`/`in_sample`), with the grade derived by `grade_of` so a row cannot contradict itself | — | shipped |
+| Forward paper pipeline | IMPLEMENTED | OMS provenance stamp on the order's `NEW` event → `trade_journal.evidence_grade` → learning dataset. Proven end to end by `scripts/verify_paper_workflow.py` (**81/81 checks**) and by `tests/test_paper_forward_e2e.py`, which drives both legs of a round trip through the runner with no rule stubbing. Includes that a stamp-less row stays in-sample, and (2026-09-16) that a running deployment is subscribed to the live feed rather than silently pricing off the daily cache — see §4.6 | — | shipped |
+| Learning dataset / report / analysis | IMPLEMENTED | `services/learning.py`, `api/routers/learning.py`, `web/src/LearningPanel.tsx`; the report states facts ungated and gates the *claim* on forward observations | — | shipped |
+| **Genuine forward observations** | **0** | The book is 140 momentum-ledger rows, **all in-sample backfills**, and `trade_journal` holds 0 rows because no paper deployment has ever traded. The pipeline is wired, proven and tested — and as of 2026-09-16 a running deployment is genuinely *on* the live feed (§4.6) — so the next real paper fill is what changes this number. The blocker — no way to author the pinned strategy version a deployment needs — was closed 2026-09-16 (§8/§9); the number now changes when a deployment is actually started and traded. | — | — |
+| VWAP relationship | MISSING | the cache holds daily bars and a session VWAP is not recoverable from one; declared as a missing feature **with that reason** rather than left blank | P3 | — |
+| India VIX | MISSING | no cached series for the instrument | P3 | — |
+| Sector strength | MISSING | needs same-day same-sector peers; the universe CSVs cover 501 of the cached symbols | P3 | — |
+| Autonomous parameter optimisation | NOT ATTEMPTED | deliberately out of scope: no automatic parameter change, strategy modification, deployment or AI-generated decision. `LearningService` has no method whose name contains `apply`/`deploy`/`optimize`/`place_order`, asserted by `tests/test_learning_service.py` | — | later |
 | **FRONTEND** | | | | |
 | Dashboard shell, 21 panels | IMPLEMENTED | `web/src/*.tsx`; hash router, sidebar, command palette | — | shipped |
 | Auth gate + watchlist panel | IMPLEMENTED | `AuthGate.tsx`, `WatchlistPanel.tsx`; verified in a real browser 2026-09-14 | — | shipped |
 | lightweight-charts | IMPLEMENTED | `ChartsPanel.tsx` (1,187 L) | — | shipped (must not be replaced) |
-| Strategy workflow UI | MISSING | `StrategiesPanel.tsx` is a **read-only registry viewer** — no create/version/validate/backtest | P1 | Phase 2 |
+| Strategy workflow UI | PARTIALLY | `StrategiesPanel.tsx` now has an authoring half — create a strategy, validate a draft definition, append an immutable version, and see `deployable` per version. Still read-only for rename/archive/compare, and no in-panel backtest launch (that is the Backtest tab). | P2 | Phase 3 |
 | Screener UI (nested + explanations) | PARTIALLY | `CustomScannerPanel.tsx` — flat conditions, no match explanation | P2 | Phase 3 |
 | Risk control center | PARTIALLY | `RiskPanel.tsx` shows limits + kill switch; **no reason field**, no per-strategy limits | P1 | Phase 2 |
 | Async backtest UI | MISSING | depends on the backend job runner | P1 | Phase 2 |
+| Paper deployment + monitoring UI | IMPLEMENTED | `PaperDeploymentPanel.tsx` — deploy (strategy, pinned version, capital, universe, timeframe), START/PAUSE/STOP/RESET, and the signal→risk→order→fill→position timeline | — | shipped |
 | Options chain UI | MISSING | depends on the data layer | P3 | Phase 4 |
 
 ---
@@ -205,10 +215,24 @@ it. The totals cover the priced positions and the response says so.
 
 Covered by `tests/test_paper_engine.py` (48) and `tests/test_api_paper.py` (24).
 
-*Remaining:* the paper loop is request-driven, not a scheduler — nothing yet
-re-evaluates resting orders on a tick, and no live-quote price source is wired (the
-seam exists: `atr.services.paper.default_price_source`). Both belong with the
-deployment runner, which is the next piece of gap 6's infrastructure.
+*Remaining (as of the original assessment):* the paper loop is request-driven, not a
+scheduler — nothing yet re-evaluates resting orders on a tick, and no live-quote price
+source is wired.
+
+**Closed 2026-09-15.** `services/runner.py` is that scheduler. `PaperRunner` holds one
+background task for all RUNNING paper deployments, calls the **same**
+`eval_entry`/`eval_exit` the scanner and backtester call, re-evaluates resting orders every
+pass, and routes each signal through the existing `ExecutionService` — open → risk gate →
+OMS → `PaperVenue` → recorded fill — so the runner contains no matching, no costing and no
+P&L arithmetic of its own. Positions are never accumulated in memory: they are folded from
+`order_events` on every pass, which is what stops the runner drifting from the orders that
+produced them.
+
+The loop is all-or-nothing on the strategy definition: `DeploymentLoop._rules()` returns
+`None` rather than a default ruleset when the pinned `(strategy_id, version)` cannot be
+resolved, and records `blocked_reason` for the status surface. Trading a generic default
+under a named strategy's version stamp is the one outcome worse than not trading, and it is
+invisible — the loop runs happily and every artefact looks correctly attributed.
 
 ### 4. Paper mode is a gate, not an engine — **original assessment (2026-09-13)**
 
@@ -294,13 +318,38 @@ runs for minutes, which will hit any proxy timeout. There is no job abstraction,
 
 *Needs:* backend (job runner + 6 endpoints) + frontend (progress and results).
 
-### 8. Strategies are not persisted — **P1, workflow**
+### 8. Strategies are not persisted — **CLOSED 2026-09-16**
 
-17 strategies exist as Python classes. Nothing is stored, so there is no versioning, no
-immutability, no comparison, and no link from a backtest to the definition that produced it.
-`DATA_MODEL.md` §4 specifies `strategies`, `strategy_versions`, `backtest_runs` — none exist.
+The tables and the repository existed; the routes did not. `GET /strategies` read the *code*
+registry, so a stored `(strategy_id, strategy_version)` could only be produced by a script
+against `StrategyRepository` — and since a deployment pins that pair and the runner refuses
+to trade a version it cannot resolve, the platform's headline chain began at a row nobody
+could author.
 
-*Needs:* backend then frontend. The Python registry must keep working unchanged.
+Now: `POST /api/v1/strategies` creates, `POST /{id}/versions` appends an immutable version,
+`GET /{id}/versions/{v}` reads it by exact number, `POST /{id}/validate` checks a draft or a
+stored version without writing, and `POST /seed` ships a worked example so a fresh install
+can run the chain. `atr strategy seed|list|show|create|version|validate` does the same from
+the terminal.
+
+The Python registry is unchanged, which was the constraint.
+
+Two things worth recording about how it was built:
+
+* **The definition→rules coercion moved into the compute layer.** It lived in
+  `services/runner.py`; `atr/strategy` may not import `atr/services`, so a validator written
+  against the runner's helper would have been a *second* implementation of "is this
+  definition runnable". The validator would then have approved versions the loop refuses —
+  the same silent-failure shape as §4.6. It is now `atr.strategy.definition`, and the runner
+  delegates to it.
+* **`POST /paper/deployments` checks the pinned version**, but only when the `strategy_id` is
+  one of the caller's own saved strategies. A version that does not exist, or one that
+  resolves to no live entry/exit rules, is a 422. A bare registry key is left alone — that
+  path is deliberate and pinned by `tests/test_paper_deployment.py`.
+
+*Verified:* `tests/test_strategy_authoring.py` (26) and `tests/test_strategy_authoring_e2e.py`
+(8), the latter driving the whole chain over HTTP and then through the real runner to a
+`PAPER_FORWARD` row in the learning dataset.
 
 ### 9. Strategy workflow UI does not exist — **P1, workflow**
 
@@ -310,6 +359,41 @@ Paper → Live` path has no UI at all.
 
 *Needs:* frontend, on top of gap 8. The rules shown must map to the real engine — a fake
 editor would be worse than none.
+
+**Head closed 2026-09-16.** `StrategiesPanel` now authors: create a strategy, paste a
+definition, validate it (errors *and* warnings, with the field names the server rejected),
+append an immutable version, and see `deployable` / `not deployable` per version with the
+reason. The definition is a JSON textarea rather than a generated form on purpose — the rule
+layer has ~20 fields across two dataclasses and a hand-built form would be a second
+definition of the schema, and the two would drift. The server is the schema.
+
+**Partially closed 2026-09-15.** The tail of that path — `Version → Backtest → Paper →
+Monitor` — now has a UI: the Paper tab deploys a *pinned immutable version* through a
+backtested strategy and monitors it continuously. What is still missing is the head: there
+is no way to create a strategy or author a version from the screen — **closed 2026-09-16**:
+`StrategiesPanel` creates strategies, validates draft definitions and appends immutable
+versions against `POST /api/v1/strategies`, and `POST /seed` gives a fresh install a working
+one. `GET /strategies` remains the *code* registry and is still read-only, which is correct:
+those strategies are compiled in and have no version history to pin.
+
+Two bugs surfaced while wiring that path, both **silent**, and both worth remembering
+because the failure they produce is indistinguishable from "you have not created one yet":
+
+* `GET /backtests/options` was **not owner-scoped**. It carried no principal, so
+  `strategy_registry` fell through to `_any_user_id()` — the first row of `users`. One
+  account saw another's strategies and none of its own.
+* `strategy_registry` unpacked `StrategyRepository.list_for_user(...)` as `(rows, total)`.
+  That method returns a **plain list** (unlike `OrderRepository.list_for_user`), so it
+  raised `ValueError` — which the surrounding `except Exception`, whose only job is "an
+  unreachable database must not stop the built-ins rendering", swallowed into a
+  `logger.debug`. **The saved half of the registry was empty for every user, in every
+  build.**
+
+Only `kind: "saved"` strategies carry versions and only they are deployable, so the two
+compound: the deploy form rendered *"Cannot deploy yet — pick a saved strategy"* while the
+strategy sat in the database. Both are now pinned by `tests/test_backtest_options_scope.py`
+(5 tests, each verified to fail against the reintroduced bug) and covered live by
+`scripts/probe_paper_ui.py` (57 checks).
 
 ### 10. Screener lacks nested conditions and match explanations — **P2, differentiation**
 
@@ -450,6 +534,77 @@ live all satisfy one interface.
 Imported by three modules (`stream.py` among them) but absent from `pyproject.toml` and
 `uv.lock`. A clean install would fail at import. Added as `polars>=1.0`.
 
+### 4.6 A paper deployment was never *on* the live feed — **fixed 2026-09-16**
+
+The defect that stood between the wired pipeline and its first genuine forward
+observation, and it was invisible from every surface the platform has.
+
+`TickBroadcaster._resolve_symbol` was called from `subscribe()` and nowhere else — the
+**browser** path. So a symbol reached the feed only when a dashboard was open and watching
+it. A paper deployment with no browser attached therefore had:
+
+* no bridge connection (`_ensure_bridge` was reached only from `connect()`/`subscribe()`);
+* no ticks, because nothing was subscribed;
+* `latest_price(symbol) == None` for every symbol in its universe.
+
+`default_price_source` is `fallback(live, cached_close)`, so the deployment did not fail —
+it **fell through to the daily cache**. The venue then either filled at yesterday's close
+(a paper fill at a price no exchange offered, which is the one thing a paper account must
+never do) or rejected the order as unpriceable, depending on the symbol. In both cases the
+deployment reported itself as `RUNNING`, `last_pass` counted its passes, and the dashboard
+was green. The observable symptom was "the strategy has not signalled yet", which is
+indistinguishable from a quiet market — the same silent failure shape as the two strategy
+bugs in §9.
+
+*Fix:* the runner now states its universe to the feed. `PaperRunner.sync_loops` →
+`ensure_live_symbols` (a seam in `services/paper.py`, injected by `atr/api/price_sources.py`
+because `services` may not import `api`) → `TickBroadcaster.ensure_symbols`. Three
+properties of that method are load-bearing:
+
+* **Declarative.** The caller states the whole universe; the delta against the previous
+  statement is what reaches the bridge. The runner re-states once a second, so the steady
+  state is a set comparison and no I/O.
+* **Separate from the browser ref counts.** `disconnect`/`unsubscribe` no longer take a
+  symbol off the feed while the runner still wants it, and stopping a deployment does not
+  blank a chart somebody is watching.
+* **Retried, not remembered as done.** Desired and confirmed-on-the-bridge are tracked
+  separately, so a statement made while the session was down is re-sent on the next pass
+  instead of being recorded as subscribed.
+
+A symbol that resolves to no contract is reported (`unresolved`) and attempted once per
+appearance, because a symbol with no conid can never be priced from live ticks and its
+deployment would otherwise trade on the cache forever looking healthy.
+
+Two smaller defects were read out of the runner while fixing it: `_open_position_count`
+iterated `config.symbols` while its own docstring claimed positions outside the universe
+were counted, so editing the universe while holding a position made it invisible to
+`max_open_positions`; and `pass_once` wrote the **cumulative** order count into each
+deployment's `last_pass`, so the status surface reported every deployment's sum as one
+deployment's own.
+
+*Tests:* `tests/test_paper_feed_subscription.py` (20) — every property above, each verified
+to fail against the reintroduced bug; four more in `tests/test_paper_runner.py` for the two
+runner defects; and `tests/test_paper_forward_e2e.py` (11), which drives the whole chain —
+live tick → rule → risk gate → OMS → paper fill → closed trade → `PAPER_FORWARD` → learning
+dataset — with **no rule stubbing and no hand-written journal row**, both legs through the
+runner.
+
+### 4.7 Still open: the tick's age is not bounded
+
+`TickBroadcaster.latest_price` returns whatever is in `_latest_ticks`, with no check on how
+old it is. The dict lives for the process lifetime, so inside the session — before the first
+tick of the day arrives, or after the feed dies mid-session — a lookup returns the previous
+session's last trade, and `PaperVenue` will fill at it. The order event records the price it
+used, so the record is not ambiguous, but nothing marks it as stale.
+
+This is reported rather than fixed because the documented degradation (`fallback_price_source`
+→ the daily cache) is deliberate and tested, and closing the hole properly means deciding
+what a paper fill should do when there is no *current* price — refuse, or fill at the last
+known one and say so. That is a product decision about what a paper account means, not a bug
+fix. What is needed either way is a freshness accessor on the broadcaster and a
+`max_age_seconds` on the price source; until then, an operator cannot tell "waiting for a
+signal" from "pricing off a stale tick", because the runner status surface reports neither.
+
 ---
 
 ## 5. Verification of the audit's own claims
@@ -472,8 +627,9 @@ Phase 2 — trading safety & correctness   (gaps 1, 2, 3, 5, 6)
   [done] 2. risk check inside the OMS, so no route can bypass it
   [done] 2b. every order path through one execution service + a venue
   [done] 3. paper execution engine on the shared rule layer
-  [next] 4. a deployment runner: drive the loop, poll resting orders, price off
-           the live quote rather than the daily cache
+  [done] 4. a deployment runner: drive the loop, poll resting orders, price off
+           the live quote rather than the daily cache — and *be on* the feed
+           (§4.6; the read side alone was inert)
   [next] 5. reconciliation + a visible mismatch surface
   [next] 6. WebSocket auth
   7. async backtest jobs + persisted strategies + the strategy UI

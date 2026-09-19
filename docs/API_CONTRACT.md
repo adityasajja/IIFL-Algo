@@ -316,12 +316,42 @@ configured notification channels (unless `notify: false`).
 | GET | `/deployments/{id}/pnl` | `order:read` | `?marks=false` skips the cache. |
 | GET | `/deployments/{id}/orders` | `order:read` | Scoped to this deployment. |
 | POST | `/deployments/{id}/orders` | `order:place` | **Place a paper order.** Fills via the paper venue. |
+| GET | `/runner` | `order:read` | The background loop's own state: `running`, `passes`, and one row per attached loop. |
 | GET | `/account` | `order:read` | The whole paper account, across deployments. |
+| POST | `/challengers` | `algo:start` | `{ strategy_id, champion_deployment_id, challenger_version }`. Launches a challenger copying the champion's capital, universe and config — only the version differs. Refuses a non-running/non-PAPER champion, the champion's own version, and a second loop on one version. |
+| GET | `/champions/compare` | `order:read` | `?strategy_id=&champion_version=&challenger_version=`. Side-by-side forward evidence per version, the exact definition diff, the version timeline, and a readiness verdict (`INSUFFICIENT EVIDENCE` / `EARLY EVIDENCE` / `COMPARISON READY`). Read-only; `promotes: false` — there is no promotion route. |
 
 **The paper engine is the same pipeline as live with a different venue** —
 `ExecutionService` → `OrderService` → the OMS, with `PaperVenue` instead of the
 broker. Same lifecycle events, same risk gate, same rule layer. There is no second
 strategy implementation.
+
+**`POST /deployments` is the one route whose body is closed.** Its Pydantic model
+sets `extra="forbid"`, so the body is exactly
+`{ strategy_id, strategy_version, capital, mode, broker_account, config }` and a
+typo'd field is a 422 rather than a silently ignored key. **There is no top-level
+`symbols` or `exchange`** — both live inside `config`, because that column is what
+the runner reads and where a deployment's reproducibility comes from.
+
+**The runner reads its universe from `config.symbols` and nowhere else.**
+`RunnerConfig.from_deployment` reads `symbols`, `exchange`, `interval_seconds`,
+`order_value`, `lookback_days`, `max_open_positions`, `stop_loss_pct` and
+`take_profit_pct` out of that dict, upper-casing the symbols before matching them
+against the price cache. A universe *name* is not resolvable by the loop, so the
+deploy form resolves it client-side; a deployment whose config named one would be
+`RUNNING` and evaluating an empty list forever.
+
+**A deployment's strategy *version* is the subject, not its id.** The runner reads
+`(strategy_id, strategy_version)` **by exact number, never "latest"**, and
+evaluates that version's stored definition. A version whose rules cannot be
+resolved does not fall back to a default ruleset — the loop refuses and reports
+`blocked_reason` on the status surface. Trading a generic default under a named
+strategy's version stamp is the one outcome worse than not trading, and it is
+silent: the loop runs and every artefact looks correctly attributed.
+
+**`GET /deployments` carries a folded `pnl` on every row**, so a list view does
+not need N follow-up requests. The snapshot is taken with `prices={}`, which means
+positions are reported unpriced there; the per-deployment routes price them.
 
 **`reset` returns a new deployment, it does not delete anything.** `order_events` is
 append-only, so a paper account's history cannot be erased; the response's
@@ -368,25 +398,221 @@ JSON and which a JavaScript client cannot parse.
 
 ---
 
+### Learning — `/api/v1/learning` (shipped 2026-09-15, extended 2026-09-16)
+
+Reads need `strategy:read` — reading an outcome is reading a strategy's behaviour,
+and a role that can see every trade's P&L but not the strategy that produced it is
+not a useful distinction to be able to grant.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/status` | Counts only, no dataset build. Cheap enough to poll. |
+| GET | `/dataset` | The dataset's shape: sources, grades, metric coverage, missing features. |
+| GET | `/dataset/rows` | A page of normalised rows, with `missing_features` **per row**. |
+| GET | `/performance` | `?strategy=&roles=&grades=&axes=&metric=&min_sample=`. |
+| GET | `/report` | The daily report. `advisory: true`, `applies_changes: false`. |
+| GET | `/drift` | BACKTEST vs PAPER vs LIVE, per metric. |
+| GET | `/overview` | Everything above, derived from **one** dataset build. |
+| GET | `/axes` | The axes that exist, and the ones that cannot. |
+| GET | `/readiness` | `?strategy_id=&refresh=`. Per-strategy forward-evidence readiness: counts against the 10/30/50 gates, research states (`NOT READY` → `MINIMUM SAMPLE` → `ANALYSIS READY` → `OPTIMIZATION ELIGIBLE`), weekly accumulation, and data-quality issues. States are research labels; `advisory_only: true`, `applies_changes: false`. |
+
+**There is no mutating method on this router.** Not "no mutating route is called" —
+the method set itself is empty, asserted by `tests/test_learning_api.py`. A write
+route is precisely where the guarantee "the learning engine never modifies a live
+strategy, places an order, or bypasses the risk engine" would be lost, because a
+route is reachable without passing through the service's own guards.
+
+Five fields exist because a client that ignores them renders a confidently wrong
+screen. None of them may be treated as cosmetic:
+
+| Field | Where | What it means |
+|---|---|---|
+| `evidence_grades` | dataset, report | `{forward, in_sample}` — always both keys, including at zero. `forward` = recorded before the outcome; `in_sample` = measured on the history the rule was selected on. **A backtest is `in_sample` by construction.** A bucket that mixes the two is not an out-of-sample result. |
+| `evidence_classes` | dataset | The four-value provenance: `BACKTEST`, `IN_SAMPLE`, `PAPER_FORWARD`, `LIVE_FORWARD`. The drift comparison needs these; a finding needs the grade. |
+| `evidence_grade` / `evidence_note` | dataset row | The row's grade, and **why it carries that grade**. A grade with no stated basis is a label the reader has to take on trust. |
+| `forward_observations` / `in_sample_observations` / `latest_forward_ts` | dataset, report | The counts that say how much of the book is evidence, and when the most recent piece of it closed. A book can hold thousands of in-sample rows and no forward one, and these are what make that visible. |
+| `claimable` / `today_grades` | report | Whether the forward book clears the sample floor, and the grades of the trades that closed today. The report **states what happened** — a fact, always — and **withholds the judgement** until `claimable`. A day whose trades are all in-sample produced a figure and no evidence, and the payload says so. |
+| `metric_coverage` | dataset | How many closed trades carry each outcome column. A column can be **absent rather than empty**: the paper ledger records returns and no size, so `net_pnl` is `0` there while `return_pct` holds every row. |
+| `metric` / `metric_note` | analysis, report | Which column the figures are in, and whether it was resolved rather than requested. |
+| `aggregate` | report | `sum` for a currency metric, `mean` for a percentage one. Summing the returns of an equal-weight basket reports the basket once per constituent. |
+| `net_pnl_today` | report | Today's **rupees**, and `null` whenever the metric is not `net_pnl`. It is deliberately not an alias for `metric_total`: a field named `net_pnl` holding a percentage is the kind of quietly wrong number the engine exists to refuse. |
+| `signal_id` / `opening_order_id` / `context_score` / `context_model_version` / `context_class` | dataset row | The trade's link back to the signal that raised it, the opening order behind it, and the context recorded at signal time — kept as recorded, never recomputed. `None` when the trade cannot be linked back; the readiness quality list reports the gap rather than the builder inventing a link. |
+
+`?axes=` rejects an unknown name with `400 unknown_axis` rather than silently
+falling back to the default set — a dashboard asking for `?axes=rvol_bukcet` and
+receiving a full, plausible analysis of eleven other axes is how a chart ends up
+confidently wrong.
+
+`?grades=forward` restricts a sample to the forward book. It is separate from
+`?roles=` because the two answer different questions: roles ask *which system
+produced this* (backtest, paper, real money), grades ask *is it evidence at all*.
+
+A `drift` metric whose sample is too small is `insufficient` with a `reason` and a
+`delta` of `null`. The client must render it as *unmeasured*, never as zero.
+
+---
+
+### Signal Context — `/api/v1/signal-context` (shipped 2026-09-17)
+
+Reads need `strategy:read` for the same reason the learning surface does: a signal
+context is a description of a strategy's behaviour under a market condition.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/model` | The active scoring model: `version`, `criteria`, thresholds. |
+| GET | `/signals` | `?limit=&offset=&source=LIVE|PAPER|BACKTEST&strategy_id=&context_class=`. Newest first; `market_context`/`sector_context`/`stock_context`/`score_breakdown` are **objects**, not JSON strings. |
+| GET | `/signals/{signal_id}` | One signal's full context and per-criterion breakdown. `404` if unknown. |
+| GET | `/analytics` | `?dimension=context_class|score_band|regime|sector_rs|stock_rs|breadth|volatility&strategy_id=&strategy_version=&source=`. |
+| GET | `/effectiveness` | `?strategy_id=&strategy_version=&source=LIVE|PAPER|BACKTEST&metric=return_pct|net_pnl&min_sample=` (default 10). Whether a higher score accompanies a different forward outcome: `score_verdict` (bands, means, `monotonic_high_is_better`, `may_claim`, `statement`), forward `axes` with per-bucket `lift` vs complement / `p_adjusted` / `significance`, and `in_sample_axes` reported separately. `400` on an unknown `metric` or `source`. `strategy_version` scopes to one arm's traded signals (that version's orders and episodes) — contexts are shared across arms firing on the same signal, so scoping by recording version would drop whichever arm recorded second. |
+
+**There is no mutating method on this router.** The whole surface is a projection of
+what the engine already recorded; enrichment happens in the runner and the backtest
+worker, not through an API call.
+
+`signal_id` is the join key. A paper deployment stamps the bar key
+(`SYMBOL:YYYY-MM-DD`) on both the order (`orders.signal_id`) and the context; a
+backtest run uses `RUN_ID:SEQ` and links through `trade_id`. That is what lets
+`/analytics` resolve a signal to the episode it produced.
+
+Two fields carry the honesty of the analytics surface:
+
+| Field | What it means |
+|---|---|
+| `n` / `n_forward` / `n_in_sample` | Counts are **always** reported, even when nothing resolved. |
+| `evidence_note` | `forward`, `in_sample_only`, `insufficient_forward_observations` or `no_resolvable_outcomes`. A backtest bucket is `in_sample_only` — real, shown, and never presented as out-of-sample. |
+| `suppressed` | `true` when the forward sample is below `min_forward_n`; then `mean_return`, `median_return`, `win_rate`, `ci_low`, `ci_high` and `profit_factor` are `null`. Render them as *unmeasured*, never as zero. |
+
+Three fields carry the honesty of the `/effectiveness` surface:
+
+| Field | What it means |
+|---|---|
+| `score_verdict.may_claim` | `true` only when the 80–100 band clears the floor **and** tests `strong`/`moderate` against lower bands after the Bonferroni correction. Anything else is "not proven", never a soft claim. |
+| `lift` / `p_adjusted` | `lift` is bucket mean minus **complement** mean, never a comparison against zero; the p-value shown is already corrected for `bonferroni_comparisons` across the declared axes. |
+| `significance: in_sample_not_a_claim` | Every bucket under `in_sample_axes`. Backtest results are descriptive: reported, labelled, and never combined with forward evidence. |
+
+---
+
 # Part 2 — Specified (Phases 2–4)
 
 Shapes are fixed here so the frontend can be built against them; none of it is
 implemented.
 
-## Strategies — `/api/v1/strategies` (Phase 2/4)
+## Strategies — `/api/v1/strategies` (Phase 2)
+
+**Shipped 2026-09-16.** Implemented surface:
 
 ```
-GET    /                       list strategies (own + shared)
-POST   /                       create  { name, description, kind }
+GET    /                       list the caller's own strategies
+POST   /                       create  { name, description, kind, engine_key }
 GET    /{id}                   metadata + latest version
-PATCH  /{id}                   rename / describe / archive
-GET    /{id}/versions          version list with metrics summary
+GET    /{id}/versions          version list, each with `deployable` and why not
 POST   /{id}/versions          create a NEW version (never mutates an old one)
-GET    /{id}/versions/{v}      the definition
+GET    /{id}/versions/{v}      the definition, by exact number
+POST   /{id}/validate          structural validation, of a draft or a stored version
+POST   /seed                   create the worked example strategy + version 1
+```
+
+This is the authoring half of the strategy workflow and the only way to produce
+the `(strategy_id, strategy_version)` pair a paper deployment pins. Before it,
+`GET /strategies` (the *code* registry — unversioned, undeployable) was the only
+strategy route, so a stored version could only be produced by a script against
+`StrategyRepository`, and the chain `Strategy → Version → Deploy → Forward
+observation` started at a row nobody could create.
+
+**Not implemented, deliberately:**
+
+```
+PATCH  /{id}                   rename / describe / archive
 GET    /{id}/compare?from=&to= side-by-side metric comparison
-POST   /{id}/validate          structural validation without saving
 POST   /{id}/from-nl           natural language → rules (AI, returns a draft)
 ```
+
+`from-nl` is the one worth explaining: a model emitting a rule block is only as
+good as the validation behind it, and shipping the emitter without the rest of
+the workflow would produce drafts that look authoritative. The validation is what
+exists; the emitter can follow.
+
+### Two fields that carry the honesty of the surface
+
+**`deployable`** on every version. It is computed by the *runner's own* resolver
+(`atr.strategy.definition.resolve_rules`), so a version marked deployable is one
+the live loop will actually trade, and one marked undeployable carries
+`not_deployable_reason`. This cannot drift from behaviour, which is the only
+reason it is worth showing: an unresolvable version produces a deployment that
+reports itself `RUNNING` and places no orders, and on the monitor that is
+indistinguishable from a quiet market.
+
+**`statistical_validation`** on every validation response:
+
+```json
+"statistical_validation": {
+  "performed": false,
+  "reason": "structural validation only: it says the definition will execute, not that it will make money. No out-of-sample result is implied.",
+  "how_to_measure": "POST /api/v1/backtests (out-of-sample walk-forward with deflated-Sharpe correction), or `atr research`"
+}
+```
+
+`ok: true` means "this will execute". It is not a finding, and the payload says so
+rather than letting a green tick be read as one. The same clause is on the CLI
+(`atr strategy validate`) for the same reason.
+
+### Validation codes
+
+`errors` make the definition unrunnable; `warnings` describe something executable
+that is probably not what was meant. Both are lists of
+`{code, field, message}`.
+
+`field` is the address of the problem, so a caller can point at it without
+parsing prose. Rule-level findings are qualified by their block (`entry.breakout_proximity_pct`,
+`exit.stop_loss_pct`) because the two blocks are separate constructors; a
+block-level finding uses the block name alone (`exit` for `no_exit_rule`), and a
+top-level finding uses the bare key (`unknown_definition_key`).
+
+| code | kind | what it means |
+|---|---|---|
+| `unreadable_definition` | error | not a JSON object |
+| `unknown_rule_field` | error | a field the rule dataclass does not have — the block cannot be constructed |
+| `non_numeric_rule_value` | error | e.g. `"5%"` where a number belongs |
+| `unknown_engine_key` | error | no such registry strategy, so a backtest cannot run |
+| `unknown_strategy_param` | error | the strategy's constructor does not take that parameter |
+| `params_without_engine_key` | error | params nothing will read |
+| `params_not_an_object` | error | the backtest runner merges params into a constructor and needs an object |
+| `unknown_definition_key` | warning | a top-level key neither consumer reads — silently ignored |
+| `no_exit_rule` | warning | no exit can ever fire, so no closed trade and no forward observation |
+| `trend_sma_order_inverted` | warning | `trend_fast_sma >= trend_slow_sma`, so the pullback rule can never fire |
+| `trend_confirm_bars_clamped` | warning | below 1, and clamped to 1 by `eval_exit` |
+| `min_history_bars_exceeds_typical_warmup` | warning | needs more history than the runner loads |
+| `rules_and_params_disagree` | warning | the live loop runs `rules`, a backtest runs `params`, and they differ |
+
+The last one is the one to read carefully. A version may carry an explicit
+`rules` block (what the live loop evaluates) *and* `engine_key` + `params` (what a
+backtest runs). They must describe one strategy: a backtest of rules the
+deployment does not run scores the wrong subject, and scores it convincingly.
+
+### Immutability
+
+There is no route that updates a definition, and its absence is asserted by
+`tests/test_strategy_authoring.py`. Re-posting identical rules is `409
+duplicate_definition` naming the version that already holds them, not version 3
+and 4 of one strategy — two identical definitions are one strategy. Creation
+refuses a definition with structural errors (`422 invalid_definition`) unless
+`force: true`, because a version cannot be edited afterwards and its failure mode
+is silent.
+
+`POST /paper/deployments` verifies the pinned version when the `strategy_id` is
+one of the caller's own saved strategies: a missing version is `422
+version_not_found` and an unresolvable one is `422 version_not_deployable`. A
+`strategy_id` that is not a saved strategy is left alone — a deployment may name
+a bare registry key, and the runner reports that refusal on the status surface.
+
+### The worked example
+
+`POST /seed` (and `atr strategy seed`) creates `Example breakout` and its version
+1 from `atr.strategy.example`: a breakout entry with a stop-loss **and** a
+take-profit exit. Both exits are set on purpose — a definition with no live exit
+rule opens positions and never closes one, which produces no closed trade and
+therefore no forward observation. It is idempotent, so it is safe in a setup
+script. It has not been validated out of sample and makes no claim to an edge.
 
 ## Screener — `/api/v1/screener` (Phase 2)
 
@@ -451,6 +677,46 @@ for it is how you get a dead dashboard.
 
 **Shipped 2026-09-14 — see §1.2 above for the implemented surface.**
 
+## Monitoring — `/api/v1/monitor` (shipped 2026-09-15)
+
+Seven **read-only** routes, all `order:read`. They answer "what is this deployment
+doing and why", and they are separated from `/paper` because the distinction is
+worth enforcing: `/paper` can change state, `/monitor` cannot.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/deployments/{id}` | **The whole screen in one request.** See below. |
+| GET | `/deployments/{id}/status` | Lifecycle + the trading answer |
+| GET | `/deployments/{id}/pnl` | P&L with the today-vs-total split |
+| GET | `/deployments/{id}/timeline` | `?limit=300`. The signal→position chain |
+| GET | `/deployments/{id}/signals` | `?limit=200` |
+| GET | `/deployments/{id}/trades` | `?limit=200`. Journal round trips |
+| GET | `/deployments/{id}/risk` | Limits and what the deployment observes |
+
+**`/deployments/{id}` is deliberately one request rather than six.** The
+monitoring screen polls, and six endpoints means six round trips per tick, six
+chances to fail independently, and a screen whose cards can disagree with each
+other because they were rendered from different moments. One composed response
+gives the UI a single consistent snapshot. It carries `status, pnl, positions,
+orders, fills, signals, trades, risk, timeline`.
+
+**Read-only throughout, and that is a safety property rather than a style
+choice.** A monitoring bug must be able to misreport and never to mis-trade. No
+route here can start, stop, pause or place anything, so a mistake in a read
+projection cannot change an account.
+
+**Nothing here serialises `Infinity` or `NaN`.** `Infinity` is not valid JSON, so
+a limit that means *unbounded* is emitted as `null` — the backend collapses the
+`inf` sentinel rather than letting the serializer produce a body the browser
+rejects. The UI renders `null` as `"unbounded"`. This is asserted by
+`scripts/probe_paper_ui.py`, which fails the run if either token appears.
+
+**`today_pnl` is `null`, never `0.0`, when there is no earlier equity to subtract
+from.** The two are not the same statement — one says *not measured*, the other
+says *flat* — and a monitor that reports an unmeasured day as ₹0 is teaching its
+operator to distrust it. `today_since` names the boundary used, so the figure can
+be checked.
+
 ## Live algos — `/api/v1/algos` (Phase 3)
 
 ```
@@ -485,6 +751,43 @@ POST   /options/strategies     build a multi-leg strategy → payoff + greeks + 
 GET    /options/templates      the named templates
 POST   /options/backtest       options-specific backtest config
 ```
+
+## Post-trade analytics & attribution (Shipped 2026-09-17)
+
+Read-only. Every route here is a `GET`, scoped to the authenticated principal,
+and reads a projection of the journal rather than anything the trading path
+writes — so including the router cannot alter the behaviour of an order, a gate
+or a strategy.
+
+```
+GET /api/v1/analytics/trades/{trade_id}/attribution   the full 9-branch tree
+GET /api/v1/analytics/trades                          ?strategy_id=&strategy_version=&symbol=
+                                                      &start=&end=&source=&evidence_grade=
+                                                      &market_regime=&sector=&limit=&offset=
+GET /api/v1/analytics/summary                         headline figures + coverage + grade counts
+GET /api/v1/analytics/performance/by-strategy         the six, by the attribution branches
+GET /api/v1/analytics/performance/by-regime
+GET /api/v1/analytics/performance/by-context
+GET /api/v1/analytics/performance/by-sizing
+GET /api/v1/analytics/performance/by-execution
+GET /api/v1/analytics/mae-mfe                         distributions + the P&L relationships
+```
+
+**Deliberately absent: a "best strategy" ranking.** A `GET /analytics/best` would
+be a number with no sample size, no grade split and no per-regime breakdown
+attached to it, and it would be the single most-read figure on the page. The
+comparison surface (`by-strategy`) reports every slice *with* its `n` and its
+`evidence_grade` counts so the reader supplies the judgement.
+
+**Two fields carry the honesty of this surface.**
+
+- `coverage` — `{attributed, closed_trades, complete, unattributed}`. `complete`
+  is `None` when the count could not be taken, never `False`: "we could not count
+  the book" and "the book is not fully attributed" call for different responses.
+- `evidence_counts` — `n`, `forward_n`, `in_sample_n`, `by_grade`, `by_class`,
+  `class_unrecorded`, `all_forward`. A row whose class was never recorded is
+  counted under `class_unrecorded` rather than being defaulted, because defaulting
+  it is how a forward count comes to contradict itself.
 
 ## Risk, execution control, reconciliation
 

@@ -262,6 +262,9 @@ audit happen.
 | Strategy Service | `strategy/` + `STRATEGIES` | keep; add `appdb` strategy + version storage (**Phase 4**) |
 | Backtest Service | `backtest/` + `research/` | keep; move job execution off the request thread |
 | Paper Trading Engine | mode flag only | `services/paper.py` — `PaperVenue` + `PaperLedger` — **built 2026-09-14** |
+| Deployment Service | **absent** | `services/paper.py` — deployments + lifecycle, and `services/monitoring.py` — the read-only projection — **built 2026-09-15** |
+| Paper Runner | **absent** | `services/runner.py` — the clock. Consumes live ticks, calls `eval_entry`/`eval_exit`, and sequences risk → OMS → venue → fill. Contains no matching, no costing and no P&L arithmetic of its own — **built 2026-09-15** |
+| Trade Journal | **absent** | `services/journal.py` — one row per round trip, reconciled from the position fold — **built 2026-09-15** |
 | Risk Engine | `execution/risk.py` | keep; extend limits, add per-strategy scoping |
 | Order Management Service | **absent** | `execution/oms.py` state machine + `services/orders.py` + `order_intents` — **built 2026-09-14** |
 | Execution Service | **absent** | `services/execution.py` — the one path to a venue — **built 2026-09-14** |
@@ -272,6 +275,8 @@ audit happen.
 | Notification Service | `alerts/` | keep; add channels + routing |
 | Audit Service | JSONL appends | `appdb.audit_events` + query API (**Phase 1**) |
 | Analytics Service | `backtest/metrics.py` | keep; add regime + live-vs-backtest comparison |
+| Signal Context Engine | **absent** | `signal_context/` (pure `engine.py` + `analytics.py`), `services`-equivalent `signal_context/service.py`, `signal_contexts` table, `/api/v1/signal-context` — **built 2026-09-17** |
+| Attribution Service | **absent** | `analytics/` (pure `excursions.py` + `attribution.py` + `aggregation.py`), `services/attribution.py`, `trade_attributions` table, `/api/v1/analytics` — **built 2026-09-17** |
 
 ### The order path, and why it is one path
 
@@ -285,6 +290,29 @@ route ──► services/execution.py ──► services/orders.py ──► exe
                                             └──► PaperLedger folds order_events back
                                                  into backtest.portfolio.Portfolio
 ```
+
+Downstream of the closed trade, one more leg reads that fold without writing to it:
+
+```
+trade_journal (closed episode) ──► services/attribution.py ──► analytics/ (pure)
+                                            │                        │
+                                            │                        └── 9-branch tree, excursions,
+                                            │                            execution quality, buckets
+                                            └──► trade_attributions ──► /api/v1/analytics
+                                                                  └──► learning dataset columns
+```
+
+**The arrow is one-way.** The journal does not know attribution exists. Journaling
+is about *what happened*; attribution is about *why*, and keeping the direction
+one-way is what stops a reporting concern from being able to fail a trade
+recording. `services/attribution.py` calls the journal's idempotent `reconcile`
+first — not because it needs to write, but because attributing a trade requires
+the trade to exist.
+
+**`analytics/` imports no storage and `services/attribution.py` writes exactly one
+table.** Those two properties are what make the layer safe to run on a schedule
+and what four of the integrity tests assert structurally rather than trusting to
+review.
 
 Three rules hold this shape together, and each exists because breaking it caused a
 real bug:
@@ -454,6 +482,167 @@ retry, a reconnect, or a duplicated feed message safe.
 **Why not Kafka.** One process, one user, thousands of bars a day. An external
 broker would add an operational dependency to buy nothing. The interface is the
 deliverable; the transport is a config value.
+
+## The learning pipeline: from a live tick to a finding
+
+The self-learning engine reads what the system actually did and reports what it
+means. It is **advisory only** — no route, no method and no payload on this path
+can change a strategy, place an order or bypass the risk engine, and
+`tests/test_learning_api.py` asserts the router's mutating method set is empty.
+
+The chain, and the module that owns each link:
+
+```
+LIVE MARKET      atr/services/runner.py      the deployment clock; ticks and bars
+      ↓
+PAPER STRATEGY   atr/signals/rules.py        eval_entry / eval_exit — the SAME
+                                             functions the backtester calls
+      ↓
+PAPER ORDER      atr/services/orders.py      OrderRepository.create writes the order
+                                             and its NEW event, stamped with provenance
+      ↓
+PAPER FILL       atr/services/paper.py       PaperVenue matches against the live price,
+                                             with IndianDeliveryCosts and a slippage model
+      ↓
+CLOSED TRADE     atr/services/journal.py     reconcile() folds order_events into positions
+                                             and opens/closes a trade_journal episode
+      ↓
+LEARNING DATASET atr/services/learning.py    LearningDatasetBuilder normalises
+                                             backtest_trades + trade_journal + the paper
+                                             ledger into one table, with entry-time
+                                             features enriched point-in-time; journal
+                                             rows keep their signal_id, opening
+                                             order and recorded context
+                                             (score/version/class) as recorded
+      ↓
+DAILY ANALYSIS   atr/services/learning.py    DailyLearningReport + PerformanceAnalysis
+                                             + the drift comparison
+      ↓
+READINESS        atr/services/learning.py    readiness(): per-strategy evidence
+                       + research/              against the 10/30/50 gates, research
+                         learning_readiness.py  states, weekly accumulation and
+                                             data-quality flags — read-only
+```
+
+**Nothing in the chain is a manual export.** A paper trade that closes becomes a
+learning observation on the next dataset build, because the journal is a
+projection of the same position fold the account's P&L comes from — the journal
+cannot disagree with the book, and it cannot be skipped.
+
+### Being on the feed is not the same as reading it
+
+The first link has two halves and only one of them is a read:
+
+```
+READING    atr/services/paper.py      live_tick_source → broadcaster.latest_price()
+BEING ON   atr/api/stream.py          ensure_symbols() → bridge.subscribe_feed()
+```
+
+A symbol reaches the broadcaster's tick store only when somebody subscribes to
+it, and subscription used to be reachable from one place only — the browser
+path. So with no dashboard open the bridge was never connected, every
+`latest_price` returned `None`, and `default_price_source` fell through to the
+daily cache: the deployment was priced at yesterday's close, or not priced at
+all, while reporting itself as running. Either outcome is worse than an honest
+refusal, and both are silent.
+
+The runner therefore *states* its universe — `PaperRunner.sync_loops` →
+`ensure_live_symbols` → `TickBroadcaster.ensure_symbols` — on every pass, and the
+broadcaster keeps server-side subscriptions separate from browser ref counts so
+the two cannot unsubscribe each other. The statement is declarative (the delta
+against the previous statement is what reaches the bridge), retried when the
+bridge was down, and reports symbols it could not resolve to a contract rather
+than swallowing them.
+
+### Two levels of evidence, because they answer two questions
+
+`evidence_class` says **where a record came from**: `BACKTEST`, `IN_SAMPLE`,
+`PAPER_FORWARD`, `LIVE_FORWARD`. The drift comparison needs all four — comparing
+paper against real money is the point of having a paper engine.
+
+`evidence_grade` says **whether a finding may depend on it**: `forward` or
+`in_sample`. Every consumer that has to decide whether it may publish a number
+reads this one. Both are defined once, in `atr/research/learning_evidence.py`,
+and the grade is derived from the class by `grade_of`, so a row cannot carry a
+grade that contradicts its class.
+
+**Anything unrecognised, absent or ambiguous grades in-sample.** Over-claiming
+independence is silent — an in-sample number wearing a forward label reads
+exactly like a finding — while under-claiming it is merely conservative. The two
+failure modes are not symmetric, so the default is not neutral.
+
+### How "forward" is established, and why a timestamp cannot do it
+
+A record is forward when it was written **before its outcome was known**. The
+tempting test is the gap between an order's `created_at` and the market time it
+claims, and it does not work: a backfill harness writes both, so it can write
+them consistently, and no reader can tell a genuine record from a well-forged one.
+
+So the marker is something only the live path can write. `OrderRepository.create`
+— the one method that raises an order — stamps the `NEW` event's `raw` payload
+with `{"provenance": "forward", "recorded_at": <wall clock>}`, and
+`TradeJournalService` copies that verdict onto the episode it opens. Anything
+inserted into the tables by another route has no stamp, and **absence grades
+in-sample**.
+
+### The report states facts and withholds claims
+
+The daily report has two jobs with different evidence requirements. *What
+happened* is a fact: a count, a figure and its arithmetic against the preceding
+window, produced for the whole book — a book of in-sample trades still had a day.
+*Whether it was good* is a claim, gated on `DailyReport.claimable`, which counts
+**forward** observations only. A thousand in-sample rows do not make a claim
+supportable, because they were measured on the history the rules were chosen from.
+
+Gating the facts would go silent on a real trading day; ungating the claim would
+publish a restatement of the selection history as a result. The split is the
+design.
+
+### Deliberately absent
+
+No automatic parameter change, no automatic strategy modification, no automatic
+deployment, no AI-generated trading decision. `LearningService` has no method
+whose name contains `apply`, `deploy`, `optimize` or `place_order`, and a test
+enumerates the class to keep it that way. The findings carry `evidence` and never
+a `proposed_value`.
+
+## The signal context engine: annotating signals, not gating them
+
+The Context-Aware Signal Engine answers *"what was the market, sector and stock
+context when this signal fired?"* for every signal the platform raises, and scores
+that context deterministically. It is an annotation layer: it never blocks a
+signal, changes a strategy parameter, or alters an order.
+
+```
+LIVE / PAPER   atr/services/runner.py ──► signal_context/service.py ──► engine.py
+                     (after the order is placed, best-effort)              │
+                                                                          ▼
+BACKTEST       atr/services/backtests.py ─► signal_context/service.py   signal_contexts
+                     (after the run completes, point-in-time)
+                                                                          │
+SIGNAL EXPLORER  /api/v1/signal-context ──────────────────────────────────┘
+```
+
+The seams that make it safe:
+
+* **`engine.py` is pure.** It imports only market-intel models, the point-in-time
+  enrichment primitives and the indicators. The environment-dependent universe
+  scan (breadth and sector metrics at a past date) lives in `service.py`, so the
+  engine's tests need neither a database nor a data root. Same inputs → same
+  score, which is what makes a backtest comparison meaningful.
+* **Point-in-time by construction.** Every stock, sector and market measurement is
+  computed from frames truncated at the signal timestamp, reusing
+  `research/learning_enrich._as_of`. A price move after the signal cannot change
+  its score.
+* **Best-effort, and never in the path of an order.** The runner records the
+  context *after* `execution.place` returns; the backtest worker records contexts
+  *after* the run is COMPLETED. Every entry point catches and logs — a lost
+  annotation is never a failed or delayed signal.
+* **The two evidence kinds are kept apart.** A backtest context resolves to an
+  `in_sample` outcome; a live/paper context resolves forward only through the real
+  book (the order carrying the same `signal_id`, then the journal episode inside
+  its session). Statistics are suppressed until the forward sample supports them,
+  exactly as the learning pipeline withholds claims.
 
 ## F. Phase 1 implementation plan
 

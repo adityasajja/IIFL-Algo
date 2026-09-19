@@ -514,7 +514,9 @@ CREATE TABLE trade_journal (
     duration_sec   INTEGER,
     regime         VARCHAR(24),        -- from the regime engine
     signal_reason  TEXT,
-    slippage_bps   DOUBLE PRECISION,
+    exit_reason    VARCHAR(32),        -- the closing order's own reason
+    slippage_bps   DOUBLE PRECISION,   -- mean of the measurable legs
+    evidence_grade VARCHAR(16),        -- 'forward' | 'in_sample'
     notes          TEXT,
     created_at     TIMESTAMPTZ NOT NULL
 );
@@ -523,7 +525,28 @@ CREATE TABLE trade_journal (
 `mfe`/`mae` are stored rather than derived because they require the intra-trade
 path, which the order-event log does not preserve once a position is netted.
 `duration_sec` *is* derived, from `entry_ts`/`exit_ts` at close time, so the two
-cannot disagree.
+cannot disagree. `exit_reason`, `slippage_bps` and `evidence_grade` were added
+after the table shipped; `AppDatabase.ADDITIVE_COLUMNS` is how an existing
+database gets them.
+
+### `evidence_grade` — the column that decides how much a trade is worth
+
+`forward` when the opening order was raised live, `in_sample` otherwise. It is
+**not** derived from timestamps: a replay harness writes historical market
+timestamps and can write them consistently, so a reader has no way to tell a
+genuine record from a well-forged one. Instead the OMS stamps every order it
+raises, on the `NEW` event's `raw` payload, with
+`{"provenance": "forward", "recorded_at": <wall clock>}` — and the journal copies
+that verdict onto the episode it opens. Anything inserted into the table by
+another route simply does not have the stamp, and **absence grades in-sample**,
+because over-claiming independence is silent and under-claiming it is merely
+conservative.
+
+The four-value `evidence_class` (BACKTEST, IN_SAMPLE, PAPER_FORWARD,
+LIVE_FORWARD) and the two-value `evidence_grade` (`forward`, `in_sample`) are
+defined once, in `atr/research/learning_evidence.py`, and the grade is derived
+from the class by `grade_of` — so a record cannot carry a grade that disagrees
+with its class. `atr.services.learning` stamps both onto every dataset row.
 
 ---
 
@@ -533,6 +556,10 @@ cannot disagree.
 `screener_scans`. The Python registry (`atr.strategy.registry`) is unchanged and
 still the execution path for a `code` strategy — a persisted strategy either points
 at a registry entry via `engine_key` or is defined entirely by its JSON rules.
+
+**Added 2026-09-15:** `backtest_trades`, `backtest_curves`, `backtest_monthly` —
+the per-trade and per-bar artefacts of a run, so the results page can paginate a
+trade list and a single trade is an indexed lookup rather than a parsed blob.
 
 ```sql
 CREATE TABLE strategies (
@@ -609,10 +636,78 @@ Three changes from the original spec:
   "a row exists" cannot report `QUEUED` vs `RUNNING` vs `FAILED`.
 * `equity_curve`/`trade_count`/`oos`/`fold` were **dropped from the row**. The
   equity curve, the trade list, the monthly returns and the exposure series are
-  per-bar/per-trade artefacts; they belong in a file keyed by `run_id`, not as
-  multi-megabyte JSON in a control-plane row that every list query then has to
-  avoid reading. The row keeps the *summary*; `metrics` is the JSON blob the
-  dashboard renders.
+  per-bar/per-trade artefacts; they do not belong as multi-megabyte JSON in a
+  control-plane row that every list query then has to avoid reading. The row
+  keeps the *summary*; `metrics` is the JSON blob the dashboard renders.
+
+  **The effective parameters are resolved, not read (added 2026-09-15).** The
+  trade-detail read originally reported `config["params"]` verbatim. For a run
+  pinned to a saved version that is `{}`, because a version's parameters live in
+  `strategy_versions.definition` and never in the run's own config — so the
+  trade view answered "which parameters ran?" with nothing. It now merges the
+  stored definition first and the run's explicit overrides on top, mirroring
+  `BacktestRunner.build_strategy`. A version backtest can therefore say what the
+  version contained.
+
+  **Where they went instead (revised 2026-09-15).** This section originally said
+  they should live "in a file keyed by `run_id`". They are in three tables
+  instead: `backtest_trades`, `backtest_curves`, `backtest_monthly`. The reason
+  is the requirement that a user can open *any* trade and see it — a file means
+  parsing the whole artefact to serve page 2 of a 20,000-trade run, and it makes
+  a per-trade lookup a linear scan. The tables give a `(run_id, seq)` index for
+  free. `run_id` is a foreign key with `ON DELETE CASCADE`, so deleting a run
+  cannot orphan its artefacts. The cost is three more tables in the control-plane
+  database; the benefit is that the trade list is a query rather than a parse.
+
+`backtest_trades` stores `signal_reason` and `exit_reason` as text. These are the
+*why* of a trade — the signal conditions that opened it and the rule that closed
+it — and they are the difference between a trade list and a P&L statement. They
+are nullable because not every strategy can explain itself, and a row that says
+"not recorded" is honest where a synthesised sentence would not be.
+
+```sql
+-- Per-trade artefacts of a run. Written once, when the run completes.
+CREATE TABLE backtest_trades (
+    trade_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       VARCHAR(32) NOT NULL REFERENCES backtest_runs(run_id) ON DELETE CASCADE,
+    seq          INTEGER NOT NULL,       -- 0-based, stable order within a run
+    symbol       VARCHAR(32) NOT NULL,
+    direction    VARCHAR(6)  NOT NULL,   -- LONG | SHORT, stored rather than inferred
+    quantity     DOUBLE PRECISION NOT NULL,
+    entry_ts     TIMESTAMPTZ NOT NULL,
+    entry_price  DOUBLE PRECISION NOT NULL,
+    exit_ts      TIMESTAMPTZ,
+    exit_price   DOUBLE PRECISION,
+    gross_pnl    DOUBLE PRECISION,
+    commission   DOUBLE PRECISION,
+    net_pnl      DOUBLE PRECISION,
+    return_pct   DOUBLE PRECISION,
+    duration_days DOUBLE PRECISION,
+    exit_reason  VARCHAR(32),            -- signal | stop_loss | take_profit | trailing_stop
+    signal_reason TEXT,                  -- the strategy's own words, or NULL
+    strategy_id  VARCHAR(32),
+    strategy_version INTEGER
+);
+
+-- Equity, drawdown and exposure as one row per (run, kind, bar).
+CREATE TABLE backtest_curves (
+    curve_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id    VARCHAR(32) NOT NULL REFERENCES backtest_runs(run_id) ON DELETE CASCADE,
+    kind      VARCHAR(12) NOT NULL,      -- equity | drawdown | exposure | cash
+    seq       INTEGER NOT NULL,
+    ts        TIMESTAMPTZ NOT NULL,
+    value     DOUBLE PRECISION NOT NULL
+);
+
+-- Calendar-month returns. NULL is "no bars that month", which is not 0.00%.
+CREATE TABLE backtest_monthly (
+    row_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     VARCHAR(32) NOT NULL REFERENCES backtest_runs(run_id) ON DELETE CASCADE,
+    year       INTEGER NOT NULL,
+    month      INTEGER NOT NULL,
+    return_pct DOUBLE PRECISION
+);
+```
 
 `data_fingerprint` is the field that makes a backtest a *measurement*: without it
 you cannot tell whether two runs differ because the strategy changed or because the
@@ -654,7 +749,9 @@ users ──1:N── sessions
       ──1:N── reconciliation_runs
       ──1:N── trade_journal
       ──1:N── strategies ──1:N── strategy_versions
-      ──1:N── backtest_runs
+      ──1:N── backtest_runs ──1:N── backtest_trades
+      │                     ──1:N── backtest_curves
+      │                     └──1:N── backtest_monthly
       └──1:N── screener_scans
 
 audit_events ──(soft ref, user_id may be NULL for system events)── users
@@ -720,7 +817,283 @@ Keys in use: ``risk.kill_switch``, ``risk.execution_mode``,
 
 ---
 
-## 7. Migrations
+## 8. Portfolio tier
+
+**Shipped 2026-09-18.** One row per user, holding the capital-allocation
+policy the portfolio risk gate enforces: portfolio limits, conflict handling
+and strategy priorities.
+
+```sql
+CREATE TABLE portfolio_policies (
+    user_id    VARCHAR(32) PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    policy     TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    updated_by VARCHAR(64),
+    reason     TEXT
+);
+```
+
+Why this is not `system_state`: that table belongs to the installation (kill
+switch, execution mode), while capital allocation belongs to whoever owns the
+paper book. Per-user rows keep one account's limits from constraining another.
+No policy row means no portfolio limits — the gate passes everything through,
+which is the pre-policy behaviour, and every figure the dashboard shows is
+still computed.
+
+---
+
+## 5. Learning & Optimization tier (Shipped)
+
+### 5.1 `learning_observations`
+Persisted learning records representing in-sample, forward paper, and live trading observations.
+
+```sql
+CREATE TABLE learning_observations (
+    observation_id   VARCHAR(36) PRIMARY KEY,
+    trade_id         VARCHAR(36),
+    strategy_id      VARCHAR(36) NOT NULL,
+    strategy_version INTEGER,
+    evidence_class   VARCHAR(32) NOT NULL,
+    evidence_grade   VARCHAR(32) NOT NULL,
+    is_forward       BOOLEAN NOT NULL,
+    entry_ts         TIMESTAMP NOT NULL,
+    exit_ts          TIMESTAMP,
+    pnl              REAL,
+    return_pct       REAL,
+    features         TEXT,
+    created_at       TIMESTAMP NOT NULL
+);
+```
+
+### 5.2 `optimization_recommendations`
+Controlled strategy optimization recommendations generated from empirical forward evidence.
+
+```sql
+CREATE TABLE optimization_recommendations (
+    recommendation_id VARCHAR(36) PRIMARY KEY,
+    hypothesis_id     VARCHAR(36) NOT NULL,
+    strategy_id       VARCHAR(36) NOT NULL,
+    from_version      INTEGER NOT NULL,
+    to_version        INTEGER,
+    status            VARCHAR(32) NOT NULL,
+    candidate_changes TEXT NOT NULL,
+    validation_report TEXT NOT NULL,
+    created_at        TIMESTAMP NOT NULL,
+    approved_at       TIMESTAMP,
+    approved_by       VARCHAR(36)
+);
+```
+
+### 5.3 `strategy_experiments`
+
+A controlled experiment measures a candidate strategy version against the
+version it came from. The experiment **records and reports**; it never promotes
+the candidate — approval is a separate, explicit act.
+
+```sql
+CREATE TABLE strategy_experiments (
+    experiment_id         VARCHAR(36) PRIMARY KEY,
+    strategy_id           VARCHAR(32) NOT NULL REFERENCES strategies(strategy_id) ON DELETE CASCADE,
+    source_version        INTEGER NOT NULL,
+    target_version        INTEGER,
+    recommendation_id     VARCHAR(36) REFERENCES optimization_recommendations(recommendation_id) ON DELETE SET NULL,
+    creator_user_id       VARCHAR(64) NOT NULL,
+    name                  VARCHAR(128) NOT NULL,
+    reason                TEXT NOT NULL,
+    parameter_changes     TEXT NOT NULL,  -- JSON
+    baseline_definition   TEXT NOT NULL,  -- JSON
+    candidate_definition  TEXT NOT NULL,  -- JSON
+    status                VARCHAR(20) NOT NULL DEFAULT 'CREATED',
+    rejection_reason      TEXT,
+    results               TEXT,           -- JSON: metrics comparison, curves, distributions
+    explanation           TEXT,           -- JSON: what changed, why, what was found
+    error                 TEXT,
+    created_at            DATETIME NOT NULL,
+    updated_at            DATETIME NOT NULL,
+    reviewed_by           VARCHAR(64),
+    reviewed_at           DATETIME
+);
+```
+
+---
+
+## 7. Signal context tier (Shipped)
+
+**Shipped 2026-09-17.** One table, `signal_contexts`, records the market, sector
+and stock context of every signal the platform raises, together with the
+deterministic score the Context-Aware Signal Engine computed for it.
+
+```sql
+CREATE TABLE signal_contexts (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                VARCHAR(32) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    signal_id              VARCHAR(64) NOT NULL,
+    strategy_id            VARCHAR(32),
+    strategy_version       INTEGER,
+    symbol                 VARCHAR(64) NOT NULL,
+    action                 VARCHAR(8) NOT NULL,       -- BUY | SELL
+    signal_source          VARCHAR(16) NOT NULL,      -- LIVE | PAPER | BACKTEST
+    signal_ts              VARCHAR(40) NOT NULL,
+    context_model_version  VARCHAR(24) NOT NULL,
+    context_class          VARCHAR(24) NOT NULL,      -- STRONG | NEUTRAL | WEAK | INSUFFICIENT_DATA
+    context_score          INTEGER NOT NULL DEFAULT 0,
+    max_possible_score     INTEGER NOT NULL DEFAULT 0,
+    has_insufficient_data  BOOLEAN NOT NULL DEFAULT FALSE,
+    run_id                 VARCHAR(32),               -- backtest linkage
+    trade_id               INTEGER,                   -- backtest_trades.trade_id
+    order_id               VARCHAR(32),               -- orders linkage (live/paper)
+    market_context         TEXT,                      -- JSON snapshot
+    sector_context         TEXT,                      -- JSON snapshot
+    stock_context          TEXT,                      -- JSON snapshot
+    score_breakdown        TEXT,                      -- JSON, per-criterion
+    missing_fields         TEXT,                      -- JSON list
+    benchmark_provenance   TEXT,                      -- JSON
+    created_at             DATETIME NOT NULL,
+    UNIQUE (user_id, signal_id)
+);
+```
+
+Why this exists and why it is shaped this way:
+
+* **The score is not recomputable from the trades.** Breadth, sector strength and
+  the benchmark provenance are not stored on a trade; without this table a
+  historical signal's context is simply lost. The JSON snapshots make the record
+  self-describing, so a future scoring version can reclassify old rows without a
+  migration.
+* **`signal_id` is the join.** A paper deployment stamps the bar key
+  (``SYMBOL:YYYY-MM-DD``) on both the order (``orders.signal_id``) and the
+  context, so an outcome can be resolved back to the context that preceded it.
+  A backtest run uses ``RUN_ID:SEQ`` and links through ``trade_id``.
+* **`context_model_version` is not decoration.** Scoring weights change; the row
+  must say which model produced it or a comparison across time is meaningless.
+* **Enrichment never gates trading.** This table is written after an order is
+  placed (paper) or after a run completes (backtest), best-effort. A missing row
+  is a lost annotation, never a blocked or altered signal.
+
+---
+
+## 8. Portfolio tier — Capital Allocation & Portfolio Risk
+
+### 8.1 `portfolio_policies`
+
+Stores per-user aggregate risk limits and signal conflict resolution policies.
+
+```sql
+CREATE TABLE portfolio_policies (
+    user_id                  VARCHAR(32) PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    policy_json              TEXT NOT NULL,
+    max_total_exposure       DOUBLE PRECISION,
+    max_daily_loss           DOUBLE PRECISION,
+    max_capital_per_strategy DOUBLE PRECISION,
+    max_open_positions       INTEGER,
+    max_stock_exposure       DOUBLE PRECISION,
+    max_sector_exposure      DOUBLE PRECISION,
+    max_correlated_exposure  DOUBLE PRECISION,
+    conflict_resolution      VARCHAR(32) NOT NULL DEFAULT 'reject',
+    created_at               DATETIME NOT NULL,
+    updated_at               DATETIME NOT NULL
+);
+```
+
+`portfolio_policies` provides persistence for portfolio-level risk parameters, siting above individual strategy limits and evaluated before OMS order dispatch.
+
+---
+
+## 8. Post-trade attribution tier (Shipped)
+
+**Shipped 2026-09-17.** One table, `trade_attributions`, holds the nine-branch
+attribution of every closed trade: what the signal was, what the context was, what
+the entry actually cost, how the size was chosen, what risk was taken, what the
+venue charged, why it ended, and what it made.
+
+```sql
+CREATE TABLE trade_attributions (
+    trade_id                 VARCHAR(32) PRIMARY KEY,   -- trade_journal.trade_id
+    user_id                  VARCHAR(32) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    deployment_id            VARCHAR(32),
+    symbol                   VARCHAR(64) NOT NULL,
+    side                     VARCHAR(4)  NOT NULL,      -- BUY | SELL (opening side)
+    source                   VARCHAR(16) NOT NULL,      -- BACKTEST | PAPER | LIVE
+    evidence_grade           VARCHAR(16),               -- forward | in_sample (copied)
+    evidence_class           VARCHAR(16),               -- PAPER_FORWARD | ... (copied)
+    simulated                BOOLEAN NOT NULL DEFAULT TRUE,
+
+    attribution              TEXT NOT NULL,             -- JSON: the TRADE tree
+    reason_codes             TEXT,                      -- comma-joined, for LIKE
+    missing_fields           TEXT,                      -- JSON
+
+    -- lifted columns: exactly what the learning axes slice on
+    entry_quality            VARCHAR(16),               -- good | poor
+    execution_quality        VARCHAR(24),               -- low_slippage | normal | high_slippage
+    mfe_pct                  FLOAT,
+    mae_pct                  FLOAT,
+    mfe_amount               FLOAT,
+    mae_amount               FLOAT,
+    mfe_over_risk            FLOAT,
+    realized_over_risk       FLOAT,
+    capture_efficiency_pct   FLOAT,
+    entry_slippage_bps       FLOAT,
+    exit_slippage_bps        FLOAT,
+    total_slippage_bps       FLOAT,
+    transaction_costs        FLOAT,
+    cost_pct                 FLOAT,
+    signal_to_order_sec      FLOAT,
+    order_to_fill_sec        FLOAT,
+    holding_sec              INTEGER,
+    partial_fill             BOOLEAN NOT NULL DEFAULT FALSE,
+    fill_ratio               FLOAT,
+    sizing_method            VARCHAR(32),
+    sizing_cap_reason        VARCHAR(64),
+    realized_risk_pct        FLOAT,
+    planned_risk_amount      FLOAT,
+    context_score            INTEGER,
+    context_class            VARCHAR(24),
+    market_regime            VARCHAR(24),
+    sector                   VARCHAR(64),
+    sector_strength          FLOAT,
+    stock_relative_strength  FLOAT,
+    rvol                     FLOAT,
+    atr_pct                  FLOAT,
+    exit_reason              VARCHAR(32),
+
+    input_fingerprint        VARCHAR(64) NOT NULL,
+    computed_at              DATETIME NOT NULL,
+    updated_at               DATETIME NOT NULL
+);
+```
+
+Why this exists and why it is shaped this way:
+
+* **`trade_id` is the primary key, and that is the whole idempotency story.** A
+  second attribution of a closed trade cannot create a second row, whatever the
+  caller does. Re-attribution is a replacement, and an unchanged trade never
+  reaches the write at all — `input_fingerprint` is compared first, so a scheduled
+  sweep over a stable book writes nothing.
+* **It is derived, so it is a separate table.** A journal row is true the instant
+  the fold writes it; an attribution row is computed from the journal, the
+  order-event log and the price cache, so it can be *absent* (not yet computed) or
+  *superseded* (a late fill arrived). On the journal, "this trade has no net P&L"
+  and "this trade has not been attributed" would be the same sentence.
+* **The tree is stored whole; the sliceable fields are lifted.** The nine branches
+  are the deliverable and a reader wants them intact and together, so they live in
+  one JSON column. The ~40 fields below it are copied out because an axis has to
+  be able to `GROUP BY` them, and a JSON path cannot be indexed portably across
+  SQLite and Postgres.
+* **`evidence_grade` is copied, never derived.** The service reads it from
+  `trade_journal` and writes it here for query convenience. There is no code path
+  that computes a grade on this table, and `TradeAttributionRepository` exposes no
+  method that could: the one place a grade may be decided is the journal's own
+  writer. A row whose grade disagreed with its journal row would be a second
+  opinion about provenance.
+* **`simulated` travels with the row.** A backtest fill and a paper fill are both
+  produced by a model; a live fill was reported by a broker. The flag exists so a
+  comparison between simulated and real execution can filter on it without
+  consulting a second table — and so a viewer cannot present a simulated fill as
+  real execution.
+
+---
+
+## 9. Migrations
 
 `AppDatabase.prepare()` calls `create_all()`, which creates missing tables but
 **never alters an existing one**. That is adequate while the schema is only ever
