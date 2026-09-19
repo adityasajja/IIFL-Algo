@@ -8,21 +8,34 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import {
+  AlertCircle,
+  Check,
   ChevronDown,
+  Code,
   Maximize2,
   Minimize2,
+  Minus,
+  MousePointer,
+  Pencil,
+  Play,
   Plus,
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Square,
   Trash2,
+  TrendingUp,
   X,
 } from "lucide-react";
-import { API_URL, getCandles, placeOrder, type Candle } from "./api";
+import { API_URL, getCandles, getTickCandles, placeOrder, type Candle } from "./api";
 import { Button } from "./components/ui/button";
+import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
+import { DrawingCanvas, type DrawingTool } from "./components/chart/DrawingCanvas";
+import { evaluatePineScript, parsePineInputs, PINE_PRESETS, type PineSeriesResult } from "./lib/pineScript";
+import { setVisibleInterval } from "./lib/visibleInterval";
 
 type BarTime = string | UTCTimestamp;
 
@@ -45,6 +58,7 @@ const DEFAULT_WATCH: WatchRow[] = [
 ];
 
 const TIMEFRAMES = [
+  { v: "1s", label: "1s", isTick: true },
   { v: "5m", label: "5m" },
   { v: "15m", label: "15m" },
   { v: "60m", label: "1h" },
@@ -151,6 +165,40 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
   const [showRSI, setShowRSI] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
 
+  // Drawing Tools State
+  const [activeTool, setActiveTool] = useState<DrawingTool>("cursor");
+  const [canvasDim, setCanvasDim] = useState({ width: 800, height: 600 });
+
+  // Pine Script State
+  const [pineEditorOpen, setPineEditorOpen] = useState(false);
+  const [pineScript, setPineScript] = useState<string>(() => {
+    return localStorage.getItem("atr.chart.pinescript") || `// Custom Strategy Indicator\nfast = ta.ema(close, 9);\nslow = ta.ema(close, 21);\nplot(fast, "Fast EMA", "#00e5ff");\nplot(slow, "Slow EMA", "#ff007f");`;
+  });
+  const [pineDraft, setPineDraft] = useState<string>(pineScript);
+  const [pineError, setPineError] = useState<string | null>(null);
+  const [pineAppliedMsg, setPineAppliedMsg] = useState(false);
+
+  // Dynamic Pine Indicator Settings & Styles
+  const [pineInputs, setPineInputs] = useState<Record<string, any>>(() => {
+    try {
+      const saved = localStorage.getItem("atr.chart.pineinputs");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [pineStyles, setPineStyles] = useState<Record<string, { color?: string; lineWidth?: number; visible?: boolean }>>(() => {
+    try {
+      const saved = localStorage.getItem("atr.chart.pinestyles");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [pineSettingsModalOpen, setPineSettingsModalOpen] = useState(false);
+  const [pineSettingsActiveTab, setPineSettingsActiveTab] = useState<"inputs" | "style">("inputs");
+  const [indicatorLegendValues, setIndicatorLegendValues] = useState<Record<string, number | null>>({});
+
   // Active hover OHLC stats
   const [hoverData, setHoverData] = useState<{
     open: number;
@@ -177,8 +225,10 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const priceChartRef = useRef<HTMLDivElement>(null);
   const rsiChartRef = useRef<HTMLDivElement>(null);
+  const pineSubChartRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
   const rsiApiRef = useRef<IChartApi | null>(null);
+  const pineChartApiRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
   // Live price tick
@@ -228,6 +278,30 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       setLoading(true);
       setError(null);
       setSearchOpen(false);
+
+      // 1s timeframe uses tick buffer resampling (real-time only)
+      if (targetTf === "1s") {
+        try {
+          const ticks = await getTickCandles(targetSym, 1);
+          if (!ticks || ticks.length === 0) {
+            throw new Error("No live tick data - ensure market is open and symbol is subscribed");
+          }
+          setSymbol(targetSym);
+          setCandles(ticks.map((t) => ({
+            ts: t.ts,
+            open: t.open,
+            high: t.high,
+            low: t.low,
+            close: t.close,
+            volume: t.volume,
+          })));
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
 
       const now = new Date();
       let fromDate = new Date(now);
@@ -308,22 +382,64 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     const lastBar = candles[candles.length - 1];
     const newClose = liveTick.ltp;
     const isIntraday = timeframe !== "1d";
-    const timeVal = isIntraday
-      ? (Math.floor(new Date(lastBar.ts).getTime() / 1000) as UTCTimestamp)
-      : lastBar.ts.slice(0, 10);
+
+    // For 1s timeframe, use tick's epoch time directly
+    let timeVal: UTCTimestamp;
+    if (timeframe === "1s") {
+      timeVal = Math.floor(liveTick.epoch || Date.now() / 1000) as UTCTimestamp;
+    } else if (isIntraday) {
+      timeVal = Math.floor(new Date(lastBar.ts).getTime() / 1000) as UTCTimestamp;
+    } else {
+      timeVal = lastBar.ts.slice(0, 10) as unknown as UTCTimestamp;
+    }
 
     try {
-      candleSeriesRef.current.update({
-        time: timeVal,
-        open: lastBar.open,
-        high: Math.max(lastBar.high, newClose),
-        low: Math.min(lastBar.low, newClose),
-        close: newClose,
-      });
+      // For 1s, check if we need a new candle or update existing
+      if (timeframe === "1s") {
+        const lastCandleTime = Math.floor(new Date(lastBar.ts).getTime() / 1000);
+        const currentSecond = Math.floor(liveTick.epoch || Date.now() / 1000);
+
+        if (currentSecond > lastCandleTime) {
+          // New second - add new candle
+          candleSeriesRef.current.update({
+            time: currentSecond as UTCTimestamp,
+            open: newClose,
+            high: newClose,
+            low: newClose,
+            close: newClose,
+          });
+        } else {
+          // Same second - update current candle
+          candleSeriesRef.current.update({
+            time: timeVal,
+            open: lastBar.open,
+            high: Math.max(lastBar.high, newClose),
+            low: Math.min(lastBar.low, newClose),
+            close: newClose,
+          });
+        }
+      } else {
+        candleSeriesRef.current.update({
+          time: timeVal,
+          open: lastBar.open,
+          high: Math.max(lastBar.high, newClose),
+          low: Math.min(lastBar.low, newClose),
+          close: newClose,
+        });
+      }
     } catch {
       // ignore
     }
   }, [liveTick, candles, timeframe]);
+
+  // For 1s timeframe, periodically refresh candles from tick buffer
+  useEffect(() => {
+    if (timeframe !== "1s") return;
+    const interval = setVisibleInterval(() => {
+      void loadCandles(symbol, "1s");
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timeframe, symbol, loadCandles]);
 
   // Indicators calculations
   const model = useMemo(() => {
@@ -381,7 +497,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       timeScale: {
         borderColor: border,
         timeVisible: timeframe !== "1d",
-        secondsVisible: false,
+        secondsVisible: timeframe === "1s",
       },
       handleScroll: true,
       handleScale: true,
@@ -506,6 +622,148 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       );
     }
 
+    // Custom Pine Script Indicator Evaluation
+    let pineSubChart: IChartApi | null = null;
+    let pineFirstSeries: ISeriesApi<any> | null = null;
+    try {
+      const allPinePlots = evaluatePineScript(pineScript, candles, true, "#2962ff", pineInputs, pineStyles);
+      const overlayPlots = allPinePlots.filter((p) => p.isOverlay);
+      const panePlots = allPinePlots.filter((p) => !p.isOverlay);
+
+      // 1. Overlay plots on main price chart
+      overlayPlots.forEach((p) => {
+        const line = priceChart.addLineSeries({
+          color: p.color,
+          lineWidth: (p.lineWidth as 1 | 2 | 3 | 4) ?? 2,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          title: p.name,
+        });
+        line.setData(
+          candles.flatMap((_, i) =>
+            p.values[i] !== null ? [{ time: model.times[i], value: p.values[i] as number }] : []
+          )
+        );
+      });
+
+      // 2. Separate dedicated pane for non-overlay indicators (oscillators like FiboGann)
+      if (panePlots.length > 0 && pineSubChartRef.current) {
+        pineSubChart = createChart(pineSubChartRef.current, {
+          layout: {
+            background: { type: ColorType.Solid, color: bg },
+            textColor: text,
+            fontSize: 10,
+          },
+          grid: {
+            vertLines: { color: grid },
+            horzLines: { color: grid },
+          },
+          crosshair: {
+            mode: CrosshairMode.Normal,
+            vertLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
+            horzLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
+          },
+          rightPriceScale: {
+            borderColor: border,
+            scaleMargins: { top: 0.12, bottom: 0.12 },
+          },
+          timeScale: {
+            borderColor: border,
+            visible: !showRSI, // Show time scale on the bottom-most pane
+            timeVisible: timeframe !== "1d",
+          },
+          handleScroll: true,
+          handleScale: true,
+          height: 140,
+        });
+        pineChartApiRef.current = pineSubChart;
+
+        panePlots.forEach((p, plotIdx) => {
+          const s = pineSubChart!.addLineSeries({
+            color: p.color,
+            lineWidth: (p.lineWidth as 1 | 2 | 3 | 4) ?? 2,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: p.name,
+          });
+          if (plotIdx === 0) pineFirstSeries = s;
+          s.setData(
+            candles.flatMap((_, i) =>
+              p.values[i] !== null ? [{ time: model.times[i], value: p.values[i] as number }] : []
+            )
+          );
+        });
+
+        // Set initial legend values
+        const lastIdx = candles.length - 1;
+        const initialVals: Record<string, number | null> = {};
+        panePlots.forEach((p) => {
+          initialVals[p.name] = p.values[lastIdx] ?? null;
+        });
+        setIndicatorLegendValues(initialVals);
+
+        // Bidirectional timeScale and crosshair synchronization between Price chart and Indicator Pane
+        let isSyncingPine = false;
+        priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+          if (isSyncingPine || !range || !pineSubChart) return;
+          isSyncingPine = true;
+          pineSubChart.timeScale().setVisibleLogicalRange(range);
+          isSyncingPine = false;
+        });
+
+        pineSubChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+          if (isSyncingPine || !range) return;
+          isSyncingPine = true;
+          priceChart.timeScale().setVisibleLogicalRange(range);
+          if (rsiChart) rsiChart.timeScale().setVisibleLogicalRange(range);
+          isSyncingPine = false;
+        });
+
+        priceChart.subscribeCrosshairMove((param) => {
+          if (!param.time || !pineSubChart || !pineFirstSeries) return;
+          if (!isSyncingPine) {
+            isSyncingPine = true;
+            pineSubChart.setCrosshairPosition(param.point?.y ?? 50, param.time, pineFirstSeries);
+            isSyncingPine = false;
+          }
+          const timeIndex = new Map<BarTime, number>(model.times.map((tm, i) => [tm, i]));
+          const idx = timeIndex.get(param.time as BarTime);
+          if (idx !== undefined) {
+            const vals: Record<string, number | null> = {};
+            panePlots.forEach((p) => {
+              vals[p.name] = p.values[idx] ?? null;
+            });
+            setIndicatorLegendValues(vals);
+          }
+        });
+
+        pineSubChart.subscribeCrosshairMove((param) => {
+          if (!param.time || !pineSubChart) return;
+          if (!isSyncingPine) {
+            isSyncingPine = true;
+            priceChart.setCrosshairPosition(param.point?.y ?? 50, param.time, candleSeries);
+            if (rsiChart && rsiLineSeries) {
+              rsiChart.setCrosshairPosition(param.point?.y ?? 50, param.time, rsiLineSeries);
+            }
+            isSyncingPine = false;
+          }
+          const timeIndex = new Map<BarTime, number>(model.times.map((tm, i) => [tm, i]));
+          const idx = timeIndex.get(param.time as BarTime);
+          if (idx !== undefined) {
+            const vals: Record<string, number | null> = {};
+            panePlots.forEach((p) => {
+              vals[p.name] = p.values[idx] ?? null;
+            });
+            setIndicatorLegendValues(vals);
+          }
+        });
+      }
+
+      setPineError(null);
+    } catch (err: any) {
+      setPineError(err?.message || "Error evaluating script");
+    }
+
     // RSI Sub-Chart (if enabled)
     let rsiChart: IChartApi | null = null;
     let rsiLineSeries: ISeriesApi<"Line"> | null = null;
@@ -534,6 +792,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           visible: true,
           timeVisible: timeframe !== "1d",
         },
+        handleScroll: true,
+        handleScale: true,
         height: 110,
       });
       rsiApiRef.current = rsiChart;
@@ -572,6 +832,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         if (isSyncing || !range) return;
         isSyncing = true;
         priceChart.timeScale().setVisibleLogicalRange(range);
+        if (pineSubChart) pineSubChart.timeScale().setVisibleLogicalRange(range);
         isSyncing = false;
       });
 
@@ -579,6 +840,16 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         if (isSyncing || !param.time || !rsiChart || !rsiLineSeries) return;
         isSyncing = true;
         rsiChart.setCrosshairPosition(param.point?.y ?? 50, param.time, rsiLineSeries);
+        isSyncing = false;
+      });
+
+      rsiChart.subscribeCrosshairMove((param) => {
+        if (isSyncing || !param.time || !rsiChart) return;
+        isSyncing = true;
+        priceChart.setCrosshairPosition(param.point?.y ?? 50, param.time, candleSeries);
+        if (pineSubChart && pineFirstSeries) {
+          pineSubChart.setCrosshairPosition(param.point?.y ?? 50, param.time, pineFirstSeries);
+        }
         isSyncing = false;
       });
     }
@@ -629,23 +900,39 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       const w = chartWrapperRef.current.clientWidth;
       const totalH = chartWrapperRef.current.clientHeight;
       const rsiH = showRSI ? 110 : 0;
-      const priceH = Math.max(totalH - rsiH, 300);
+      const hasPinePane = pineSubChart !== null;
+      const pineH = hasPinePane ? 140 : 0;
+      const priceH = Math.max(totalH - rsiH - pineH, 260);
 
+      setCanvasDim({ width: w, height: priceH });
       priceChart.applyOptions({ width: w, height: priceH });
+      if (pineSubChart) {
+        pineSubChart.applyOptions({ width: w, height: pineH });
+      }
       if (rsiChart) {
         rsiChart.applyOptions({ width: w, height: rsiH });
       }
     };
 
     const ro = new ResizeObserver(handleResize);
-    if (chartWrapperRef.current) ro.observe(chartWrapperRef.current);
+    if (chartWrapperRef.current) {
+      ro.observe(chartWrapperRef.current);
+      const hasPinePane = pineSubChart !== null;
+      const rsiH = showRSI ? 110 : 0;
+      const pineH = hasPinePane ? 140 : 0;
+      setCanvasDim({
+        width: chartWrapperRef.current.clientWidth,
+        height: Math.max(chartWrapperRef.current.clientHeight - rsiH - pineH, 260),
+      });
+    }
 
     return () => {
       ro.disconnect();
       priceChart.remove();
+      if (pineSubChart) pineSubChart.remove();
       if (rsiChart) rsiChart.remove();
     };
-  }, [candles, model, theme, showRibbon, showEMA200, showBB, showRSI, showVolume, timeframe]);
+  }, [candles, model, theme, showRibbon, showEMA200, showBB, showRSI, showVolume, timeframe, pineScript, pineInputs, pineStyles]);
 
   // Quick Order Action
   const handleQuickOrder = async (isBuy: boolean) => {
@@ -869,6 +1156,22 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               </div>
             )}
           </div>
+
+          <div className="h-4 w-px bg-[#2a2e39]" />
+
+          {/* Pine Script Editor Toggle */}
+          <button
+            type="button"
+            onClick={() => setPineEditorOpen(!pineEditorOpen)}
+            className={cn(
+              "flex items-center gap-1.5 rounded px-2.5 py-1 transition-colors text-xs font-medium",
+              pineEditorOpen ? "bg-[#2962ff] text-white" : "text-[#d1d4dc] hover:bg-[#2a2e39]"
+            )}
+            title="Pine Script Indicator Editor"
+          >
+            <Code size={13} className={pineEditorOpen ? "text-white" : "text-[#787b86]"} />
+            <span>Pine Editor</span>
+          </button>
         </div>
 
         {/* Right Toolbar: Refresh, Fullscreen */}
@@ -894,10 +1197,82 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 2. MAIN BODY: LEFT CHART + RIGHT WATCHLIST & DETAILS          */}
+      {/* 2. MAIN BODY: LEFT DRAWING TOOLS + CHART + RIGHT WATCHLIST     */}
       {/* ------------------------------------------------------------- */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left Interactive Canvas Area */}
+        {/* TradingView Left Drawing Tools Rail */}
+        <div className="flex flex-col items-center gap-1 border-r border-[#2a2e39] bg-[#131722] py-2 px-1 text-[#787b86] shrink-0 z-30 select-none">
+          <button
+            type="button"
+            title="Crosshair / Normal Cursor"
+            onClick={() => setActiveTool("cursor")}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              activeTool === "cursor" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+            )}
+          >
+            <MousePointer size={15} />
+          </button>
+          <button
+            type="button"
+            title="Trendline (Click start & end points)"
+            onClick={() => setActiveTool("trendline")}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              activeTool === "trendline" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+            )}
+          >
+            <TrendingUp size={15} />
+          </button>
+          <button
+            type="button"
+            title="Extended Ray"
+            onClick={() => setActiveTool("ray")}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              activeTool === "ray" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+            )}
+          >
+            <Pencil size={15} />
+          </button>
+          <button
+            type="button"
+            title="Horizontal Price Level"
+            onClick={() => setActiveTool("hline")}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              activeTool === "hline" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+            )}
+          >
+            <Minus size={15} />
+          </button>
+          <button
+            type="button"
+            title="Rectangle / Supply & Demand Zone"
+            onClick={() => setActiveTool("rect")}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              activeTool === "rect" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+            )}
+          >
+            <Square size={15} />
+          </button>
+          <div className="my-1 h-px w-4 bg-[#2a2e39]" />
+          <button
+            type="button"
+            title="Clear All Drawings"
+            onClick={() => {
+              localStorage.removeItem("atr.chart.drawings");
+              window.dispatchEvent(new Event("storage"));
+              setActiveTool("cursor");
+            }}
+            className="rounded p-1.5 text-[#787b86] hover:bg-[#f23645]/20 hover:text-[#f23645] transition-colors"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+
+        {/* Central Interactive Canvas Area */}
         <div className="flex flex-1 flex-col min-w-0 relative">
           {/* TradingView Legend & OHLC HUD Bar */}
           <div className="absolute top-2 left-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono pointer-events-none bg-[#131722]/85 px-2 py-1 rounded border border-[#2a2e39]/60 backdrop-blur">
@@ -942,18 +1317,222 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               </div>
             ) : (
               <>
-                <div ref={priceChartRef} className="flex-1 w-full min-h-[300px]" />
+                <div ref={priceChartRef} data-lenis-prevent className="flex-1 w-full min-h-[300px] relative">
+                  <DrawingCanvas
+                    tool={activeTool}
+                    onToolSelect={setActiveTool}
+                    width={canvasDim.width}
+                    height={canvasDim.height}
+                  />
+                </div>
+                {/* Dedicated Subchart Pane for Pine Oscillators / Non-overlay Indicators */}
+                {(() => {
+                  let hasPanePlots = false;
+                  let indicatorName = "Pine Indicator";
+                  try {
+                    const parsed = evaluatePineScript(pineScript, candles, true, "#2962ff", pineInputs, pineStyles);
+                    hasPanePlots = parsed.some((p) => !p.isOverlay);
+                    const indMatch = pineScript.match(/indicator\s*\(\s*["']([^"']+)["']/i);
+                    if (indMatch) indicatorName = indMatch[1];
+                  } catch {}
+
+                  if (!hasPanePlots) return null;
+
+                  return (
+                    <div className="border-t border-[#2a2e39] relative group/pane flex flex-col bg-[#131722]">
+                      {/* Indicator Header Legend (TradingView Style) */}
+                      <div className="absolute top-1.5 left-2 z-20 flex items-center gap-2 text-[11px] font-mono select-none bg-[#131722]/85 px-2 py-0.5 rounded border border-[#2a2e39]/60 backdrop-blur">
+                        <span className="font-semibold text-white truncate max-w-[200px]" title={indicatorName}>
+                          {indicatorName}
+                        </span>
+
+                        {/* Interactive Action Icons (Hover visible or subtle) */}
+                        <div className="flex items-center gap-1 opacity-70 group-hover/pane:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            title="Indicator Settings"
+                            onClick={() => setPineSettingsModalOpen(true)}
+                            className="p-1 rounded hover:bg-[#2a2e39] text-[#787b86] hover:text-white transition-colors"
+                          >
+                            <SlidersHorizontal size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Remove Indicator"
+                            onClick={() => {
+                              setPineScript("// No custom indicator");
+                              localStorage.removeItem("atr.chart.pinescript");
+                            }}
+                            className="p-1 rounded hover:bg-[#2a2e39] text-[#787b86] hover:text-[#f23645] transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+
+                        {/* Real-time Indicator Value readouts */}
+                        <div className="flex items-center gap-2 text-[10.5px] ml-1">
+                          {Object.entries(indicatorLegendValues).map(([name, val]) => (
+                            <span key={name} className="text-[#00e5ff]">
+                              <span className="text-[#787b86] font-normal">{name}: </span>
+                              <span className="font-semibold">{val !== null ? val.toFixed(2) : "—"}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Lightweight Charts Canvas for Pine Subchart */}
+                      <div ref={pineSubChartRef} data-lenis-prevent className="w-full h-[140px]" />
+                    </div>
+                  );
+                })()}
+
                 {showRSI && (
                   <div className="border-t border-[#2a2e39] relative">
                     <span className="absolute top-1 left-2 z-10 text-[10px] font-mono text-[#7e57c2] font-semibold">
                       RSI (14)
                     </span>
-                    <div ref={rsiChartRef} className="w-full h-[110px]" />
+                    <div ref={rsiChartRef} data-lenis-prevent className="w-full h-[110px]" />
                   </div>
                 )}
               </>
             )}
           </div>
+
+          {/* Pine Script Editor Drawer (Bottom Dock) */}
+          {pineEditorOpen && (
+            <div className="border-t border-[#2a2e39] bg-[#1e222d] flex flex-col h-72 shrink-0 z-40 transition-all">
+              {/* Header */}
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#2a2e39] bg-[#171b26] text-xs">
+                <div className="flex items-center gap-2">
+                  <Code size={14} className="text-[#2962ff]" />
+                  <span className="font-semibold text-white tracking-wide">Pine Script Indicator Studio</span>
+                  <span className="text-[10px] text-[#2962ff] font-mono bg-[#2962ff]/10 px-1.5 py-0.5 rounded border border-[#2962ff]/30 font-semibold">v6 Reference</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Preset Selector */}
+                  <span className="text-[11px] text-[#787b86]">Templates:</span>
+                  <div className="flex items-center gap-1">
+                    {PINE_PRESETS.map((p) => (
+                      <button
+                        key={p.name}
+                        type="button"
+                        onClick={() => {
+                          setPineDraft(p.code);
+                          setPineError(null);
+                        }}
+                        className="rounded px-2 py-0.5 text-[10.5px] bg-[#2a2e39]/80 hover:bg-[#2a2e39] text-[#b2b5be] hover:text-white transition-colors"
+                        title={p.desc}
+                      >
+                        {p.name.replace(/ \(.*\)/, "")}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="h-4 w-[1px] bg-[#2a2e39] mx-1" />
+
+                  {/* Apply Button */}
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      try {
+                        // Validate script compilation first
+                        evaluatePineScript(pineDraft, candles, true);
+                        setPineScript(pineDraft);
+                        localStorage.setItem("atr.chart.pinescript", pineDraft);
+                        setPineError(null);
+                        setPineAppliedMsg(true);
+                        setTimeout(() => setPineAppliedMsg(false), 2000);
+                      } catch (err: any) {
+                        setPineError(err?.message || "Syntax error in script");
+                      }
+                    }}
+                    className="h-6 px-2.5 text-xs bg-[#2962ff] hover:bg-[#2962ff]/90 text-white font-medium flex items-center gap-1"
+                  >
+                    {pineAppliedMsg ? <Check size={12} className="text-emerald-300" /> : <Play size={11} fill="currentColor" />}
+                    <span>{pineAppliedMsg ? "Applied!" : "Apply to Chart"}</span>
+                  </Button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPineEditorOpen(false)}
+                    className="p-1 rounded text-[#787b86] hover:bg-[#2a2e39] hover:text-white"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Code Editor Body with Line Numbers Gutter */}
+              <div className="flex-1 flex bg-[#131722] relative overflow-hidden font-mono text-[12px]">
+                {/* Line numbers gutter */}
+                <div className="w-10 select-none bg-[#0e1117] text-[#4a4e5d] text-right pr-2.5 pt-2 border-r border-[#2a2e39] font-mono text-[11px] leading-relaxed">
+                  {pineDraft.split("\n").map((_, i) => (
+                    <div key={i}>{i + 1}</div>
+                  ))}
+                </div>
+                {/* Textarea */}
+                <textarea
+                  value={pineDraft}
+                  onChange={(e) => setPineDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Tab indent support
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      const start = e.currentTarget.selectionStart;
+                      const end = e.currentTarget.selectionEnd;
+                      const val = pineDraft;
+                      setPineDraft(val.substring(0, start) + "    " + val.substring(end));
+                      setTimeout(() => {
+                        const target = e.target as HTMLTextAreaElement;
+                        if (target) {
+                          target.selectionStart = target.selectionEnd = start + 4;
+                        }
+                      }, 0);
+                    }
+                    // Ctrl+Enter or Cmd+Enter to compile & apply
+                    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      try {
+                        evaluatePineScript(pineDraft, candles, true);
+                        setPineScript(pineDraft);
+                        localStorage.setItem("atr.chart.pinescript", pineDraft);
+                        setPineError(null);
+                        setPineAppliedMsg(true);
+                        setTimeout(() => setPineAppliedMsg(false), 2000);
+                      } catch (err: any) {
+                        setPineError(err?.message || "Syntax error in script");
+                      }
+                    }
+                  }}
+                  spellCheck={false}
+                  placeholder={`// Full TradingView Pine Script v5\n// e.g.:\nfast = ta.ema(close, 9);\nslow = ta.ema(close, 21);\nplot(fast, "Fast EMA", "#00e5ff");\nplot(slow, "Slow EMA", "#ff007f");`}
+                  className="flex-1 h-full bg-transparent text-[#d1d4dc] p-2 leading-relaxed resize-none focus:outline-none selection:bg-[#2962ff]/40 overflow-y-auto whitespace-pre font-mono"
+                />
+              </div>
+
+              {/* Status / Syntax Console Footer */}
+              <div className="px-3 py-1.5 bg-[#171b26] border-t border-[#2a2e39] text-[11px] flex items-center justify-between font-mono">
+                <div className="flex items-center gap-2">
+                  {pineError ? (
+                    <span className="text-[#f23645] flex items-center gap-1.5 font-medium">
+                      <AlertCircle size={13} />
+                      {pineError}
+                    </span>
+                  ) : (
+                    <span className="text-[#089981] flex items-center gap-1.5 font-medium">
+                      <Check size={13} />
+                      Compilation successful · Added to chart
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 text-[#787b86] text-[10.5px]">
+                  <span>Shortcut: <kbd className="bg-[#2a2e39] px-1 py-0.5 rounded text-white text-[10px]">Ctrl</kbd> + <kbd className="bg-[#2a2e39] px-1 py-0.5 rounded text-white text-[10px]">Enter</kbd></span>
+                  <span>|</span>
+                  <span>Built-ins: <span className="text-[#2962ff]">ta.sma</span>, <span className="text-[#2962ff]">ta.ema</span>, <span className="text-[#2962ff]">ta.rsi</span>, <span className="text-[#2962ff]">ta.macd</span>, <span className="text-[#2962ff]">ta.atr</span>, <span className="text-[#2962ff]">plot</span></span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Bottom Date Range Bar (1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, ALL) */}
           <div className="flex h-8 shrink-0 items-center justify-between border-t border-[#2a2e39] bg-[#131722] px-3 text-[11px]">
@@ -1182,6 +1761,262 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* TRADINGVIEW DYNAMIC INDICATOR SETTINGS MODAL                             */}
+      {/* ========================================================================= */}
+      {pineSettingsModalOpen && (() => {
+        const dynamicInputs = parsePineInputs(pineScript);
+        let plots: PineSeriesResult[] = [];
+        let indicatorTitle = "Indicator Settings";
+        try {
+          plots = evaluatePineScript(pineScript, candles, true, "#2962ff", pineInputs, pineStyles);
+          const indMatch = pineScript.match(/indicator\s*\(\s*["']([^"']+)["']/i);
+          if (indMatch) indicatorTitle = indMatch[1];
+        } catch {}
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm animate-in fade-in duration-150">
+            <div
+              className="bg-[#1e222d] border border-[#2a2e39] rounded-xl shadow-2xl w-[480px] max-w-[92vw] flex flex-col overflow-hidden text-[#d1d4dc] font-sans"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#2a2e39] bg-[#171b26]">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal size={16} className="text-[#2962ff]" />
+                  <span className="font-semibold text-white text-sm truncate max-w-[340px]">
+                    {indicatorTitle}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPineSettingsModalOpen(false)}
+                  className="p-1 rounded-md text-[#787b86] hover:bg-[#2a2e39] hover:text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Tabs Bar (TradingView style: Inputs | Style | Visibility) */}
+              <div className="flex items-center gap-6 px-5 border-b border-[#2a2e39] bg-[#1e222d] text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setPineSettingsActiveTab("inputs")}
+                  className={cn(
+                    "py-2.5 transition-colors border-b-2 font-medium tracking-wide",
+                    pineSettingsActiveTab === "inputs"
+                      ? "border-[#2962ff] text-[#2962ff]"
+                      : "border-transparent text-[#787b86] hover:text-white"
+                  )}
+                >
+                  Inputs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPineSettingsActiveTab("style")}
+                  className={cn(
+                    "py-2.5 transition-colors border-b-2 font-medium tracking-wide",
+                    pineSettingsActiveTab === "style"
+                      ? "border-[#2962ff] text-[#2962ff]"
+                      : "border-transparent text-[#787b86] hover:text-white"
+                  )}
+                >
+                  Style
+                </button>
+              </div>
+
+              {/* Tab Contents Body */}
+              <div className="p-5 max-h-[360px] overflow-y-auto space-y-4 text-xs">
+                {pineSettingsActiveTab === "inputs" && (
+                  <>
+                    {dynamicInputs.length === 0 ? (
+                      <div className="text-center py-8 text-[#787b86] font-mono text-xs">
+                        No configurable inputs defined in this indicator script.
+                      </div>
+                    ) : (
+                      <div className="space-y-3.5">
+                        {dynamicInputs.map((inputDef) => {
+                          const currentValue = pineInputs[inputDef.id] !== undefined
+                            ? pineInputs[inputDef.id]
+                            : inputDef.defval;
+
+                          return (
+                            <div key={inputDef.id} className="flex items-center justify-between gap-4">
+                              <label className="text-white font-medium text-xs truncate max-w-[200px]" title={inputDef.title}>
+                                {inputDef.title}
+                              </label>
+
+                              <div className="flex items-center">
+                                {inputDef.type === "bool" ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(currentValue)}
+                                    onChange={(e) => {
+                                      const updated = { ...pineInputs, [inputDef.id]: e.target.checked };
+                                      setPineInputs(updated);
+                                      localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
+                                    }}
+                                    className="h-4 w-4 rounded bg-[#131722] border-[#2a2e39] text-[#2962ff] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                  />
+                                ) : inputDef.type === "color" ? (
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="color"
+                                      value={String(currentValue).startsWith("#") ? String(currentValue) : "#2962ff"}
+                                      onChange={(e) => {
+                                        const updated = { ...pineInputs, [inputDef.id]: e.target.value };
+                                        setPineInputs(updated);
+                                        localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
+                                      }}
+                                      className="w-7 h-7 rounded border border-[#2a2e39] bg-transparent cursor-pointer p-0"
+                                    />
+                                    <span className="font-mono text-[11px] text-[#787b86]">{currentValue}</span>
+                                  </div>
+                                ) : (
+                                  <input
+                                    type={inputDef.type === "int" || inputDef.type === "float" ? "number" : "text"}
+                                    step={inputDef.step ?? (inputDef.type === "float" ? "0.1" : "1")}
+                                    min={inputDef.minval}
+                                    max={inputDef.maxval}
+                                    value={currentValue ?? ""}
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      let parsedVal: any = raw;
+                                      if (inputDef.type === "int") parsedVal = parseInt(raw, 10) || 0;
+                                      else if (inputDef.type === "float") parsedVal = parseFloat(raw) || 0;
+                                      const updated = { ...pineInputs, [inputDef.id]: parsedVal };
+                                      setPineInputs(updated);
+                                      localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
+                                    }}
+                                    className="w-24 px-2 py-1.5 rounded bg-[#131722] border border-[#2a2e39] text-white text-right font-mono text-xs focus:outline-none focus:border-[#2962ff]"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {pineSettingsActiveTab === "style" && (
+                  <div className="space-y-3.5">
+                    {plots.length === 0 ? (
+                      <div className="text-center py-8 text-[#787b86] font-mono text-xs">
+                        No plot outputs to customize.
+                      </div>
+                    ) : (
+                      plots.map((p) => {
+                        const styleConfig = pineStyles[p.name] || {};
+                        const currentColor = styleConfig.color || p.color;
+                        const currentWidth = styleConfig.lineWidth ?? p.lineWidth ?? 2;
+                        const isVisible = styleConfig.visible !== false;
+
+                        return (
+                          <div key={p.name} className="flex items-center justify-between gap-3 border-b border-[#2a2e39]/40 pb-2.5">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isVisible}
+                                onChange={(e) => {
+                                  const updated = {
+                                    ...pineStyles,
+                                    [p.name]: { ...styleConfig, visible: e.target.checked },
+                                  };
+                                  setPineStyles(updated);
+                                  localStorage.setItem("atr.chart.pinestyles", JSON.stringify(updated));
+                                }}
+                                className="h-4 w-4 rounded bg-[#131722] border-[#2a2e39] text-[#2962ff] cursor-pointer"
+                              />
+                              <span className="font-medium text-white text-xs truncate max-w-[160px]" title={p.name}>
+                                {p.name}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              {/* Color Picker */}
+                              <input
+                                type="color"
+                                value={currentColor.startsWith("#") ? currentColor : "#2962ff"}
+                                onChange={(e) => {
+                                  const updated = {
+                                    ...pineStyles,
+                                    [p.name]: { ...styleConfig, color: e.target.value },
+                                  };
+                                  setPineStyles(updated);
+                                  localStorage.setItem("atr.chart.pinestyles", JSON.stringify(updated));
+                                }}
+                                className="w-6 h-6 rounded border border-[#2a2e39] bg-transparent cursor-pointer p-0"
+                              />
+
+                              {/* Line Width Selector */}
+                              <Select
+                                size="sm"
+                                className="w-20"
+                                value={String(currentWidth)}
+                                onChange={(v) => {
+                                  const updated = {
+                                    ...pineStyles,
+                                    [p.name]: { ...styleConfig, lineWidth: parseInt(v, 10) },
+                                  };
+                                  setPineStyles(updated);
+                                  localStorage.setItem("atr.chart.pinestyles", JSON.stringify(updated));
+                                }}
+                                options={[
+                                  { value: "1", label: "1 px" },
+                                  { value: "2", label: "2 px" },
+                                  { value: "3", label: "3 px" },
+                                  { value: "4", label: "4 px" },
+                                ]}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between px-5 py-3 border-t border-[#2a2e39] bg-[#171b26] text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPineInputs({});
+                    setPineStyles({});
+                    localStorage.removeItem("atr.chart.pineinputs");
+                    localStorage.removeItem("atr.chart.pinestyles");
+                  }}
+                  className="text-[#787b86] hover:text-white transition-colors"
+                >
+                  Reset to Defaults
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setPineSettingsModalOpen(false)}
+                    className="h-7 px-3 text-xs bg-[#2a2e39] text-white hover:bg-[#2a2e39]/80"
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => setPineSettingsModalOpen(false)}
+                    className="h-7 px-3 text-xs bg-[#2962ff] text-white hover:bg-[#2962ff]/90"
+                  >
+                    Ok
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

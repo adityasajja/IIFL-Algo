@@ -11,7 +11,6 @@
 import {
   BookmarkCheck,
   ChevronDown,
-  Loader2,
   Play,
   Plus,
   Save,
@@ -29,7 +28,9 @@ import {
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
+import { ButtonLoader } from "./components/ui/loading";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
 
@@ -129,26 +130,19 @@ function ConditionRow({
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5">
       {/* LHS indicator */}
-      <select
+      <Select
+        size="sm"
         value={cond.indicator}
-        onChange={(e) => {
-          const meta = IND_BY_ID[e.target.value];
+        onChange={(v) => {
+          const meta = IND_BY_ID[v];
           onChange({
             ...cond,
-            indicator: e.target.value,
+            indicator: v,
             period: meta?.hasPeriod ? (meta.defaultPeriod ?? 14) : undefined,
           });
         }}
-        className="rounded-md border border-border/60 bg-background px-2 py-1 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
-      >
-        {["Price", "MA", "Momentum", "Volatility", "Volume", "Returns"].map((cat) => (
-          <optgroup key={cat} label={cat}>
-            {INDICATORS.filter((i) => i.category === cat).map((i) => (
-              <option key={i.id} value={i.id}>{i.label}</option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+        options={INDICATORS.map((i) => ({ value: i.id, label: i.label }))}
+      />
 
       {/* LHS period */}
       {lhsMeta?.hasPeriod && (
@@ -163,15 +157,12 @@ function ConditionRow({
       )}
 
       {/* Operator */}
-      <select
+      <Select
+        size="sm"
         value={cond.op}
-        onChange={(e) => onChange({ ...cond, op: e.target.value })}
-        className="rounded-md border border-border/60 bg-background px-2 py-1 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
-      >
-        {OPERATORS.map((o) => (
-          <option key={o.id} value={o.id}>{o.label}</option>
-        ))}
-      </select>
+        onChange={(v) => onChange({ ...cond, op: v })}
+        options={OPERATORS.map((o) => ({ value: o.id, label: o.label }))}
+      />
 
       {/* RHS type toggle */}
       {!isCross && (
@@ -198,22 +189,19 @@ function ConditionRow({
         />
       ) : !isCross ? (
         <>
-          <select
+          <Select
+            size="sm"
             value={cond.rhs_indicator ?? "sma"}
-            onChange={(e) => {
-              const meta = IND_BY_ID[e.target.value];
+            onChange={(v) => {
+              const meta = IND_BY_ID[v];
               onChange({
                 ...cond,
-                rhs_indicator: e.target.value,
+                rhs_indicator: v,
                 rhs_period: meta?.hasPeriod ? (meta.defaultPeriod ?? 20) : undefined,
               });
             }}
-            className="rounded-md border border-border/60 bg-background px-2 py-1 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {INDICATORS.filter((i) => i.category === "MA" || i.category === "Price" || i.category === "Momentum").map((i) => (
-              <option key={i.id} value={i.id}>{i.label}</option>
-            ))}
-          </select>
+            options={INDICATORS.filter((i) => i.category === "MA" || i.category === "Price" || i.category === "Momentum").map((i) => ({ value: i.id, label: i.label }))}
+          />
           {IND_BY_ID[cond.rhs_indicator ?? "sma"]?.hasPeriod && (
             <input
               type="number"
@@ -228,22 +216,19 @@ function ConditionRow({
       ) : (
         /* crosses_above/below — RHS is always an indicator */
         <>
-          <select
+          <Select
+            size="sm"
             value={cond.rhs_indicator ?? "sma"}
-            onChange={(e) => {
-              const meta = IND_BY_ID[e.target.value];
+            onChange={(v) => {
+              const meta = IND_BY_ID[v];
               onChange({
                 ...cond,
-                rhs_indicator: e.target.value,
+                rhs_indicator: v,
                 rhs_period: meta?.hasPeriod ? (meta.defaultPeriod ?? 20) : undefined,
               });
             }}
-            className="rounded-md border border-border/60 bg-background px-2 py-1 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {INDICATORS.filter((i) => i.category === "MA" || i.category === "Price" || i.category === "Momentum").map((i) => (
-              <option key={i.id} value={i.id}>{i.label}</option>
-            ))}
-          </select>
+            options={INDICATORS.filter((i) => i.category === "MA" || i.category === "Price" || i.category === "Momentum").map((i) => ({ value: i.id, label: i.label }))}
+          />
           {IND_BY_ID[cond.rhs_indicator ?? "sma"]?.hasPeriod && (
             <input
               type="number"
@@ -522,7 +507,7 @@ export default function CustomScannerPanel({
             disabled={running || conditions.length === 0}
             className="gap-2"
           >
-            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {running ? <ButtonLoader size={16} /> : <Play className="h-4 w-4" />}
             {running ? "Scanning…" : "Run scan"}
           </Button>
 

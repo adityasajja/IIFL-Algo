@@ -4,7 +4,8 @@ import {
   BarChart3,
   Check,
   Columns3,
-  Loader2,
+  Ellipsis,
+  ListChecks,
   Pencil,
   Plus,
   RefreshCw,
@@ -35,9 +36,12 @@ import {
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
+import { ButtonLoader, PageLoader } from "./components/ui/loading";
 import { Input } from "./components/ui/input";
 import { Switch } from "./components/ui/switch";
 import { cn } from "./lib/utils";
+import { setVisibleInterval } from "./lib/visibleInterval";
+import { useDialog } from "./components/ui/dialog-context";
 
 interface Props {
   /** Effective permissions of the signed-in principal, from `/auth/me`. */
@@ -99,6 +103,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const dialog = useDialog();
 
   const [live, setLive] = useState(true);
   const [showColumns, setShowColumns] = useState(false);
@@ -226,7 +231,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
   // the user has already navigated away from.
   useEffect(() => {
     if (!live || !activeId) return;
-    const t = setInterval(() => void loadQuotes(activeId, true), LIVE_REFRESH_MS);
+    const t = setVisibleInterval(() => void loadQuotes(activeId, true), LIVE_REFRESH_MS);
     return () => clearInterval(t);
   }, [live, activeId, loadQuotes]);
 
@@ -279,7 +284,6 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
       const created = await createWatchlist({ name, exchange: detail?.exchange ?? "NSEEQ" });
       setNewName("");
       setRenaming(false);
-      setNotice(`Created “${created.name}”.`);
       await loadLists(created.watchlist_id);
     } catch (e) {
       report(e);
@@ -313,12 +317,17 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
 
   async function removeList() {
     if (!activeId || !detail) return;
-    if (!window.confirm(`Delete “${detail.name}” and its ${detail.items.length} symbols?`)) return;
+    const ok = await dialog.confirm({
+      title: `Delete “${detail.name}”?`,
+      description: `${detail.items.length} ${detail.items.length === 1 ? "stock" : "stocks"} will be removed with it.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
       await deleteWatchlist(activeId);
-      setNotice(`Deleted “${detail.name}”.`);
       setActiveId(null);
       setDetail(null);
       setQuotes(null);
@@ -432,12 +441,103 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
 
   // ── render ─────────────────────────────────────────────────────────────────
   const staleCount = quotes?.rows.filter((r) => r.stale).length ?? 0;
-  const noHistory = quotes?.rows.filter((r) => r.error).length ?? 0;
+  // Sorting is a view over the list, never a change to it: the stored order is
+  // the user's own and clearing the sort returns to it. Several keys sort in
+  // priority order (Shift+click adds one), so ties on the first fall to the next.
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }[]>([]);
+  useEffect(() => setSort([]), [detail?.watchlist_id]);
+
+  const sortedRows = useMemo(() => {
+    const items = (detail?.items ?? []).map((symbol, index) => ({ symbol, index }));
+    if (sort.length === 0) return items;
+    const valueOf = (symbol: string, key: string): unknown =>
+      key === "symbol" ? symbol : quotes?.rows.find((r) => r.symbol === symbol)?.[key];
+    const missing = (v: unknown) => v === null || v === undefined || v === "";
+    return [...items].sort((a, b) => {
+      for (const { key, dir } of sort) {
+        const va = valueOf(a.symbol, key);
+        const vb = valueOf(b.symbol, key);
+        // Missing values sink to the bottom in either direction.
+        if (missing(va) && missing(vb)) continue;
+        if (missing(va)) return 1;
+        if (missing(vb)) return -1;
+        const cmp =
+          typeof va === "number" && typeof vb === "number"
+            ? va - vb
+            : String(va).localeCompare(String(vb));
+        if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+      }
+      return 0;
+    });
+  }, [detail?.items, quotes, sort]);
+
+  /** Click replaces the sort; Shift+click adds to it. Each key cycles first -> reverse -> off. */
+  function toggleSort(key: string, firstDir: "asc" | "desc", additive: boolean) {
+    const reverse: "asc" | "desc" = firstDir === "asc" ? "desc" : "asc";
+    type Spec = { key: string; dir: "asc" | "desc" };
+    setSort((cur) => {
+      const existing = cur.find((c) => c.key === key);
+      const next: Spec | null = !existing ? { key, dir: firstDir } : existing.dir === firstDir ? { key, dir: reverse } : null;
+      if (!additive) return next ? [next] : [];
+      const others = cur.filter((c) => c.key !== key);
+      // Keep the key's place in the priority order when it flips direction.
+      if (existing && next) return cur.map((c) => (c.key === key ? next : c));
+      return next ? [...others, next] : others;
+    });
+  }
+  const sortOf = (key: string) => {
+    const i = sort.findIndex((c) => c.key === key);
+    return i < 0 ? { dir: null, rank: null } : { dir: sort[i].dir, rank: sort.length > 1 ? i + 1 : null };
+  };
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [menuOpen]);
 
   if (loading && !lists) {
     return (
       <Card className="grid place-items-center p-10 text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" />
+        <PageLoader />
+      </Card>
+    );
+  }
+
+  if (lists && lists.length === 0) {
+    return (
+      <Card className="mx-auto grid max-w-md justify-items-center gap-4 px-8 py-14 text-center">
+        <span className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+          <ListChecks className="size-6" />
+        </span>
+        <div>
+          <div className="text-base font-semibold">Follow the stocks you care about</div>
+          <p className="mt-1 text-sm text-muted-foreground">Make a list and watch live prices.</p>
+        </div>
+        {mayWrite ? (
+          <div className="flex w-full items-center gap-2">
+            <div className="min-w-0 flex-1 text-left">
+              <Input
+                value={newName}
+                onChange={setNewName}
+                placeholder="Name your list"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newName.trim()) void createList();
+                }}
+              />
+            </div>
+            <Button disabled={busy || !newName.trim()} onClick={() => void createList()}>
+              Create
+            </Button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Ask an owner to create one.</p>
+        )}
       </Card>
     );
   }
@@ -489,9 +589,23 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
         ) : null}
 
         {lists && lists.length === 0 && !renaming ? (
-          <Hint className="px-1 py-2">
-            No watchlists yet. {mayWrite ? "Create one to start tracking symbols." : "Ask an owner to create one."}
-          </Hint>
+          <div className="grid justify-items-center gap-2.5 px-2 py-6 text-center">
+            <Hint>
+              {mayWrite ? "Group the symbols you follow." : "Ask an owner to create one."}
+            </Hint>
+            {mayWrite ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setRenaming(true);
+                  setNewName("");
+                }}
+              >
+                <Plus className="size-3.5" /> New watchlist
+              </Button>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="grid gap-1">
@@ -525,7 +639,9 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
           <Hint>
             {error
               ? error
-              : "Select a watchlist, or create one. Every list is scoped to your account."}
+              : lists && lists.length === 0
+                ? "Your watchlists and their live quotes appear here."
+                : "Select a watchlist. Every list is scoped to your account."}
           </Hint>
         ) : (
           <>
@@ -541,10 +657,9 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                   ) : null}
                 </h3>
                 <Hint>
-                  {detail.items.length} symbols · {detail.exchange} ·{" "}
-                  {quotes ? `source ${quotes.source}` : "loading quotes…"}
-                  {staleCount > 0 ? ` · ${staleCount} from cache` : ""}
-                  {noHistory > 0 ? ` · ${noHistory} with no local history` : ""}
+                  {detail.items.length} {detail.items.length === 1 ? "stock" : "stocks"}
+                  {quotes ? "" : " · loading prices…"}
+                  {staleCount > 0 ? ` · ${staleCount} delayed` : ""}
                 </Hint>
               </div>
 
@@ -569,39 +684,56 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                   Columns
                 </Button>
                 {mayWrite ? (
-                  <>
+                  <div className="relative" ref={menuRef}>
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => {
-                        setRenaming((v) => !v);
-                        setRenameValue(detail.name);
-                      }}
-                      title="Rename"
+                      onClick={() => setMenuOpen((v) => !v)}
+                      title="More"
+                      aria-label="More"
                     >
-                      <Pencil className="size-3.5" />
+                      <Ellipsis className="size-3.5" />
                     </Button>
-                    {!detail.is_default ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={busy}
-                        onClick={() => void makeDefault()}
-                        title="Make this my default list"
-                      >
-                        <Star className="size-3.5" />
-                      </Button>
+                    {menuOpen ? (
+                      <div className="absolute right-0 top-full z-20 mt-1.5 w-48 overflow-hidden rounded-xl border border-border bg-card p-1 shadow-lg">
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-muted"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setRenaming(true);
+                            setRenameValue(detail.name);
+                          }}
+                        >
+                          <Pencil className="size-3.5 text-muted-foreground" /> Rename
+                        </button>
+                        {!detail.is_default ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-muted"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              void makeDefault();
+                            }}
+                          >
+                            <Star className="size-3.5 text-muted-foreground" /> Make default
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void removeList();
+                          }}
+                        >
+                          <Trash2 className="size-3.5" /> Delete
+                        </button>
+                      </div>
                     ) : null}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={busy}
-                      onClick={() => void removeList()}
-                      title="Delete this watchlist"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </>
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -649,7 +781,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                     placeholder="RELIANCE, INFY-EQ — or paste a list"
                     rightIcon={
                       searching ? (
-                        <Loader2 className="size-4 animate-spin" />
+                        <ButtonLoader size={16} />
                       ) : draft ? (
                         <button
                           type="button"
@@ -736,26 +868,41 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
 
             {/* ── the table ──────────────────────────────────────────────── */}
             {detail.items.length === 0 ? (
-              <Hint className="mt-4">
-                No symbols yet.{mayWrite ? " Add one above." : ""}
-              </Hint>
+              <div className="mt-2" />
             ) : (
               <div className="mt-3 overflow-x-auto rounded-xl border border-border">
                 <table className="w-full border-collapse text-[13px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-left">
                       <th className="w-8 px-2 py-2" />
-                      <th className="px-3 py-2 font-semibold">Symbol</th>
+                      <th
+                        className="px-3 py-2 font-semibold"
+                        aria-sort={sortOf("symbol").dir === "asc" ? "ascending" : sortOf("symbol").dir === "desc" ? "descending" : "none"}
+                      >
+                        <SortButton
+                          label="Symbol"
+                          {...sortOf("symbol")}
+                          onClick={(additive) => toggleSort("symbol", "asc", additive)}
+                        />
+                      </th>
                       {activeSpecs.map((c) => (
-                        <th key={c.key} className="px-3 py-2 text-right font-semibold">
-                          {c.label}
+                        <th
+                          key={c.key}
+                          className="px-3 py-2 text-right font-semibold"
+                          aria-sort={sortOf(c.key).dir === "asc" ? "ascending" : sortOf(c.key).dir === "desc" ? "descending" : "none"}
+                        >
+                          <SortButton
+                            label={columnLabel(c)}
+                            {...sortOf(c.key)}
+                            onClick={(additive) => toggleSort(c.key, "desc", additive)}
+                          />
                         </th>
                       ))}
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.items.map((symbol, index) => {
+                    {sortedRows.map(({ symbol, index }) => {
                       const row = quotes?.rows.find((r) => r.symbol === symbol);
                       return (
                         <tr
@@ -832,6 +979,8 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                             <div className="flex items-center justify-end gap-0.5">
                               {mayWrite ? (
                                 <>
+                                  {sort.length === 0 ? (
+                                    <>
                                   <button
                                     type="button"
                                     title="Move up"
@@ -850,6 +999,8 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                                   >
                                     <ArrowDown className="size-3.5" />
                                   </button>
+                                    </>
+                                  ) : null}
                                   <button
                                     type="button"
                                     title="Remove from this list"
@@ -879,12 +1030,20 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
               </div>
             )}
 
-            <Hint className="mt-3">
-              Prices come from the local daily cache and are overlaid with live broker
-              quotes when a session is active. A row with a green dot is live; amber means
-              the cached close; red means there is no local history for that symbol.
-              {!mayWrite ? " Your role can read this list but not change it." : ""}
-            </Hint>
+            {detail.items.length > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500" /> Live
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-amber-500" /> Delayed
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-rose-500" /> No data
+                </span>
+                {!mayWrite ? <span className="ml-auto">View only</span> : null}
+              </div>
+            ) : null}
           </>
         )}
       </Card>
@@ -899,6 +1058,24 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
  * what they need. Hiding them would leave the user wondering why market cap is
  * missing; showing them as zero would be a lie.
  */
+// Friendlier names than the registry's shorthand. The registry keeps the technical
+// label; this is what a person reads, in the picker and the table header alike.
+const COLUMN_LABELS: Record<string, string> = {
+  ltp: "Price",
+  range_pct: "Day range %",
+  volume_ratio: "Volume vs avg",
+  vwap: "VWAP",
+  atr14: "Volatility (ATR)",
+  atr_pct: "Volatility %",
+  rsi14: "RSI",
+  bars: "Days of data",
+  last_bar_date: "Last update",
+};
+const GROUP_LABELS: Record<string, string> = { provenance: "Data" };
+
+const columnLabel = (c: { key: string; label: string }) => COLUMN_LABELS[c.key] ?? c.label;
+const groupLabel = (g: string) => GROUP_LABELS[g] ?? g.charAt(0).toUpperCase() + g.slice(1);
+
 function ColumnPicker({
   specs,
   selected,
@@ -910,9 +1087,11 @@ function ColumnPicker({
   disabled: boolean;
   onToggle: (key: string) => void;
 }) {
+  // Columns with no data source can't be turned on, so offering them is clutter.
   const groups = useMemo(() => {
     const map = new Map<string, ColumnSpec[]>();
     for (const s of specs) {
+      if (!s.available) continue;
       const list = map.get(s.group) ?? [];
       list.push(s);
       map.set(s.group, list);
@@ -923,59 +1102,80 @@ function ColumnPicker({
   if (specs.length === 0) {
     return (
       <div className="mt-3 rounded-xl border border-border p-3">
-        <Hint>Loading the column registry…</Hint>
+        <Hint>Loading…</Hint>
       </div>
     );
   }
 
   return (
-    <div className="mt-3 rounded-xl border border-border bg-muted/20 p-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {groups.map(([group, items]) => (
-          <div key={group}>
-            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {group}
-            </div>
-            <div className="grid gap-0.5">
-              {items.map((c) => {
-                const on = selected.includes(c.key);
-                return (
-                  <button
-                    key={c.key}
-                    type="button"
-                    disabled={disabled || !c.available}
-                    onClick={() => onToggle(c.key)}
-                    title={c.available ? c.description : `Not collected yet — requires ${c.requires}`}
-                    className={cn(
-                      "flex items-center gap-2 rounded px-1.5 py-1 text-left text-[12.5px] transition-colors",
-                      !c.available
-                        ? "cursor-not-allowed text-muted-foreground/50"
-                        : on
-                          ? "text-foreground hover:bg-muted/60"
-                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "grid size-3.5 shrink-0 place-items-center rounded border",
-                        on && c.available
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border",
-                      )}
-                    >
-                      {on && c.available ? <Check className="size-2.5" /> : null}
-                    </span>
-                    <span className="truncate">{c.label}</span>
-                    {!c.available ? (
-                      <span className="ml-auto shrink-0 text-[10px] italic">needs {c.requires}</span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="mt-3 space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+      {groups.map(([group, items]) => (
+        <div key={group} className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span className="w-20 shrink-0 text-xs text-muted-foreground">{groupLabel(group)}</span>
+          {items.map((c) => {
+            const on = selected.includes(c.key);
+            return (
+              <button
+                key={c.key}
+                type="button"
+                disabled={disabled}
+                onClick={() => onToggle(c.key)}
+                title={c.description}
+                aria-pressed={on}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-50",
+                  on
+                    ? "border-primary/40 bg-primary/10 text-foreground"
+                    : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+                )}
+              >
+                {on ? <Check className="size-3 text-primary" /> : null}
+                {columnLabel(c)}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
+  );
+}
+
+/** A column header you can click to sort by. The arrow only shows once it is active. */
+function SortButton({
+  label,
+  dir,
+  rank,
+  onClick,
+}: {
+  label: string;
+  dir: "asc" | "desc" | null;
+  /** Position in a multi-column sort (1 = first); null when there is only one. */
+  rank: number | null;
+  onClick: (additive: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => onClick(e.shiftKey)}
+      title="Click to sort · Shift+click to add a second sort"
+      className={cn(
+        "group inline-flex items-center gap-1 font-semibold transition-colors hover:text-foreground",
+        dir ? "text-foreground" : "",
+      )}
+    >
+      {label}
+      {dir === "desc" ? (
+        <ArrowDown className="size-3" />
+      ) : dir === "asc" ? (
+        <ArrowUp className="size-3" />
+      ) : (
+        <ArrowDown className="size-3 opacity-0 transition-opacity group-hover:opacity-40" />
+      )}
+      {rank !== null ? (
+        <span className="grid size-4 place-items-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+          {rank}
+        </span>
+      ) : null}
+    </button>
   );
 }

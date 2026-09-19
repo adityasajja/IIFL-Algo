@@ -21,7 +21,7 @@
  *  3. **"Could not be measured" is never rendered as a failure.** The backend
  *     distinguishes the two; collapsing them here would throw that away.
  */
-import { AlertTriangle, ChevronDown, ChevronRight, Loader2, Plus, Save, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   screenerColumns,
@@ -43,7 +43,9 @@ import {
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { ButtonLoader } from "./components/ui/loading";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { cn } from "./lib/utils";
 
 // ─── operators ────────────────────────────────────────────────────────────────
@@ -212,25 +214,24 @@ function ConditionRow({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select
+      <Select
+        size="sm"
         value={draft.indicator}
-        onChange={(e) => {
-          const next = byKey.get(e.target.value);
+        onChange={(v) => {
+          const next = byKey.get(v);
           onChange({
             ...draft,
-            indicator: e.target.value,
+            indicator: v,
             period: next?.takes_period && !draft.period ? String(next.default_period ?? 14) : draft.period,
           });
         }}
-        className="min-w-[13rem] rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-      >
-        {indicators.map((ind) => (
-          <option key={ind.key} value={ind.key} disabled={!ind.available}>
-            {ind.label}
-            {ind.available ? "" : " — unavailable"}
-          </option>
-        ))}
-      </select>
+        options={indicators.map((ind) => ({
+          value: ind.key,
+          label: `${ind.label}${ind.available ? "" : " — unavailable"}`,
+          disabled: !ind.available,
+        }))}
+        className="min-w-[13rem]"
+      />
 
       {spec?.takes_period ? (
         <input
@@ -242,17 +243,12 @@ function ConditionRow({
         />
       ) : null}
 
-      <select
+      <Select
+        size="sm"
         value={draft.op}
-        onChange={(e) => onChange({ ...draft, op: e.target.value })}
-        className="rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-      >
-        {OPERATORS.map((op) => (
-          <option key={op.id} value={op.id}>
-            {op.label}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onChange({ ...draft, op: v })}
+        options={OPERATORS.map((op) => ({ value: op.id, label: op.label }))}
+      />
 
       {isBetween ? (
         <>
@@ -272,33 +268,24 @@ function ConditionRow({
         </>
       ) : (
         <>
-          <select
+          <Select
+            size="sm"
             value={draft.rhsKind}
-            onChange={(e) => onChange({ ...draft, rhsKind: e.target.value as "value" | "indicator" })}
-            className="rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-          >
-            {RHS_KINDS.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => onChange({ ...draft, rhsKind: v as "value" | "indicator" })}
+            options={RHS_KINDS.map((k) => ({ value: k.id, label: k.label }))}
+          />
 
           {draft.rhsKind === "indicator" ? (
             <>
-              <select
+              <Select
+                size="sm"
                 value={draft.rhsIndicator}
-                onChange={(e) => onChange({ ...draft, rhsIndicator: e.target.value })}
-                className="min-w-[10rem] rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-              >
-                {indicators
+                onChange={(v) => onChange({ ...draft, rhsIndicator: v })}
+                options={indicators
                   .filter((i) => i.available)
-                  .map((ind) => (
-                    <option key={ind.key} value={ind.key}>
-                      {ind.label}
-                    </option>
-                  ))}
-              </select>
+                  .map((ind) => ({ value: ind.key, label: ind.label }))}
+                className="min-w-[10rem]"
+              />
               {byKey.get(draft.rhsIndicator)?.takes_period && !spec?.takes_period ? (
                 <input
                   value={draft.rhsPeriod}
@@ -366,14 +353,15 @@ function GroupEditor({
       )}
     >
       <div className="mb-2 flex items-center gap-2">
-        <select
+        <Select
+          size="sm"
           value={group.match}
-          onChange={(e) => onChange({ ...group, match: e.target.value as "all" | "any" })}
-          className="rounded-lg border border-border bg-card px-2 py-1 text-[12px] font-semibold uppercase tracking-wide outline-none focus:border-primary"
-        >
-          <option value="all">Match ALL (AND)</option>
-          <option value="any">Match ANY (OR)</option>
-        </select>
+          onChange={(v) => onChange({ ...group, match: v as "all" | "any" })}
+          options={[
+            { value: "all", label: "Match ALL (AND)" },
+            { value: "any", label: "Match ANY (OR)" },
+          ]}
+        />
         {depth > 0 ? (
           <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
             nested group
@@ -607,7 +595,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                 <Save className="h-3.5 w-3.5" /> Save
               </Button>
               <Button size="sm" onClick={run} disabled={running || validation?.valid === false}>
-                {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                {running ? <ButtonLoader /> : <Search className="h-3.5 w-3.5" />}
                 {running ? "Scanning…" : "Run scan"}
               </Button>
             </div>
@@ -618,47 +606,38 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted-foreground">Universe</span>
-              <select
+              <Select
+                size="sm"
                 value={universe}
-                onChange={(e) => setUniverse(e.target.value)}
-                className="min-w-[12rem] rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-              >
-                {universes.map((u) => (
-                  <option key={u.name} value={u.name}>
-                    {u.label} ({u.size})
-                  </option>
-                ))}
-              </select>
+                onChange={setUniverse}
+                options={universes.map((u) => ({
+                  value: u.name,
+                  label: `${u.label} (${u.size})`,
+                }))}
+                className="min-w-[12rem]"
+              />
             </label>
 
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted-foreground">Rank by</span>
-              <select
+              <Select
+                size="sm"
                 value={sort}
-                onChange={(e) => setSort(e.target.value)}
-                className="rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-              >
-                {["rel_volume", "change_pct", "atr_pct", "rsi14", "volume", "ltp", "symbol"].map((s) => (
-                  <option key={s} value={s}>
-                    {COL_LABELS[s] ?? s}
-                  </option>
-                ))}
-              </select>
+                onChange={setSort}
+                options={["rel_volume", "change_pct", "atr_pct", "rsi14", "volume", "ltp", "symbol"].map(
+                  (s) => ({ value: s, label: COL_LABELS[s] ?? s }),
+                )}
+              />
             </label>
 
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted-foreground">Max rows</span>
-              <select
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
-                className="rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
-              >
-                {[25, 50, 100, 200].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
+              <Select
+                size="sm"
+                value={String(limit)}
+                onChange={(v) => setLimit(Number(v))}
+                options={[25, 50, 100, 200].map((n) => ({ value: String(n), label: String(n) }))}
+              />
             </label>
           </div>
 

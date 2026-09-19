@@ -12,6 +12,7 @@ import { Button } from "./components/ui/button";
 import { Card, CardHeader, Hint } from "./components/ui/card";
 import { EquityChart } from "./components/ui/equity-chart";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import {
   Badge,
@@ -27,6 +28,7 @@ import { cn } from "./lib/utils";
 import ValidationPanel from "./ValidationPanel";
 import EpisodicPivotPanel from "./EpisodicPivotPanel";
 import AlphaHuntPanel from "./AlphaHuntPanel";
+import { humanizeSentence, strategyLabel } from "./lib/format";
 
 type Source = "cache" | "fetch" | "synthetic";
 
@@ -89,7 +91,7 @@ function previewLine(strategy: string, source: Source, nSymbols: number, search:
         ? "on broker history (~6 years)"
         : "on computer-generated prices";
   const search_ = search ? " It will search a grid of settings to be honest about the bar." : "";
-  return `Will test ${strategy} against ${stocks} ${data}.${search_}`;
+  return `Will test ${strategyLabel(strategy)} against ${stocks} ${data}.${search_}`;
 }
 
 
@@ -251,7 +253,7 @@ export default function ResearchPanel({
   const beats = oos && bench ? oos.sharpe > bench.sharpe : null;
 
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-4">
       {/* When the Evidence section drives the view, its own sub-tabs are the
           switcher — showing a second one here would just be two controls
           fighting over the same state. */}
@@ -399,20 +401,14 @@ export default function ResearchPanel({
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <label className="px-1 text-sm font-medium text-foreground">What to test</label>
-              <select
+              <Select
                 value={strategy}
-                onChange={(e) => setStrategy(e.target.value)}
-                className="h-11 w-full rounded-full border border-border bg-transparent px-3.5 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 [&>option]:bg-card"
-              >
-                {(strategies.length
+                onChange={setStrategy}
+                options={(strategies.length
                   ? strategies.map((s) => s.name)
                   : ["signals_entry", "sma_crossover"]
-                ).map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                ).map((s) => ({ value: s, label: strategyLabel(s) }))}
+              />
             </div>
             <Input
               label="Which stocks? (blank = your default list)"
@@ -629,7 +625,7 @@ export default function ResearchPanel({
                       <th className="px-3 py-2 font-semibold">Test</th>
                       {pKeys.map((k) => (
                         <th key={k} className="px-3 py-2 font-semibold">
-                          {k.replace("param_", "")}
+                          {humanizeSentence(k.replace("param_", ""))}
                         </th>
                       ))}
                       <th className="px-3 py-2 text-right font-semibold">Train Sharpe</th>
