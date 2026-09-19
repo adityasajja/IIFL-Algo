@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { API_URL, getScan, type ScanRow } from "./api";
-import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
@@ -190,24 +189,23 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
 
       {visible && (
         <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-          <table className="w-full border-collapse text-[13px]">
+          <table className="w-full border-collapse whitespace-nowrap text-[13px]">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
-                <th className="px-3 py-2 font-semibold">Symbol</th>
+                <th className="px-2 py-2 font-semibold">Symbol</th>
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
                     onClick={() => onSort(c.key)}
                     title="sort"
-                    className="cursor-pointer select-none px-3 py-2 text-right font-semibold hover:text-foreground"
+                    className="cursor-pointer select-none px-2 py-2 text-right font-semibold hover:text-foreground"
                   >
                     {c.label}
                     {sortKey === c.key ? (sortDir === -1 ? " ▼" : " ▲") : ""}
                   </th>
                 ))}
-                <th className="px-3 py-2 font-semibold">Trend</th>
-                <th className="px-3 py-2 font-semibold">Signal</th>
-                <th className="px-3 py-2" />
+                <th className="px-2 py-2 font-semibold">Trend</th>
+                <th className="px-2 py-2 font-semibold">Signal</th>
               </tr>
             </thead>
             <tbody>
@@ -216,14 +214,14 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                 const ltp = tick?.ltp ?? r.last;
                 return (
                   <tr key={r.symbol} className="border-b border-border/60 transition-colors last:border-0 hover:bg-primary/[0.03]">
-                    <td className="px-3 py-1.5">
+                    <td className="px-2 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <strong className="font-semibold">{r.symbol.replace("-EQ", "")}</strong>
+                        <button type="button" onClick={() => openChart(r.symbol)} title="Open chart" className="font-semibold hover:underline">{r.symbol.replace("-EQ", "")}</button>
                         {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
                       </div>
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
                       <span
                         className={cn(
                           "transition-colors duration-300 font-medium",
@@ -234,30 +232,25 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                         {ltp.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
                       </span>
                     </td>
-                    <td className={cn("px-3 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
+                    <td className={cn("px-2 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
                       {r.ret_1m.toFixed(1)}
                     </td>
-                  <td className={cn("px-3 py-1.5 text-right tabular-nums", r.vs_high > -2 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
+                  <td className={cn("px-2 py-1.5 text-right tabular-nums", r.vs_high > -2 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
                     {r.vs_high.toFixed(1)}
                   </td>
-                  <td className={cn("px-3 py-1.5 text-right tabular-nums", r.rsi < 30 ? "text-emerald-600 dark:text-emerald-400" : r.rsi > 70 ? "text-destructive" : "")}>
+                  <td className={cn("px-2 py-1.5 text-right tabular-nums", r.rsi < 30 ? "text-emerald-600 dark:text-emerald-400" : r.rsi > 70 ? "text-destructive" : "")}>
                     {r.rsi.toFixed(0)}
                   </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{r.vol_x.toFixed(1)}</td>
-                  <td className="px-3 py-1.5">
-                    <Pill tone={r.trend === "UP" ? "up" : r.trend === "DOWN" ? "down" : "flat"}>{r.trend}</Pill>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{r.vol_x.toFixed(1)}</td>
+                  <td className="px-2 py-1.5">
+                    <Pill tone={r.trend === "UP" ? "up" : r.trend === "DOWN" ? "down" : "flat"}>{r.trend === "UP" ? "Up" : r.trend === "DOWN" ? "Down" : "Flat"}</Pill>
                   </td>
-                  <td className="px-3 py-1.5">
+                  <td className="px-2 py-1.5">
                     <span className="inline-flex flex-wrap gap-1">
-                      {r.breakout && <Pill tone="up">BREAKOUT</Pill>}
-                      {r.gold_cross_5d && <Pill tone="gold">GOLD CROSS</Pill>}
-                      {r.rsi < 30 && <Pill tone="gold">OVERSOLD</Pill>}
+                      {r.breakout && <Pill tone="up">Breakout</Pill>}
+                      {r.gold_cross_5d && <Pill tone="gold">Golden cross</Pill>}
+                      {r.rsi < 30 && <Pill tone="gold">Oversold</Pill>}
                     </span>
-                  </td>
-                  <td className="px-3 py-1.5 text-right">
-                    <Button size="sm" variant="ghost" onClick={() => openChart(r.symbol)} title="Open chart">
-                      Chart
-                    </Button>
                   </td>
                 </tr>
               );
