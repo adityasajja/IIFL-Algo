@@ -28,6 +28,7 @@ from atr.api.legacy import (
     signals,
     startup,
     system,
+    tracker,
     validation,
 )
 from atr.api.middleware import install_middleware
@@ -59,7 +60,7 @@ app.add_middleware(
 include_routers(app)
 for module in (
     system, backtest, orders, risk, signals, alerts, briefing, scanner,
-    market_data, research, validation, dashboard, login,
+    market_data, research, validation, dashboard, login, tracker,
 ):
     app.include_router(module.router)
 

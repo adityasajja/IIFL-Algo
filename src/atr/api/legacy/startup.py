@@ -46,7 +46,11 @@ async def _jobs_loop() -> None:
         lambda: backup_now(DATA_ROOT, settings.backup_dir, keep=settings.backup_keep),
         at=(2, 30),
     )
-    await run_forever([backup], JobStore(DATA_ROOT))
+    from atr.research.forward_tracker import run_daily
+
+    # After the 16:30 price top-up, so the day's bars are in before signals are read.
+    tracker = DailyJob("forward_tracker", lambda: run_daily(DATA_ROOT), at=(17, 30), weekdays_only=True)
+    await run_forever([backup, tracker], JobStore(DATA_ROOT))
 
 
 async def _eod_refresh_loop() -> None:
