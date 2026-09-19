@@ -33,7 +33,7 @@ know what a database is, so the whole thing is testable against known answers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from atr.research import learning_stats as stats
 

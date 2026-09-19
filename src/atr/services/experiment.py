@@ -12,24 +12,20 @@ CURRENT STRATEGY vs LEARNED CANDIDATE vs BASELINE
 from __future__ import annotations
 
 import json
-import logging
 import math
-import uuid
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from loguru import logger
 
-from atr.appdb.engine import AppDatabase, get_app_db, utcnow
+from atr.appdb.engine import AppDatabase, get_app_db
 from atr.appdb.repositories import (
     OptimizationRecommendationRepository,
     StrategyExperimentRepository,
     StrategyRepository,
 )
-from atr.backtest.engine import BacktestConfig, BacktestResult
+from atr.backtest.engine import BacktestConfig
 from atr.data.base import DataFeed
 from atr.data.synthetic import SyntheticConfig, SyntheticFeed
 from atr.optimization.adaptive import (
@@ -37,9 +33,7 @@ from atr.optimization.adaptive import (
     extract_adaptive_parameters,
 )
 from atr.optimization.evaluator import (
-    PerformanceMetrics,
     RobustnessResult,
-    WalkForwardMetrics,
     evaluate_backtest,
     evaluate_robustness,
     evaluate_walk_forward,

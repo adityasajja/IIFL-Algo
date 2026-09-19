@@ -422,7 +422,7 @@ def validate_definition(definition: Any) -> dict[str, Any]:
                 )
             )
         else:
-            from atr.strategy.sizing import SizingConfig, SizingMethod
+            from atr.strategy.sizing import SizingMethod
             known_sizing_keys = {
                 "method",
                 "capital_allocation",

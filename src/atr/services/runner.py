@@ -48,22 +48,17 @@ import math
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, time as clock_time
+from datetime import datetime
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from atr.appdb.engine import utcnow
-from atr.appdb.repositories import DeploymentRepository
-from atr.core.enums import OrderType, Side
+from atr.core.enums import OrderType
 from atr.execution.oms import OrderDraft
 from atr.market_calendar import (
-    MARKET_CLOSE,
-    MARKET_OPEN,
-    NSEMarketCalendar,
     get_market_calendar,
-    is_market_open as _cal_is_market_open,
 )
 from atr.services.paper import (
     PaperLedger,

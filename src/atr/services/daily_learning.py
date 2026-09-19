@@ -27,11 +27,10 @@ Guarantees & Constraints:
 from __future__ import annotations
 
 import json
-import logging
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -40,8 +39,6 @@ from loguru import logger
 from atr.appdb.engine import AppDatabase, get_app_db, utcnow
 from atr.appdb.repositories import (
     LearningObservationRepository,
-    OptimizationRecommendationRepository,
-    StrategyRepository,
     SystemStateRepository,
 )
 from atr.optimization.adaptive import extract_adaptive_parameters
@@ -49,13 +46,8 @@ from atr.optimization.candidates import (
     OptimizationCandidate,
     generate_candidates_from_observations,
 )
-from atr.research import learning_stats as stats
-from atr.research.learning_axes import (
-    DEFAULT_AXES,
-    axes_from_names,
-)
 from atr.research.learning_drift import compare_sources
-from atr.research.learning_evidence import CLASS_PAPER_FORWARD, GRADE_FORWARD
+from atr.research.learning_evidence import CLASS_PAPER_FORWARD
 from atr.services.learning import (
     LearningDataset,
     LearningService,

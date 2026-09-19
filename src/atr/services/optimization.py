@@ -25,8 +25,6 @@ from atr.appdb.repositories import (
 from atr.data.base import DataFeed
 from atr.data.synthetic import SyntheticConfig, SyntheticFeed
 from atr.optimization.adaptive import (
-    AdaptiveParameter,
-    apply_parameter_to_definition,
     extract_adaptive_parameters,
 )
 from atr.optimization.candidates import (

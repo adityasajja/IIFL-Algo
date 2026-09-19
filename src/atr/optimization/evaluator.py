@@ -16,7 +16,6 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 from atr.backtest.engine import BacktestConfig, BacktestEngine, BacktestResult
 from atr.data.base import DataFeed

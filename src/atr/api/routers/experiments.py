@@ -18,7 +18,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from atr.api.deps import CurrentPrincipal, require_permission
-from atr.auth.models import Principal
 from atr.auth.rbac import Permission
 from atr.services.experiment import StrategyExperimentService
 

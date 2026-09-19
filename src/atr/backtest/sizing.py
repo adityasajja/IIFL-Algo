@@ -39,7 +39,6 @@ from atr.strategy.sizing import (
     RoundingRule,
     SizingConfig,
     SizingMethod,
-    SizingResult,
 )
 
 

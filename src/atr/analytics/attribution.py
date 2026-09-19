@@ -45,12 +45,11 @@ from typing import Any
 
 from atr.analytics import reason_codes as rc
 from atr.analytics.excursions import (
-    ExecutionQuality,
     ExcursionSet,
     compute_excursions,
     execution_quality,
 )
-from atr.analytics.models import AttributionInput, AttributionLeg, TradeDetails
+from atr.analytics.models import AttributionInput
 
 # ---------------------------------------------------------------------------
 # Thresholds — declared once, injectable, and recorded with every row

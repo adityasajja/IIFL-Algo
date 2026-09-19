@@ -93,7 +93,6 @@ from atr.research.learning_drift import DriftAnalysis
 from atr.research.learning_drift import analyse as drift_analysis
 from atr.research.learning_enrich import (
     benchmark_provenance_at,
-    benchmark_trend,
     bucket_atr,
     bucket_relative_volume,
     bucket_rsi,
@@ -3501,7 +3500,6 @@ class LearningService:
         ``condition_value`` filters to a single bucket label. When omitted all
         buckets of the axis are returned, ranked by sample size.
         """
-        from atr.research.learning_axes import axes_from_names
 
         min_n = min_sample if min_sample is not None else stats.MIN_SAMPLE
         resolved_metric, metric_note = resolve_metric(

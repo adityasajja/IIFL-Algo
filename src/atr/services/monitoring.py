@@ -30,7 +30,6 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
-from loguru import logger
 
 #: Steps in the causal chain, in the order they occur. The UI renders these as
 #: the pipeline rail, so the order here is load-bearing.
