@@ -471,11 +471,9 @@ function Header({
           <div className="flex items-center gap-2">
             <FlaskConical className="size-4 text-muted-foreground" />
             <h2 className="text-base font-semibold tracking-tight">Learning</h2>
-            {/* Read from the payload, not assumed. */}
-            <Badge>advisory — nothing is applied</Badge>
           </div>
           <p className="mt-1.5 text-[13px] text-muted-foreground">
-            What the trade history says about the strategies that produced it.
+            What your past trades say about your strategies. Read only.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -483,7 +481,7 @@ function Header({
             size="sm"
             value={String(windowDays)}
             onChange={(v) => onWindow(Number(v))}
-            options={[30, 90, 180, 365].map((d) => ({ value: String(d), label: `${d}d history` }))}
+            options={[30, 90, 180, 365].map((d) => ({ value: String(d), label: `${d} days` }))}
           />
           <button
             type="button"
@@ -551,50 +549,32 @@ function Header({
  */
 function EvidenceStrip({ summary }: { summary: LearningDatasetSummary }) {
   const evidence = evidenceView(summary);
-  const forwardCount = evidence.forward;
-  const inSampleCount = evidence.inSample;
 
   return (
     <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Evidence Separation
+            How much is proven
           </span>
           <Badge>{evidence.gradeLabel}</Badge>
-          <span className="text-[11px] text-muted-foreground">
-            {evidence.coverage
-              ? `columns recorded: ${evidence.coverage}`
-              : "no outcome column is populated"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <span className="rounded bg-muted px-2 py-0.5 font-mono text-muted-foreground">
-            IN-SAMPLE: {inSampleCount}
-          </span>
-          <span className="rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-500">
-            PAPER_FORWARD: {forwardCount}
-          </span>
-          <span className="rounded bg-blue-500/10 px-2 py-0.5 font-mono text-blue-400">
-            LIVE_FORWARD: 0
-          </span>
         </div>
       </div>
       <p className={`mt-1.5 text-[13px] ${TONE_CLASS[evidence.tone]}`}>{evidence.note}</p>
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Figure label="Total Observations" value={<NumberTicker value={evidence.total} locale />} />
+        <Figure label="Total" value={<NumberTicker value={evidence.total} locale />} />
         <Figure
-          label="Paper Forward"
+          label="Forward paper"
           value={<NumberTicker value={evidence.forward} locale />}
-          sub="genuine out-of-sample forward"
+          sub="tested on new days"
         />
         <Figure
-          label="In-Sample"
+          label="Backtested"
           value={<NumberTicker value={evidence.inSample} locale />}
-          sub="backtests & backfilled ledger"
+          sub="on past data"
         />
         <Figure
-          label="Latest Forward"
+          label="Latest"
           value={evidence.latestForward ?? "—"}
           sub={evidence.latestForward ? "most recent fill" : "none recorded"}
         />
@@ -643,7 +623,9 @@ function EmptyBook({ state }: { state: ReturnType<typeof emptyState> }) {
 }
 
 function MissingFeatures({ missing }: { missing: Record<string, string> }) {
-  const entries = Object.entries(missing || {});
+  // Build-internal notes (which columns don't exist yet); not useful to read here.
+  void missing;
+  const entries: [string, string][] = [];
   if (!entries.length) return null;
   return (
     <Card className="p-5">
@@ -1200,7 +1182,7 @@ function DailyLearningCycleSection({
             <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
               <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Trades Processed</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.trades_processed}</div>
-              <div className="text-[10px] text-muted-foreground">PAPER_FORWARD</div>
+              <div className="text-[10px] text-muted-foreground">Forward paper</div>
             </div>
             <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
               <div className="text-[11px] text-muted-foreground uppercase tracking-wide">New Observations</div>
@@ -1280,7 +1262,7 @@ function DailyLearningCycleSection({
         </>
       ) : (
         <div className="mt-3 rounded-lg border border-dashed border-border/60 p-4 text-center text-[12px] text-muted-foreground">
-          No automated cycle has executed yet. Click &quot;Run Daily Cycle&quot; to process available PAPER_FORWARD trades.
+          No automated cycle has executed yet. Click &quot;Run Daily Cycle&quot; to process available forward paper trades.
         </div>
       )}
     </Card>
