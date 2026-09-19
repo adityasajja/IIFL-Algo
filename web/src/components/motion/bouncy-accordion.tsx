@@ -15,15 +15,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { EASE_OUT } from "../../lib/ease";
-import { cn } from "../../lib/utils";
+import { EASE_OUT } from "@/lib/ease";
+import { cn } from "@/lib/utils";
 
 export type BouncyAccordionItem = {
   id: string;
   title: ReactNode;
   description?: ReactNode;
   icon?: ReactNode;
-  badge?: ReactNode;
   disabled?: boolean;
 };
 
@@ -48,6 +47,10 @@ export interface BouncyAccordionProps {
   classNames?: BouncyAccordionClassNames;
 }
 
+// Local springs keep the accordion's connected groups moving together while
+// avoiding scale projection on text-heavy row contents.
+// Gap spring: must not overshoot y — positive y overshoot drifts items below
+// their mt-3 resting point and briefly overlaps the next item.
 const ROW_TRANSITION: Transition = {
   type: "spring",
   duration: 0.55,
@@ -77,6 +80,7 @@ const CHEVRON_TRANSITION: Transition = {
   bounce: 0.28,
 };
 
+
 function useControllableAccordionValue({
   value,
   defaultValue,
@@ -95,6 +99,7 @@ function useControllableAccordionValue({
       if (!isControlled) {
         setInternalValue(next);
       }
+
       onValueChange?.(next);
     },
     [isControlled, onValueChange],
@@ -151,21 +156,21 @@ function BouncyAccordionRow({
     <motion.div
       layout="position"
       initial={false}
-      style={{ marginTop: separatedFromPrevious ? 10 : 0 }}
+      style={{ marginTop: separatedFromPrevious ? 12 : 0 }}
       transition={reduce ? { duration: 0 } : ROW_TRANSITION}
     >
       <motion.div
         data-state={open ? "open" : "closed"}
         initial={false}
         animate={{
-          borderTopLeftRadius: startsGroup ? 16 : 0,
-          borderTopRightRadius: startsGroup ? 16 : 0,
-          borderBottomLeftRadius: endsGroup ? 16 : 0,
-          borderBottomRightRadius: endsGroup ? 16 : 0,
+          borderTopLeftRadius: startsGroup ? 28 : 0,
+          borderTopRightRadius: startsGroup ? 28 : 0,
+          borderBottomLeftRadius: endsGroup ? 28 : 0,
+          borderBottomRightRadius: endsGroup ? 28 : 0,
         }}
         transition={reduce ? { duration: 0 } : ROW_TRANSITION}
         className={cn(
-          "overflow-hidden border border-border/80 bg-card text-card-foreground",
+          "overflow-hidden bg-card text-card-foreground",
           item.disabled && "opacity-50",
           classNames?.item,
         )}
@@ -178,8 +183,8 @@ function BouncyAccordionRow({
           aria-controls={contentId}
           onClick={onToggle}
           className={cn(
-            "flex min-h-[48px] w-full items-center gap-3 px-4 text-left outline-none transition-colors",
-            "hover:bg-muted/30 focus-visible:bg-muted/35",
+            "flex min-h-[54px] w-full items-center gap-4 px-5 text-left outline-none transition-colors",
+            "focus-visible:bg-muted/25",
             "disabled:pointer-events-none",
             classNames?.trigger,
           )}
@@ -187,7 +192,7 @@ function BouncyAccordionRow({
           {item.icon ? (
             <span
               className={cn(
-                "grid h-6 w-6 shrink-0 place-items-center text-muted-foreground",
+                "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground",
                 classNames?.icon,
               )}
             >
@@ -196,19 +201,18 @@ function BouncyAccordionRow({
           ) : null}
           <span
             className={cn(
-              "min-w-0 flex-1 truncate text-sm font-medium text-foreground",
+              "min-w-0 flex-1 truncate text-[15px] font-medium text-foreground",
               classNames?.title,
             )}
           >
             {item.title}
           </span>
-          {item.badge ? <div className="shrink-0">{item.badge}</div> : null}
           <motion.span
             aria-hidden
             animate={{ rotate: open ? 180 : 0 }}
             transition={reduce ? { duration: 0 } : CHEVRON_TRANSITION}
             className={cn(
-              "grid h-5 w-5 shrink-0 place-items-center text-muted-foreground",
+              "grid h-6 w-6 shrink-0 place-items-center text-muted-foreground",
               classNames?.chevron,
             )}
           >
@@ -240,11 +244,11 @@ function BouncyAccordionRow({
               opacity: open ? 1 : 0,
             }}
             transition={reduce ? { duration: 0 } : DESCRIPTION_TRANSITION}
-            className="px-4 pb-4 pt-1"
+            className="px-5 pb-5"
           >
             <div
               className={cn(
-                "text-xs leading-relaxed text-muted-foreground",
+                "text-[15px] leading-6 text-muted-foreground",
                 classNames?.description,
               )}
             >
@@ -283,13 +287,14 @@ export function BouncyAccordion({
         }
         return;
       }
+
       setActiveValue(id);
     },
     [activeValue, collapsible, setActiveValue],
   );
 
   return (
-    <div className={cn("w-full space-y-1.5", className, classNames?.root)}>
+    <div className={cn("w-full", className, classNames?.root)}>
       {items.map((item, index) => {
         const open = activeValue === item.id;
         const previousIsOpen = activeIndex === index - 1;

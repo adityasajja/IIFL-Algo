@@ -83,10 +83,15 @@ const listClasses: Record<Variant, string> = {
   segment: "inline-flex items-center gap-0 rounded-lg bg-card p-0.5",
 };
 
+// A fixed-width tab strip wider than its container used to widen the whole page
+// (a horizontal scrollbar on <body>). Let the strip scroll on its own instead.
+const scrollClasses =
+  "max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0";
+
 export function TabsList({ children, className }: { children: ReactNode; className?: string }) {
   const { variant } = useTabs();
   return (
-    <div role="tablist" className={cn(listClasses[variant], className)}>
+    <div role="tablist" className={cn(listClasses[variant], scrollClasses, className)}>
       {children}
     </div>
   );

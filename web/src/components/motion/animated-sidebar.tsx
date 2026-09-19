@@ -851,8 +851,6 @@ export const AnimatedSidebarMenuItem = forwardRef<
     <motion.li
       {...props}
       ref={forwardedRef}
-      layout="position"
-      transition={SPRING_LAYOUT}
       data-slot="sidebar-menu-item"
       className={cn("relative", className)}
     />
@@ -1098,7 +1096,11 @@ export function AnimatedSidebarMenuButton({
         aria-hidden={panel.collapsed}
         className={cn(
           "relative z-10 min-w-0 flex-1 truncate",
-          panel.collapsed && "pointer-events-none",
+          // Collapsed, this label is invisible but was still a flex-1 box
+          // claiming space — that pushed the icon off-center in the icon
+          // rail instead of centering it in its highlight pill. Taking it
+          // out of flow here lets the icon sit dead-center.
+          panel.collapsed && "pointer-events-none absolute w-0 flex-none overflow-hidden",
         )}
       >
         {children}

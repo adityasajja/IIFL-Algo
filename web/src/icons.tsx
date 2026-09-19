@@ -47,6 +47,10 @@ export const IconChevR = (p: P) => (
 export const IconFlask = (p: P) => (
   <svg {...S(p)}><path d="M6.5 2.2v3.6L3.4 11.4a1.6 1.6 0 0 0 1.4 2.4h6.4a1.6 1.6 0 0 0 1.4-2.4L9.5 5.8V2.2" /><path d="M5.6 2.2h4.8" /><path d="M4.9 9.6h6.2" /></svg>
 );
+/** A brain-ish glyph: two lobes plus a fissure — reads as "learning" at 16px. */
+export const IconBrain = (p: P) => (
+  <svg {...S(p)}><path d="M8 2.6v10.8" /><path d="M8 3.4a2.4 2.4 0 0 0-4.2 1.5c-1 .3-1.7 1.2-1.7 2.3 0 .7.3 1.3.8 1.7-.2.4-.3.8-.3 1.2 0 1.4 1.1 2.5 2.5 2.5.7 0 1.4-.3 1.9-.8" /><path d="M8 3.4a2.4 2.4 0 0 1 4.2 1.5c1 .3 1.7 1.2 1.7 2.3 0 .7-.3 1.3-.8 1.7.2.4.3.8.3 1.2 0 1.4-1.1 2.5-2.5 2.5-.7 0-1.4-.3-1.9-.8" /></svg>
+);
 export const IconPulse = (p: P) => (
   <svg {...S(p)}><path d="M1.5 8h2.7L6 3.6 8.4 12l2.1-4h4" /></svg>
 );
@@ -55,4 +59,21 @@ export const IconServer = (p: P) => (
 );
 export const IconCrosshair = (p: P) => (
   <svg {...S(p)}><circle cx="8" cy="8" r="5" /><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" /></svg>
+);
+/** Paper deployment — a strategy running itself, broadcasting signals. */
+export const IconRadio = (p: P) => (
+  <svg {...S(p)}><circle cx="8" cy="8" r="1.8" /><path d="M4.9 11.1a4.4 4.4 0 0 1 0-6.2M11.1 4.9a4.4 4.4 0 0 1 0 6.2" /><path d="M2.9 13.1a7.2 7.2 0 0 1 0-10.2M13.1 2.9a7.2 7.2 0 0 1 0 10.2" /></svg>
+);
+
+/**
+ * Post-trade attribution — one trade fanning out into the branches it is
+ * explained by. A pulse would read as "live", and this is the opposite: it is
+ * what happened, read after the fact.
+ */
+export const IconAttribution = (p: P) => (
+  <svg {...S(p)}>
+    <path d="M2.4 3.4h3.2v9.2H2.4z" />
+    <path d="M8 3.4h1.4M8 8h1.4M8 12.6h1.4" />
+    <path d="M11.4 2.6h2.2v2.2h-2.2zM11.4 6.9h2.2v2.2h-2.2zM11.4 11.2h2.2v2.2h-2.2z" />
+  </svg>
 );

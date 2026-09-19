@@ -23,6 +23,7 @@ export interface LiveTick {
   best_bid?: number | null;
   best_ask?: number | null;
   ts: string;
+  epoch?: number; // Unix timestamp for precise candle alignment
   flash?: "up" | "down" | null;
   depth?: DepthLevel[] | null;
 }
@@ -45,8 +46,16 @@ let isConnected = false;
 let isBridgeActive = false;
 
 function getWsUrl(): string {
-  const base = API_URL.replace(/^http/, "ws");
-  return `${base}/ws/ticks`;
+  if (API_URL.startsWith("http")) {
+    const base = API_URL.replace(/^http/, "ws");
+    return `${base}/ws/ticks`;
+  }
+  if (typeof window !== "undefined") {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    return `${proto}//${host}/ws/ticks`;
+  }
+  return "ws://127.0.0.1:8000/ws/ticks";
 }
 
 function sendSubscription(symbols: string[]) {
@@ -150,12 +159,36 @@ export function useLiveTicks(symbols: string[] = []) {
   useEffect(() => {
     initWebSocket();
 
+    // High-frequency tick buffer batched per animation frame (60-120fps)
+    const pendingTicks: Record<string, LiveTick> = {};
+    let rafId: number | null = null;
+
+    const flushTicks = () => {
+      rafId = null;
+      if (Object.keys(pendingTicks).length === 0) return;
+      setTicks((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [sym, tick] of Object.entries(pendingTicks)) {
+          if (next[sym] !== tick) {
+            next[sym] = tick;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+      // Clear pending
+      for (const k of Object.keys(pendingTicks)) {
+        delete pendingTicks[k];
+      }
+    };
+
     const onTick = (tick: LiveTick) => {
       if (syms.current.includes(tick.symbol)) {
-        setTicks((prev) => ({
-          ...prev,
-          [tick.symbol]: tick,
-        }));
+        pendingTicks[tick.symbol] = tick;
+        if (rafId === null) {
+          rafId = requestAnimationFrame(flushTicks);
+        }
       }
     };
 
@@ -180,6 +213,9 @@ export function useLiveTicks(symbols: string[] = []) {
     }
 
     return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
       tickListeners.delete(onTick);
       statusListeners.delete(onStatus);
     };
@@ -189,6 +225,14 @@ export function useLiveTicks(symbols: string[] = []) {
     ticks,
     connected,
     bridgeActive,
-    getTick: useCallback((sym: string) => ticks[sym.toUpperCase()] || globalTicks[sym.toUpperCase()], [ticks]),
+    getTick: useCallback(
+      (sym: string) => {
+        const key = sym.toUpperCase();
+        // Only serve from globalTicks if this hook is actively subscribed to the symbol.
+        // Avoids leaking a stale cross-session tick for a symbol we're no longer tracking.
+        return ticks[key] ?? (syms.current.includes(key) ? globalTicks[key] : undefined);
+      },
+      [ticks]
+    ),
   };
 }

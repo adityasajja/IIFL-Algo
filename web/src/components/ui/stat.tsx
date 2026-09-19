@@ -64,9 +64,11 @@ export function VerdictPill({ passed, children }: { passed: boolean; children: R
 
 export function Badge({
   tone = "flat",
+  className,
   children,
 }: {
-  tone?: "flat" | "good" | "bad" | "warn";
+  tone?: "flat" | "good" | "bad" | "warn" | "info";
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -76,7 +78,9 @@ export function Badge({
         tone === "good" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
         tone === "bad" && "bg-destructive/10 text-destructive",
         tone === "warn" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        tone === "info" && "bg-sky-500/10 text-sky-600 dark:text-sky-400",
         tone === "flat" && "bg-primary/[0.07] text-muted-foreground",
+        className,
       )}
     >
       {children}

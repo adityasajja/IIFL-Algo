@@ -1,4 +1,4 @@
-import { Check, Loader2, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import {
   AnimatePresence,
   motion,
@@ -14,6 +14,7 @@ import {
 } from "react";
 import { EASE_OUT, SPRING_SWAP } from "../../lib/ease";
 import { Button, type ButtonProps } from "./button";
+import { ButtonLoader } from "./loading";
 
 export type ButtonState = "idle" | "loading" | "success" | "error";
 
@@ -197,7 +198,7 @@ export const StatefulButton = forwardRef<HTMLButtonElement, StatefulButtonProps>
         <AnimatePresence initial={false}>
           {state === "loading" ? (
             <IconSlot keyId="loading-icon">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <ButtonLoader size={16} />
             </IconSlot>
           ) : null}
           {state === "success" ? (

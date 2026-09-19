@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TrendingDown, TrendingUp, Volume2, VolumeX } from "lucide-react";
 import { useLiveTicks } from "../../lib/useLiveTicks";
 import { sound } from "../../lib/sound";
 import { cn } from "../../lib/utils";
+import { API_URL } from "../../api";
 
 const TICKER_SYMBOLS = [
   "NIFTYBEES-EQ",
@@ -23,6 +24,80 @@ export function GlobalTickerBar({ onSelectSymbol }: { onSelectSymbol?: (sym: str
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem("atr.ticker.collapsed") === "true";
   });
+  const [lastTradedQuotes, setLastTradedQuotes] = useState<Record<string, { ltp: number; chg: number; chgPct: number }>>({});
+
+  useEffect(() => {
+    // Check sessionStorage cache first for instant hydration
+    try {
+      const cached = sessionStorage.getItem("atr.ticker.quotes");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object") {
+          setLastTradedQuotes(parsed);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fetch real historical/recent candles to get the actual Last Traded Price (LTP) dynamically
+    let isCancelled = false;
+
+    const fetchRealQuotes = async () => {
+      try {
+        const results = await Promise.allSettled(
+          TICKER_SYMBOLS.map(async (sym) => {
+            const res = await fetch(`${API_URL}/candles?symbol=${encodeURIComponent(sym)}&exchange=NSEEQ&interval=1d`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            const candles = data?.candles || [];
+            if (candles.length > 0) {
+              const lastCandle = candles[candles.length - 1];
+              const prevCandle = candles.length > 1 ? candles[candles.length - 2] : null;
+              const ltp = lastCandle.close;
+              const prevClose = prevCandle ? prevCandle.close : lastCandle.open;
+              const chg = ltp - prevClose;
+              const chgPct = prevClose ? (chg / prevClose) * 100 : 0;
+              return { sym, ltp, chg, chgPct };
+            }
+            return null;
+          })
+        );
+
+        if (isCancelled) return;
+
+        const updated: Record<string, { ltp: number; chg: number; chgPct: number }> = {};
+        for (const item of results) {
+          if (item.status === "fulfilled" && item.value) {
+            updated[item.value.sym] = {
+              ltp: item.value.ltp,
+              chg: item.value.chg,
+              chgPct: item.value.chgPct,
+            };
+          }
+        }
+
+        if (Object.keys(updated).length > 0) {
+          setLastTradedQuotes((prev) => {
+            const merged = { ...prev, ...updated };
+            try {
+              sessionStorage.setItem("atr.ticker.quotes", JSON.stringify(merged));
+            } catch {
+              // ignore
+            }
+            return merged;
+          });
+        }
+      } catch {
+        // network or server error handled gracefully
+      }
+    };
+
+    fetchRealQuotes();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   const toggleSound = () => {
     const next = sound.toggle();
@@ -85,9 +160,10 @@ export function GlobalTickerBar({ onSelectSymbol }: { onSelectSymbol?: (sym: str
         <div className="flex items-center gap-5">
           {TICKER_SYMBOLS.map((sym) => {
             const tick = getTick(sym);
-            const ltp = tick?.ltp ?? null;
-            const chg = tick?.chg ?? 0;
-            const chgPct = tick?.chg_pct ?? 0;
+            const fb = lastTradedQuotes[sym];
+            const ltp = tick?.ltp ?? fb?.ltp ?? null;
+            const chg = tick?.chg ?? fb?.chg ?? 0;
+            const chgPct = tick?.chg_pct ?? fb?.chgPct ?? 0;
             const isUp = chg >= 0;
 
             return (
@@ -122,7 +198,7 @@ export function GlobalTickerBar({ onSelectSymbol }: { onSelectSymbol?: (sym: str
                     </span>
                   </>
                 ) : (
-                  <span className="text-muted-foreground/60 tabular-nums">Loading…</span>
+                  <span className="text-muted-foreground/60 tabular-nums">₹{fb ? fb.ltp.toFixed(2) : "—"}</span>
                 )}
               </div>
             );

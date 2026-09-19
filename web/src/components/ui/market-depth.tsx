@@ -52,11 +52,11 @@ export function MarketDepthLadder({
       <div className="mb-2 flex items-center justify-between border-b border-border/50 pb-2">
         <div className="flex items-center gap-1.5 font-semibold text-foreground">
           <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          5-Level Market Depth <span className="font-normal text-muted-foreground">({symbol})</span>
+          Market Depth <span className="font-normal text-muted-foreground text-xs">({symbol})</span>
         </div>
         <div className="flex items-center gap-2 text-[11px] font-medium">
           <span className="text-emerald-500">{bidRatio}% Buy</span>
-          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-destructive/30">
+          <div className="h-1.5 w-14 overflow-hidden rounded-full bg-destructive/30">
             <div
               className="h-full bg-emerald-500 transition-all duration-300"
               style={{ width: `${bidRatio}%` }}
@@ -66,76 +66,74 @@ export function MarketDepthLadder({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        {/* Bid Side */}
-        <div>
-          <div className="grid grid-cols-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>Orders</span>
-            <span className="text-right">Qty</span>
-            <span className="text-right text-emerald-500">Bid Price</span>
-          </div>
-          <div className="space-y-1">
-            {bids.map((b, i) => {
-              const widthPct = Math.round((b.quantity / maxBidQty) * 100);
-              return (
-                <div
-                  key={i}
-                  onClick={() => onSelectPrice?.(b.price)}
-                  className="group relative grid grid-cols-3 cursor-pointer items-center overflow-hidden rounded py-0.5 text-[11.5px] tabular-nums transition-colors hover:bg-emerald-500/10"
-                >
-                  <div
-                    className="absolute inset-y-0 right-0 bg-emerald-500/10 transition-all"
-                    style={{ width: `${widthPct}%` }}
-                  />
-                  <span className="relative z-10 text-muted-foreground">{b.orders}</span>
-                  <span className="relative z-10 text-right font-medium">{b.quantity.toLocaleString("en-IN")}</span>
-                  <span className="relative z-10 text-right font-bold text-emerald-500 group-hover:underline">
-                    ₹{b.price.toFixed(2)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-1.5 flex justify-between border-t border-border/50 pt-1 text-[10.5px] font-semibold text-muted-foreground">
-            <span>Total Bid</span>
-            <span className="tabular-nums text-foreground">{totalBidQty.toLocaleString("en-IN")}</span>
-          </div>
-        </div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center justify-between px-2 pb-1">
+        <span>Orders</span>
+        <span>Quantity</span>
+        <span>Price (Click to copy)</span>
+      </div>
 
-        {/* Ask Side */}
-        <div>
-          <div className="grid grid-cols-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className="text-destructive">Ask Price</span>
-            <span className="text-right">Qty</span>
-            <span className="text-right">Orders</span>
-          </div>
-          <div className="space-y-1">
-            {asks.map((a, i) => {
-              const widthPct = Math.round((a.quantity / maxAskQty) * 100);
-              return (
-                <div
-                  key={i}
-                  onClick={() => onSelectPrice?.(a.price)}
-                  className="group relative grid grid-cols-3 cursor-pointer items-center overflow-hidden rounded py-0.5 text-[11.5px] tabular-nums transition-colors hover:bg-destructive/10"
-                >
-                  <div
-                    className="absolute inset-y-0 left-0 bg-destructive/10 transition-all"
-                    style={{ width: `${widthPct}%` }}
-                  />
-                  <span className="relative z-10 font-bold text-destructive group-hover:underline">
-                    ₹{a.price.toFixed(2)}
-                  </span>
-                  <span className="relative z-10 text-right font-medium">{a.quantity.toLocaleString("en-IN")}</span>
-                  <span className="relative z-10 text-right text-muted-foreground">{a.orders}</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-1.5 flex justify-between border-t border-border/50 pt-1 text-[10.5px] font-semibold text-muted-foreground">
-            <span>Total Ask</span>
-            <span className="tabular-nums text-foreground">{totalAskQty.toLocaleString("en-IN")}</span>
-          </div>
-        </div>
+      {/* Asks (Sell Orders - descending from higher price down to best ask) */}
+      <div className="space-y-0.5">
+        {[...asks].reverse().map((a, i) => {
+          const widthPct = Math.round((a.quantity / maxAskQty) * 100);
+          return (
+            <div
+              key={`ask-${i}`}
+              onClick={() => onSelectPrice?.(a.price)}
+              title={`Click to set Limit price ₹${a.price.toFixed(2)}`}
+              className="group relative flex items-center justify-between px-2 py-1 rounded text-[11.5px] tabular-nums cursor-pointer overflow-hidden transition-colors hover:bg-destructive/15"
+            >
+              <div
+                className="absolute inset-y-0 right-0 bg-destructive/10 pointer-events-none transition-all duration-300"
+                style={{ width: `${widthPct}%` }}
+              />
+              <span className="relative z-10 text-muted-foreground/75 text-[10.5px]">{a.orders}</span>
+              <span className="relative z-10 font-medium text-foreground/85">{a.quantity.toLocaleString("en-IN")}</span>
+              <span className="relative z-10 font-semibold text-destructive group-hover:underline">
+                ₹{a.price.toFixed(2)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Center LTP Separator Bar */}
+      <div className="my-1.5 flex items-center justify-between px-2 py-1 rounded bg-muted/40 border-y border-border/60 text-xs font-semibold">
+        <span className="text-[10.5px] text-muted-foreground uppercase tracking-wider">Last Traded Price</span>
+        <span className="tabular-nums font-bold text-foreground">
+          ₹{ltp ? ltp.toFixed(2) : "—"}
+        </span>
+      </div>
+
+      {/* Bids (Buy Orders - descending from best bid down to lower prices) */}
+      <div className="space-y-0.5">
+        {bids.map((b, i) => {
+          const widthPct = Math.round((b.quantity / maxBidQty) * 100);
+          return (
+            <div
+              key={`bid-${i}`}
+              onClick={() => onSelectPrice?.(b.price)}
+              title={`Click to set Limit price ₹${b.price.toFixed(2)}`}
+              className="group relative flex items-center justify-between px-2 py-1 rounded text-[11.5px] tabular-nums cursor-pointer overflow-hidden transition-colors hover:bg-emerald-500/15"
+            >
+              <div
+                className="absolute inset-y-0 right-0 bg-emerald-500/10 pointer-events-none transition-all duration-300"
+                style={{ width: `${widthPct}%` }}
+              />
+              <span className="relative z-10 text-muted-foreground/75 text-[10.5px]">{b.orders}</span>
+              <span className="relative z-10 font-medium text-foreground/85">{b.quantity.toLocaleString("en-IN")}</span>
+              <span className="relative z-10 font-semibold text-emerald-500 group-hover:underline">
+                ₹{b.price.toFixed(2)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Totals footer */}
+      <div className="mt-2 flex items-center justify-between border-t border-border/50 pt-1.5 text-[10.5px] font-medium text-muted-foreground">
+        <span>Total Ask: <strong className="text-foreground tabular-nums">{totalAskQty.toLocaleString("en-IN")}</strong></span>
+        <span>Total Bid: <strong className="text-foreground tabular-nums">{totalBidQty.toLocaleString("en-IN")}</strong></span>
       </div>
     </div>
   );
