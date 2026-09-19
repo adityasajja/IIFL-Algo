@@ -318,10 +318,11 @@ def format_telegram_preview(sig: TradeSignal) -> tuple[str, str]:
         f"• Stop:   ₹{sig.stop_loss:,.2f}\n"
         f"• Target: ₹{sig.target:,.2f}\n"
         f"• Qty:    {sig.quantity} shares\n"
-        f"• Risk:   ₹{sig.risk_amount:,.0f} ({sig.rr_ratio:.1f}:1 R:R)\n"
-        f"• RSI:    {sig.rsi:.0f}" if sig.rsi else ""
-        + "\n\nOpen dashboard → Scanner → Trade Signals to execute."
+        f"• Risk:   ₹{sig.risk_amount:,.0f} ({sig.rr_ratio:.1f}:1 R:R)"
     )
+    if sig.rsi is not None:
+        body += f"\n• RSI:    {sig.rsi:.0f}"
+    body += "\n\nOpen dashboard → Scanner → Trade Signals to execute."
     return header, body
 
 
