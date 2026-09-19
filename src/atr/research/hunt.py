@@ -206,30 +206,70 @@ def run_weights(
 ) -> Result:
     """Hold ``weights`` and pay to change them.
 
-    ``weights`` is indexed by rebalance date and may be sparse; it is held
-    forward between dates. Weights are applied from the *next* session, because a
-    signal computed from a close cannot be traded at that same close.
+    ``weights`` is indexed by rebalance date; on any other session the book is
+    left alone and **drifts with prices**. That drift is the reason this is a
+    loop rather than a matrix multiply: treating the weight frame as a target
+    that holds forward would silently rebalance the book to target every single
+    day, for free. A fixed-weight basket would then collect the rebalancing
+    bonus while reporting zero turnover, which flatters exactly the static
+    baskets that any timing rule has to beat.
+
+    A target dated ``d`` is traded on the next session, because a signal
+    computed from a close cannot be filled at that same close.
     """
     prices = prices.sort_index()
-    daily = prices.pct_change().fillna(0.0)
-    held = weights.reindex(prices.index).ffill().fillna(0.0)
-    held = held.reindex(columns=prices.columns, fill_value=0.0)
+    columns = list(prices.columns)
+    returns = prices.pct_change().fillna(0.0)
+    targets = weights.reindex(columns=columns, fill_value=0.0).sort_index()
 
-    # Shift so today's holding was decided on yesterday's information.
-    traded = held.shift(1).fillna(0.0)
-    gross = (traded * daily).sum(axis=1)
+    dates = list(prices.index)
+    position = {d: i for i, d in enumerate(dates)}
+    # Move each target to the following session: decided on the close, filled next.
+    scheduled: dict[int, np.ndarray] = {}
+    for date, row in targets.iterrows():
+        i = position.get(date)
+        if i is None:  # a rebalance date the panel does not trade on
+            later = [j for j, d in enumerate(dates) if d > date]
+            i = later[0] - 1 if later else None
+        if i is not None and i + 1 < len(dates):
+            scheduled[i + 1] = row.to_numpy(dtype=float)
 
-    # Turnover is charged on the day the book actually changes.
-    turnover = traded.diff().abs().sum(axis=1).fillna(0.0)
-    cost_fraction = turnover.map(lambda t: costs.turnover_cost(t, notional) / notional)
-    net = gross - cost_fraction
+    matrix = returns.to_numpy(dtype=float)
+    held = np.zeros(len(columns))
+    gross = np.zeros(len(dates))
+    charged = np.zeros(len(dates))
+    traded = np.zeros(len(dates))
+
+    for i in range(len(dates)):
+        target = scheduled.get(i)
+        if target is not None:
+            # Charged on the distance from the *drifted* book, not from the last
+            # target: that difference is the cost of holding a basket steady.
+            traded[i] = float(np.abs(target - held).sum())
+            charged[i] = costs.turnover_cost(traded[i], notional) / notional
+            held = target.copy()
+        day = matrix[i]
+        gross[i] = float((held * day).sum())
+        # Carry the book forward: holdings grow with their prices, cash does not,
+        # so the weights at tomorrow's open are not the ones set at the last
+        # rebalance. Re-expressed as fractions of the new portfolio value.
+        cash = 1.0 - held.sum()
+        grown = held * (1.0 + day)
+        value = grown.sum() + cash
+        if value > 0:
+            held = grown / value
+
+    index = prices.index
+    gross_series = pd.Series(gross, index=index)
+    cost_series = pd.Series(charged, index=index)
+    net = gross_series - cost_series
 
     return Result(
         equity=(1 + net).cumprod(),
         returns=net,
-        turnover=turnover,
+        turnover=pd.Series(traded, index=index),
         costs=costs,
-        gross_returns=gross,
+        gross_returns=gross_series,
     )
 
 
