@@ -49,3 +49,7 @@ web/dist/
 /.pytest_last.txt
 /.pytest_result.xml
 /.pytest-report.xml
+
+# Local editor and agent settings (per-machine, not part of the project)
+/.claude/
+/.commandcode/
