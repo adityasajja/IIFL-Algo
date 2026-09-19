@@ -30,40 +30,41 @@ import {
   ShieldAlert,
   SlidersHorizontal,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import AlertsPanel from "./AlertsPanel";
+import { useCallback, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+const AlertsPanel = lazy(() => import("./AlertsPanel"));
+import { PageLoader } from "./components/ui/loading";
 import AuthGate from "./AuthGate";
-import BacktestPanel from "./BacktestPanel";
-import BacktestWorkflowPanel from "./BacktestWorkflowPanel";
-import ChartsPanel from "./ChartsPanel";
-import CustomScannerPanel from "./CustomScannerPanel";
-import ExecutionModePanel from "./ExecutionModePanel";
-import TradeSignalsPanel from "./TradeSignalsPanel";
-import WatchlistPanel from "./WatchlistPanel";
+const BacktestPanel = lazy(() => import("./BacktestPanel"));
+const BacktestWorkflowPanel = lazy(() => import("./BacktestWorkflowPanel"));
+const ChartsPanel = lazy(() => import("./ChartsPanel"));
+const CustomScannerPanel = lazy(() => import("./CustomScannerPanel"));
+const ExecutionModePanel = lazy(() => import("./ExecutionModePanel"));
+const TradeSignalsPanel = lazy(() => import("./TradeSignalsPanel"));
+const WatchlistPanel = lazy(() => import("./WatchlistPanel"));
 import { Button } from "./components/ui/button";
 import { CommandPalette, type CommandItem } from "./components/ui/command-palette";
 import { GlobalTickerBar } from "./components/ui/global-ticker-bar";
 import { EnvironmentBanner } from "./components/ui/environment-banner";
 import { ThemeToggle } from "./components/ui/theme-toggle";
 import LoginBanner from "./LoginBanner";
-import PortfolioPanel from "./PortfolioPanel";
-import PortfolioControlCenter from "./PortfolioControlCenter";
-import BriefingPanel from "./BriefingPanel";
-import TodayPanel from "./TodayPanel";
-import AnalyticsPanel from "./AnalyticsPanel";
-import { LearningPanel } from "./LearningPanel";
-import { OptimizationPanel } from "./OptimizationPanel";
+const PortfolioPanel = lazy(() => import("./PortfolioPanel"));
+const PortfolioControlCenter = lazy(() => import("./PortfolioControlCenter"));
+const BriefingPanel = lazy(() => import("./BriefingPanel"));
+const TodayPanel = lazy(() => import("./TodayPanel"));
+const AnalyticsPanel = lazy(() => import("./AnalyticsPanel"));
+const LearningPanel = lazy(() => import("./LearningPanel").then((m) => ({ default: m.LearningPanel })));
+const OptimizationPanel = lazy(() => import("./OptimizationPanel").then((m) => ({ default: m.OptimizationPanel })));
 import OverviewPanel from "./OverviewPanel";
-import PaperDeploymentPanel from "./PaperDeploymentPanel";
-import ResearchPanel from "./ResearchPanel";
-import EvidencePanel from "./EvidencePanel";
-import RiskPanel from "./RiskPanel";
-import StrategiesPanel from "./StrategiesPanel";
-import ScannerPanel from "./ScannerPanel";
-import ScreenerPanel from "./ScreenerPanel";
-import MarketIntelligencePanel from "./MarketIntelligencePanel";
-import SignalExplorerPanel from "./SignalExplorerPanel";
-import SystemPanel from "./SystemPanel";
+const PaperDeploymentPanel = lazy(() => import("./PaperDeploymentPanel"));
+const ResearchPanel = lazy(() => import("./ResearchPanel"));
+const EvidencePanel = lazy(() => import("./EvidencePanel"));
+const RiskPanel = lazy(() => import("./RiskPanel"));
+const StrategiesPanel = lazy(() => import("./StrategiesPanel"));
+const ScannerPanel = lazy(() => import("./ScannerPanel"));
+const ScreenerPanel = lazy(() => import("./ScreenerPanel"));
+const MarketIntelligencePanel = lazy(() => import("./MarketIntelligencePanel"));
+const SignalExplorerPanel = lazy(() => import("./SignalExplorerPanel"));
+const SystemPanel = lazy(() => import("./SystemPanel"));
 import {
   appLogout,
   getHealth,
@@ -798,6 +799,7 @@ export default function App() {
           </div>
         </div>
 
+        <Suspense fallback={<PageLoader />}>
         {tab === "dashboard" && <OverviewPanel onNavigate={(t) => setTab(t as Tab)} />}
         {tab === "watchlist" && (
           <WatchlistPanel permissions={principal?.permissions ?? []} onOpenChart={openChart} />
@@ -830,6 +832,7 @@ export default function App() {
         {tab === "optimization" && <OptimizationPanel />}
         {tab === "risk" && <RiskPanel />}
         {tab === "system" && <SystemPanel />}
+        </Suspense>
         </main>
       </AnimatedSidebarInset>
 
