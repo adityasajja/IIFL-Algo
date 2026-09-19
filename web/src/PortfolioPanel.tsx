@@ -6,6 +6,7 @@ import {
   Banknote,
   BarChart3,
   Briefcase,
+  Clock,
   Coins,
   LineChart,
   ListOrdered,
@@ -16,8 +17,9 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet,
+  Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getPortfolio,
   getRiskStatus,
@@ -28,8 +30,9 @@ import {
   type PortfolioResponse,
   type PortfolioSection,
 } from "./api";
-import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { ErrorBox, Hint } from "./components/ui/card";
 import { Input } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Badge, fmtNum } from "./components/ui/stat";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
@@ -41,6 +44,7 @@ import { MarketDepthLadder } from "./components/ui/market-depth";
 import { useLiveTicks, type LiveTick } from "./lib/useLiveTicks";
 import { sound } from "./lib/sound";
 import { cn } from "./lib/utils";
+import { useDialog } from "./components/ui/dialog-context";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,22 +58,13 @@ const num = (v: unknown): number => {
 };
 
 const INR = (n: number, frac = 0) =>
-  `₹${n.toLocaleString("en-IN", { maximumFractionDigits: frac })}`;
+  `\u20b9${n.toLocaleString("en-IN", { maximumFractionDigits: frac })}`;
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/** Soft empty state. */
-function Empty({
-  icon: Icon,
-  title,
-  hint,
-}: {
-  icon: React.ElementType;
-  title: string;
-  hint?: string;
-}) {
+function Empty({ icon: Icon, title, hint }: { icon: React.ElementType; title: string; hint?: string }) {
   return (
     <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border bg-muted/15 px-6 py-10 text-center">
       <div className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-muted-foreground">
@@ -81,56 +76,53 @@ function Empty({
   );
 }
 
-/** P&L cell with arrow + colour. Used in card lists and tables. */
-function PnLCell({
-  value,
-  pct,
-  size = "sm",
-}: {
-  value: number;
-  pct?: number;
-  size?: "sm" | "md" | "lg";
-}) {
+function PnLCell({ value, pct, size = "sm" }: { value: number; pct?: number; size?: "sm" | "md" | "lg" }) {
   const positive = value >= 0;
   const cls =
-    size === "lg"
-      ? "text-[17px] font-bold tabular-nums tracking-tight"
-      : size === "md"
-        ? "text-[15px] font-semibold tabular-nums"
-        : "text-[13px] font-semibold tabular-nums";
-  const colour = positive
-    ? "text-emerald-600 dark:text-emerald-400"
-    : "text-destructive";
+    size === "lg" ? "text-[17px] font-bold tabular-nums tracking-tight"
+    : size === "md" ? "text-[15px] font-semibold tabular-nums"
+    : "text-[13px] font-semibold tabular-nums";
+  const colour = positive ? "text-emerald-600 dark:text-emerald-400" : "text-destructive";
   return (
     <span className={cn("inline-flex items-center gap-1", colour, cls)}>
-      {positive ? (
-        <ArrowUpRight className="h-3 w-3" />
-      ) : (
-        <ArrowDownRight className="h-3 w-3" />
-      )}
+      {positive ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
       {INR(Math.abs(value))}
       {typeof pct === "number" ? (
-        <span className="text-[11px] font-medium opacity-80">
-          ({pct >= 0 ? "+" : ""}
-          {pct.toFixed(2)}%)
-        </span>
+        <span className="text-[11px] font-medium opacity-80">({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)</span>
       ) : null}
     </span>
   );
 }
 
-/** Status pill for order/trade rows. */
 function StatusPill({ status }: { status: string }) {
   const s = status.toUpperCase();
   const tone =
-    s.includes("REJECT") || s.includes("CANCEL")
-      ? "bad"
-      : s.includes("COMPLETE") || s.includes("FILLED") || s === "TRADED"
-        ? "good"
-        : s.includes("PENDING") || s.includes("OPEN") || s.includes("PARTIAL")
-          ? "warn"
-          : "flat";
+    s.includes("REJECT") || s.includes("CANCEL") ? "bad"
+    : s.includes("COMPLETE") || s.includes("FILLED") || s === "TRADED" ? "good"
+    : s.includes("PENDING") || s.includes("OPEN") || s.includes("PARTIAL") ? "warn"
+    : "flat";
   return <Badge tone={tone}>{status}</Badge>;
+}
+
+// ---------------------------------------------------------------------------
+// Inline "stale data" notice used in tab content
+// ---------------------------------------------------------------------------
+
+function StaleNotice({ lastUpdated, onRetry }: { lastUpdated: Date | null; onRetry: () => void }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-400 mb-3">
+      <Clock size={12} className="shrink-0" />
+      <span>
+        Market data delayed
+        {lastUpdated
+          ? ` \u00b7 Last updated ${lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
+          : ""}
+      </span>
+      <button type="button" onClick={onRetry} className="ml-auto underline hover:text-amber-300">
+        Retry
+      </button>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -138,13 +130,14 @@ function StatusPill({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 
 function KpiStrip({
-  data,
-  error,
-  getTick,
+  data, error, lastUpdated, getTick, pnlMode, setPnlMode,
 }: {
   data: PortfolioResponse | null;
   error: string | null;
+  lastUpdated: Date | null;
   getTick: (sym: string) => LiveTick | undefined;
+  pnlMode: "total" | "daily";
+  setPnlMode: (mode: "total" | "daily") => void;
 }) {
   const kpis = useMemo(() => {
     const limits = data?.sections?.limits?.rows?.[0] ?? null;
@@ -152,7 +145,6 @@ function KpiStrip({
     const positions = data?.sections?.positions?.rows ?? [];
 
     const tradingLimit = num(limits?.tradingLimit);
-    const collateral = num(limits?.collateralMargin);
     const utilized = num(limits?.utilizedMargin);
     const spanMargin = num(limits?.utilizedSpanMargin);
     const exposureMargin = num(limits?.utilizedExposureMargin);
@@ -160,107 +152,105 @@ function KpiStrip({
     const intradayPayin = num(limits?.intradayPayin);
     const creditForSell = num(limits?.creditForSell);
     const blockedForPayout = num(limits?.blockedForPayout);
-    const adhocMargin = num(limits?.adhocMargin);
 
-    const cashFunds =
-      openingCash + intradayPayin + creditForSell - utilized - blockedForPayout;
+    const cashFunds = openingCash + intradayPayin + creditForSell - utilized - blockedForPayout;
 
-    const holdingsInvested = holdings.reduce(
-      (s, h) => s + num(h.totalQuantity) * num(h.averageTradedPrice),
-      0,
-    );
+    const holdingsInvested = holdings.reduce((s, h) => s + num(h.totalQuantity) * num(h.averageTradedPrice), 0);
     const holdingsAtClose = holdings.reduce((s, h) => {
       const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
-      const tick = getTick(sym);
-      const px = tick?.ltp ?? num(h.previousDayClose);
+      const px = getTick(sym)?.ltp ?? 0;
       return s + num(h.totalQuantity) * px;
     }, 0);
 
-    const positionsPnl = positions.reduce((s, p) => {
+    const positionsTotalPnl = positions.reduce((s, p) => {
       const sym = String(p.symbol ?? p.tradingSymbol ?? "");
       const tick = getTick(sym);
-      const ltp = tick?.ltp ?? num(p.last_price);
+      const ltp = tick?.ltp ?? 0;
       const avg = num(p.avg_price);
       const qty = num(p.quantity);
       const explicit = p.unrealized_pnl;
       return s + (tick?.ltp ? (tick.ltp - avg) * qty : typeof explicit === "number" ? num(explicit) : (ltp - avg) * qty);
     }, 0);
 
+    const positionsDailyPnl = positions.reduce((s, p) => {
+      const sym = String(p.symbol ?? p.tradingSymbol ?? "");
+      const tick = getTick(sym);
+      const ltp = tick?.ltp ?? 0;
+      const prev = num(p.prev_close ?? p.previous_close ?? p.previousClose ?? p.prevClose ?? p.close ?? 0);
+      return s + (ltp - prev) * num(p.quantity);
+    }, 0);
+
     return {
       tradingLimit,
-      collateral,
       utilized: utilized + spanMargin + exposureMargin,
       cashFunds,
-      openingCash,
-      intradayPayin,
-      creditForSell,
       blockedForPayout,
-      adhocMargin,
       holdingsInvested,
       holdingsAtClose,
       holdingsCount: holdings.length,
       positionsCount: positions.length,
-      positionsPnl,
+      positionsPnl: pnlMode === "total" ? positionsTotalPnl : positionsDailyPnl,
     };
-  }, [data, getTick]);
+  }, [data, getTick, pnlMode]);
 
   const noData = !data && !error;
 
   return (
     <div className="rounded-2xl border border-border/80 bg-card/40 p-1">
-      <div className="grid grid-cols-2 divide-y divide-border/60 sm:divide-y-0 sm:divide-x sm:grid-cols-4">
-        {/* Metric 1: Available Margin */}
-        <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Available Margin
-          </div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">
-            {INR(noData ? 0 : kpis.tradingLimit)}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {noData ? "Loading…" : `${INR(kpis.utilized)} utilized`}
-          </div>
+      {error && data && lastUpdated && (
+        <div className="flex items-center gap-1.5 px-4 pt-2.5 pb-0 text-[11px] text-amber-500/80">
+          <Clock size={10} />
+          <span>
+            Market data delayed · Last updated{" "}
+            {lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
         </div>
-
-        {/* Metric 2: Cash Funds */}
+      )}
+      <div className="grid grid-cols-2 divide-y divide-border/60 sm:divide-y-0 sm:divide-x sm:grid-cols-4">
         <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Cash Balance
-          </div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">
-            {INR(noData ? 0 : kpis.cashFunds)}
-          </div>
+          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Available Margin</div>
+          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.tradingLimit)}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{noData ? "Loading\u2026" : `${INR(kpis.utilized)} utilized`}</div>
+        </div>
+        <div className="p-4 sm:p-5">
+          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cash Balance</div>
+          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.cashFunds)}</div>
           <div className="mt-1 text-xs text-muted-foreground truncate">
             {kpis.blockedForPayout > 0 ? `${INR(kpis.blockedForPayout)} blocked` : "Settled free funds"}
           </div>
         </div>
-
-        {/* Metric 3: Total Portfolio / Holdings */}
         <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Holdings Value
-          </div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">
-            {INR(noData ? 0 : kpis.holdingsAtClose)}
-          </div>
+          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Holdings Value</div>
+          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.holdingsAtClose)}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {noData ? "Loading…" : `${kpis.holdingsCount} stock lots`}
+            {noData ? "Loading\u2026" : (
+              <span>
+                {kpis.holdingsCount} lots ·{" "}
+                <span className={kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "text-emerald-500" : "text-destructive"}>
+                  {kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "+" : ""}{INR(kpis.holdingsAtClose - kpis.holdingsInvested)} unrealized
+                </span>
+              </span>
+            )}
           </div>
         </div>
-
-        {/* Metric 4: Open Position P&L */}
         <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Open P&L
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Intraday P&L</div>
+            <div className="flex items-center gap-0.5 rounded border border-border/60 p-0.5 text-[10px]">
+              <button type="button" onClick={() => setPnlMode("total")}
+                className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "total" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+                title="Total P&L (since entry)">Total</button>
+              <button type="button" onClick={() => setPnlMode("daily")}
+                className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "daily" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+                title="Day P&L (since previous close)">Daily</button>
+            </div>
           </div>
-          <div className={cn(
-            "mt-1 text-xl font-semibold tracking-tight tabular-nums",
-            kpis.positionsPnl > 0 ? "text-emerald-500" : kpis.positionsPnl < 0 ? "text-destructive" : "text-foreground"
-          )}>
-            {kpis.positionsPnl === 0 ? "₹0" : INR(kpis.positionsPnl)}
+          <div className={cn("mt-1 text-xl font-semibold tracking-tight tabular-nums",
+            kpis.positionsPnl > 0 ? "text-emerald-500" : kpis.positionsPnl < 0 ? "text-destructive" : "text-foreground")}>
+            {kpis.positionsPnl === 0 ? "\u20b90" : INR(kpis.positionsPnl)}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {kpis.positionsCount} active {kpis.positionsCount === 1 ? "position" : "positions"}
+            {kpis.positionsCount} open {kpis.positionsCount === 1 ? "position" : "positions"}
           </div>
         </div>
       </div>
@@ -269,89 +259,38 @@ function KpiStrip({
 }
 
 // ---------------------------------------------------------------------------
-// Tab content: Limits (semantic groups)
+// Tab: Limits
 // ---------------------------------------------------------------------------
 
-function LimitRow({
-  label,
-  value,
-  hint,
-  emphasize,
-  tone,
-}: {
-  label: string;
-  value: number;
-  hint?: string;
-  emphasize?: boolean;
-  tone?: "good" | "bad" | "warn" | "neutral";
+function LimitRow({ label, value, hint, emphasize, tone }: {
+  label: string; value: number; hint?: string; emphasize?: boolean; tone?: "good" | "bad" | "warn" | "neutral";
 }) {
   const content = (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-3 py-2 transition-colors",
-        emphasize && "border-b border-border/60 pb-2.5",
-      )}
-    >
+    <div className={cn("flex items-center justify-between gap-3 py-2 transition-colors", emphasize && "border-b border-border/60 pb-2.5")}>
       <div className="flex items-center gap-1.5 min-w-0">
-        <span
-          className={cn(
-            "truncate",
-            emphasize ? "text-sm font-semibold text-foreground" : "text-xs text-muted-foreground",
-          )}
-        >
-          {label}
-        </span>
-        {hint ? (
-          <span className="cursor-help rounded-full bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground/70">
-            ?
-          </span>
-        ) : null}
+        <span className={cn("truncate", emphasize ? "text-sm font-semibold text-foreground" : "text-xs text-muted-foreground")}>{label}</span>
+        {hint ? <span className="cursor-help rounded-full bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground/70">?</span> : null}
       </div>
-      <div
-        className={cn(
-          "shrink-0 tabular-nums font-medium",
-          emphasize ? "text-base font-bold text-foreground" : "text-xs",
-          tone === "good" && "text-emerald-600 dark:text-emerald-400",
-          tone === "bad" && "text-destructive",
-          tone === "warn" && "text-amber-600 dark:text-amber-400",
-        )}
-      >
+      <div className={cn("shrink-0 tabular-nums font-medium", emphasize ? "text-base font-bold text-foreground" : "text-xs",
+        tone === "good" && "text-emerald-600 dark:text-emerald-400",
+        tone === "bad" && "text-destructive",
+        tone === "warn" && "text-amber-600 dark:text-amber-400")}>
         {INR(value)}
       </div>
     </div>
   );
-
-  if (hint) {
-    return (
-      <Tooltip content={hint} wrapperClassName="w-full block">
-        {content}
-      </Tooltip>
-    );
-  }
-
+  if (hint) return <Tooltip content={hint} wrapperClassName="w-full block">{content}</Tooltip>;
   return content;
 }
 
-function LimitsGroup({
-  title,
-  icon: Icon,
-  badge,
-  children,
-  className,
-}: {
-  title: string;
-  icon: React.ElementType;
-  badge?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
+function LimitsGroup({ title, icon: Icon, badge, children, className }: {
+  title: string; icon: React.ElementType; badge?: React.ReactNode; children: React.ReactNode; className?: string;
 }) {
   return (
     <div className={cn("rounded-2xl border border-border bg-card p-4.5", className)}>
       <div className="mb-3 flex items-center justify-between gap-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
         <span className="flex items-center gap-2">
-          <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/[0.09] text-primary">
-            <Icon size={11} />
-          </span>
+          <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/[0.09] text-primary"><Icon size={11} /></span>
           {title}
         </span>
         {badge}
@@ -362,15 +301,7 @@ function LimitsGroup({
 }
 
 function LimitsView({ row }: { row: Row | null }) {
-  if (!row) {
-    return (
-      <Empty
-        icon={Wallet}
-        title="No limits returned"
-        hint="The broker returned an empty limits payload. Try Refresh."
-      />
-    );
-  }
+  if (!row) return <Empty icon={Wallet} title="No limits returned" hint="The broker returned an empty limits payload. Try Refresh." />;
   const tradingLimit = num(row.tradingLimit);
   const openingCash = num(row.openingCashLimit);
   const collateral = num(row.collateralMargin);
@@ -381,32 +312,19 @@ function LimitsView({ row }: { row: Row | null }) {
   const intradayPayin = num(row.intradayPayin);
   const blocked = num(row.blockedForPayout);
   const credit = num(row.creditForSell);
-
   const totalDeployed = utilized + spanMargin + exposureMargin;
   const totalPower = tradingLimit + totalDeployed;
   const deploymentPct = totalPower > 0 ? (totalDeployed / totalPower) * 100 : 0;
 
-  // Items for the BouncyAccordion breakdown of technical broker margins
   const technicalItems: BouncyAccordionItem[] = [
     {
       id: "fo_margins",
       title: "Derivatives & Exposure Margins",
       icon: <LineChart className="h-4 w-4" />,
-      badge: (
-        <span className="tabular-nums text-xs font-semibold">
-          {INR(spanMargin + exposureMargin)}
-        </span>
-      ),
       description: (
         <div className="space-y-1.5 pt-1">
-          <div className="flex justify-between py-1 border-b border-border/40">
-            <span>SPAN Margin (F&O blocked)</span>
-            <span className="font-semibold text-foreground">{INR(spanMargin)}</span>
-          </div>
-          <div className="flex justify-between py-1">
-            <span>Exposure Margin</span>
-            <span className="font-semibold text-foreground">{INR(exposureMargin)}</span>
-          </div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>SPAN Margin (F&O blocked)</span><span className="font-semibold text-foreground">{INR(spanMargin)}</span></div>
+          <div className="flex justify-between py-1"><span>Exposure Margin</span><span className="font-semibold text-foreground">{INR(exposureMargin)}</span></div>
         </div>
       ),
     },
@@ -414,30 +332,12 @@ function LimitsView({ row }: { row: Row | null }) {
       id: "cash_movements",
       title: "Cash Inflow, Outflow & Payouts",
       icon: <Banknote className="h-4 w-4" />,
-      badge: (
-        <span className="tabular-nums text-xs font-semibold">
-          {intradayPayin - blocked > 0 ? "+" : ""}
-          {INR(intradayPayin - blocked)}
-        </span>
-      ),
       description: (
         <div className="space-y-1.5 pt-1">
-          <div className="flex justify-between py-1 border-b border-border/40">
-            <span>Opening Cash</span>
-            <span className="font-semibold text-foreground">{INR(openingCash)}</span>
-          </div>
-          <div className="flex justify-between py-1 border-b border-border/40">
-            <span>Intraday Pay-in</span>
-            <span className="font-semibold text-emerald-600 dark:text-emerald-400">+{INR(intradayPayin)}</span>
-          </div>
-          <div className="flex justify-between py-1 border-b border-border/40">
-            <span>Credit from Sells</span>
-            <span className="font-semibold text-emerald-600 dark:text-emerald-400">+{INR(credit)}</span>
-          </div>
-          <div className="flex justify-between py-1">
-            <span>Blocked for Payout</span>
-            <span className="font-semibold text-destructive">-{INR(blocked)}</span>
-          </div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>Opening Cash</span><span className="font-semibold text-foreground">{INR(openingCash)}</span></div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>Intraday Pay-in</span><span className="font-semibold text-emerald-600 dark:text-emerald-400">+{INR(intradayPayin)}</span></div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>Credit from Sells</span><span className="font-semibold text-emerald-600 dark:text-emerald-400">+{INR(credit)}</span></div>
+          <div className="flex justify-between py-1"><span>Blocked for Payout</span><span className="font-semibold text-destructive">-{INR(blocked)}</span></div>
         </div>
       ),
     },
@@ -445,21 +345,10 @@ function LimitsView({ row }: { row: Row | null }) {
       id: "collateral_adhoc",
       title: "Collateral & Ad-hoc Margins",
       icon: <Coins className="h-4 w-4" />,
-      badge: (
-        <span className="tabular-nums text-xs font-semibold">
-          {INR(collateral + adhoc)}
-        </span>
-      ),
       description: (
         <div className="space-y-1.5 pt-1">
-          <div className="flex justify-between py-1 border-b border-border/40">
-            <span>Pledged Collateral</span>
-            <span className="font-semibold text-foreground">{INR(collateral)}</span>
-          </div>
-          <div className="flex justify-between py-1">
-            <span>Ad-hoc Margin Granted</span>
-            <span className="font-semibold text-foreground">{INR(adhoc)}</span>
-          </div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>Pledged Collateral</span><span className="font-semibold text-foreground">{INR(collateral)}</span></div>
+          <div className="flex justify-between py-1"><span>Ad-hoc Margin Granted</span><span className="font-semibold text-foreground">{INR(adhoc)}</span></div>
         </div>
       ),
     },
@@ -468,73 +357,23 @@ function LimitsView({ row }: { row: Row | null }) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2">
-        {/* Margin Utilization Meter */}
-        <LimitsGroup
-          title="Margin & Buying Capacity"
-          icon={LineChart}
-          badge={
-            <Badge tone={deploymentPct > 80 ? "warn" : deploymentPct > 0 ? "good" : "flat"}>
-              {deploymentPct.toFixed(1)}% deployed
-            </Badge>
-          }
-        >
-          <LimitRow
-            label="Utilized Margin (Active)"
-            value={totalDeployed}
-            emphasize
-            tone={totalDeployed > 0 ? "warn" : "neutral"}
-            hint="Total active margin consumed by equity and derivatives positions."
-          />
-          <LimitRow
-            label="Equity Utilized"
-            value={utilized}
-            hint="Margin consumed specifically by equity intraday trades."
-          />
-          <LimitRow
-            label="F&O Blocked"
-            value={spanMargin + exposureMargin}
-            hint="SPAN + exposure margin currently blocked for open derivatives."
-          />
+        <LimitsGroup title="Margin & Buying Capacity" icon={LineChart}
+          badge={<Badge tone={deploymentPct > 80 ? "warn" : deploymentPct > 0 ? "good" : "flat"}>{deploymentPct.toFixed(1)}% deployed</Badge>}>
+          <LimitRow label="Utilized Margin (Active)" value={totalDeployed} emphasize tone={totalDeployed > 0 ? "warn" : "neutral"} hint="Total active margin consumed by equity and derivatives positions." />
+          <LimitRow label="Equity Utilized" value={utilized} hint="Margin consumed specifically by equity intraday trades." />
+          <LimitRow label="F&O Blocked" value={spanMargin + exposureMargin} hint="SPAN + exposure margin currently blocked for open derivatives." />
         </LimitsGroup>
-
-        {/* Capital Composition */}
-        <LimitsGroup
-          title="Capital Composition"
-          icon={Wallet}
-          badge={
-            <span className="text-xs text-muted-foreground">
-              {collateral > 0 ? "Cash + Pledged" : "100% Cash"}
-            </span>
-          }
-        >
-          <LimitRow
-            label="Pledged Collateral"
-            value={collateral}
-            emphasize
-            hint="Margin value obtained from pledged shares/securities."
-          />
-          <LimitRow
-            label="Opening Cash"
-            value={openingCash}
-            hint="Starting cash balance at the beginning of the trading day."
-          />
-          <LimitRow
-            label="Ad-hoc Margin"
-            value={adhoc}
-            hint="Special discretionary margin extended by the broker."
-          />
+        <LimitsGroup title="Capital Composition" icon={Wallet}
+          badge={<span className="text-xs text-muted-foreground">{collateral > 0 ? "Cash + Pledged" : "100% Cash"}</span>}>
+          <LimitRow label="Pledged Collateral" value={collateral} emphasize hint="Margin value obtained from pledged shares/securities." />
+          <LimitRow label="Opening Cash" value={openingCash} hint="Starting cash balance at the beginning of the trading day." />
+          <LimitRow label="Ad-hoc Margin" value={adhoc} hint="Special discretionary margin extended by the broker." />
         </LimitsGroup>
       </div>
-
-      {/* Accordion for granular line-item breakdowns without cluttering the screen */}
       <div className="rounded-2xl border border-border bg-card p-4">
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            Granular Breakdown & Ledger Flow
-          </div>
-          <span className="text-[11px] text-muted-foreground/75">
-            Click to inspect underlying margin accounts
-          </span>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Granular Breakdown & Ledger Flow</div>
+          <span className="text-[11px] text-muted-foreground/75">Click to inspect</span>
         </div>
         <BouncyAccordion items={technicalItems} />
       </div>
@@ -543,13 +382,11 @@ function LimitsView({ row }: { row: Row | null }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab content: Positions
+// Tab: Positions
 // ---------------------------------------------------------------------------
 
-
-
 function positionPnl(p: Row, tick?: LiveTick): number {
-  const ltp = tick?.ltp ?? num(p.last_price);
+  const ltp = tick?.ltp ?? 0;
   const avg = num(p.avg_price);
   const qty = num(p.quantity);
   const explicit = num(p.unrealized_pnl);
@@ -557,184 +394,78 @@ function positionPnl(p: Row, tick?: LiveTick): number {
 }
 
 function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) => LiveTick | undefined }) {
-  const columns = useMemo<TableColumn<Row>[]>(
-    () => [
-      {
-        key: "instrument",
-        header: "Instrument",
-        sortable: true,
-        width: "2fr",
-        sortValue: (r) => String(r.symbol ?? r.tradingSymbol ?? ""),
-        cell: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "?");
-          const exch = String(r.exchange ?? "NSEEQ");
-          const tick = getTick(sym);
-          return (
-            <div className="flex items-center gap-2 py-1">
-              <span className="font-semibold text-foreground hover:text-primary transition-colors">
-                {sym}
-              </span>
-              <span className="text-[11px] text-muted-foreground">{exch}</span>
-              {tick && (
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" title="Live stream active" />
-              )}
-            </div>
-          );
-        },
+  const columns = useMemo<TableColumn<Row>[]>(() => [
+    {
+      key: "instrument", header: "Instrument", sortable: true, width: "2fr",
+      sortValue: (r) => String(r.symbol ?? r.tradingSymbol ?? ""),
+      cell: (r) => {
+        const sym = String(r.symbol ?? r.tradingSymbol ?? "?");
+        const exch = String(r.exchange ?? "NSEEQ");
+        const tick = getTick(sym);
+        return (
+          <div className="flex items-center gap-2 py-1">
+            <span className="font-semibold text-foreground hover:text-primary transition-colors">{sym}</span>
+            <span className="text-[11px] text-muted-foreground">{exch}</span>
+            {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" title="Live" />}
+          </div>
+        );
       },
-      {
-        key: "side",
-        header: "Side",
-        sortable: true,
-        width: "100px",
-        sortValue: (r) => (num(r.quantity) > 0 ? "LONG" : num(r.quantity) < 0 ? "SHORT" : "FLAT"),
-        cell: (r) => {
-          const qty = num(r.quantity);
-          const isLong = qty > 0;
-          return (
-            <Badge tone={isLong ? "good" : qty < 0 ? "bad" : "flat"}>
-              {qty === 0 ? "FLAT" : isLong ? "LONG" : "SHORT"}
-            </Badge>
-          );
-        },
+    },
+    {
+      key: "side", header: "Side", sortable: true, width: "100px",
+      sortValue: (r) => (num(r.quantity) > 0 ? "LONG" : num(r.quantity) < 0 ? "SHORT" : "FLAT"),
+      cell: (r) => { const qty = num(r.quantity); return <Badge tone={qty > 0 ? "good" : qty < 0 ? "bad" : "flat"}>{qty === 0 ? "FLAT" : qty > 0 ? "LONG" : "SHORT"}</Badge>; },
+    },
+    {
+      key: "qty", header: "Qty", sortable: true, align: "right", width: "100px",
+      sortValue: (r) => num(r.quantity),
+      cell: (r) => <span className="tabular-nums font-medium text-foreground">{num(r.quantity).toLocaleString("en-IN")}</span>,
+    },
+    {
+      key: "avg", header: "Avg", sortable: true, align: "right", width: "110px",
+      sortValue: (r) => num(r.avg_price),
+      cell: (r) => <span className="tabular-nums text-muted-foreground">{INR(num(r.avg_price), 2)}</span>,
+    },
+    {
+      key: "ltp", header: "LTP", sortable: true, align: "right", width: "110px",
+      sortValue: (r) => { const sym = String(r.symbol ?? r.tradingSymbol ?? ""); return getTick(sym)?.ltp ?? 0; },
+      cell: (r) => {
+        const sym = String(r.symbol ?? r.tradingSymbol ?? "");
+        const tick = getTick(sym);
+        const ltp = tick?.ltp ?? 0;
+        return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
-      {
-        key: "qty",
-        header: "Quantity",
-        sortable: true,
-        align: "right",
-        width: "110px",
-        sortValue: (r) => num(r.quantity),
-        cell: (r) => (
-          <span className="tabular-nums font-medium text-foreground">
-            {num(r.quantity).toLocaleString("en-IN")}
-          </span>
-        ),
+    },
+    {
+      key: "pnl", header: "Unrealized P&L", sortable: true, align: "right", width: "140px",
+      sortValue: (r) => { const sym = String(r.symbol ?? r.tradingSymbol ?? ""); return positionPnl(r, getTick(sym)); },
+      cell: (r) => { const sym = String(r.symbol ?? r.tradingSymbol ?? ""); return <PnLCell value={positionPnl(r, getTick(sym))} size="sm" />; },
+    },
+    {
+      key: "pnl_pct", header: "P&L %", sortable: true, align: "right", width: "100px",
+      sortValue: (r) => { const sym = String(r.symbol ?? r.tradingSymbol ?? ""); const tick = getTick(sym); const avg = num(r.avg_price); const ltp = tick?.ltp ?? 0; return avg > 0 ? ((ltp - avg) / avg) * 100 : 0; },
+      cell: (r) => {
+        const sym = String(r.symbol ?? r.tradingSymbol ?? ""); const tick = getTick(sym);
+        const avg = num(r.avg_price); const ltp = tick?.ltp ?? 0;
+        if (!tick || ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[12.5px]">—</span>;
+        const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
+        return <span className={cn("inline-flex items-center tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
       },
-      {
-        key: "avg",
-        header: "Avg Price",
-        sortable: true,
-        align: "right",
-        width: "120px",
-        sortValue: (r) => num(r.avg_price),
-        cell: (r) => (
-          <span className="tabular-nums text-muted-foreground">
-            {INR(num(r.avg_price), 2)}
-          </span>
-        ),
-      },
-      {
-        key: "ltp",
-        header: "LTP",
-        sortable: true,
-        align: "right",
-        width: "120px",
-        sortValue: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "");
-          return getTick(sym)?.ltp ?? num(r.last_price);
-        },
-        cell: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "");
-          const tick = getTick(sym);
-          const ltp = tick?.ltp ?? num(r.last_price);
-          return (
-            <span
-              className={cn(
-                "tabular-nums font-semibold transition-colors duration-300",
-                tick?.flash === "up" && "text-emerald-500",
-                tick?.flash === "down" && "text-destructive",
-                !tick?.flash && "text-foreground"
-              )}
-            >
-              {INR(ltp, 2)}
-            </span>
-          );
-        },
-      },
-      {
-        key: "pnl",
-        header: "Unrealized P&L",
-        sortable: true,
-        align: "right",
-        width: "140px",
-        sortValue: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "");
-          return positionPnl(r, getTick(sym));
-        },
-        cell: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "");
-          const tick = getTick(sym);
-          const pnl = positionPnl(r, tick);
-          return <PnLCell value={pnl} size="sm" />;
-        },
-      },
-      {
-        key: "pnl_pct",
-        header: "P&L %",
-        sortable: true,
-        align: "right",
-        width: "115px",
-        sortValue: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "");
-          const tick = getTick(sym);
-          const avg = num(r.avg_price);
-          const ltp = tick?.ltp ?? num(r.last_price);
-          return avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
-        },
-        cell: (r) => {
-          const sym = String(r.symbol ?? r.tradingSymbol ?? "");
-          const tick = getTick(sym);
-          const avg = num(r.avg_price);
-          const ltp = tick?.ltp ?? num(r.last_price);
-          const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
-          const positive = pct >= 0;
-          return (
-            <span
-              className={cn(
-                "inline-flex items-center gap-0.5 tabular-nums font-semibold text-[12.5px]",
-                positive ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
-              )}
-            >
-              {positive ? "+" : ""}
-              {pct.toFixed(2)}%
-            </span>
-          );
-        },
-      },
-    ],
-    [getTick],
-  );
+    },
+  ], [getTick]);
 
-  if (rows.length === 0) {
-    return (
-      <Empty
-        icon={Activity}
-        title="No open positions"
-        hint="Your intraday book is flat. Active positions will appear here with live P&L."
-      />
-    );
-  }
+  if (rows.length === 0) return <Empty icon={Activity} title="No open positions" hint="Your intraday book is flat. Active positions will appear here with live P&L." />;
 
   return (
     <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 shadow-xs">
-      <Table
-        data={rows}
-        columns={columns}
-        getRowId={(r, i) => String(r.symbol ?? r.tradingSymbol ?? i)}
-        resizable
-        reorderable
-        defaultSort={{ key: "pnl", direction: "desc" }}
-        height={Math.min(480, Math.max(160, rows.length * 52 + 48))}
-        rowHeight={52}
-        className="rounded-xl border-none"
-      />
+      <Table data={rows} columns={columns} getRowId={(r, i) => String(r.symbol ?? r.tradingSymbol ?? i)} resizable reorderable
+        defaultSort={{ key: "pnl", direction: "desc" }} height={Math.min(480, Math.max(160, rows.length * 52 + 48))} rowHeight={52} className="rounded-xl border-none" />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Tab content: Holdings
+// Tab: Holdings
 // ---------------------------------------------------------------------------
 
 function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
@@ -742,7 +473,7 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
   const name = String(row.formattedInstrumentName ?? "").trim();
   const qty = num(row.totalQuantity);
   const avg = num(row.averageTradedPrice);
-  const lastPrice = tick?.ltp ?? num(row.previousDayClose);
+  const lastPrice = tick?.ltp ?? 0;
   const invested = qty * avg;
   const currentVal = qty * lastPrice;
   const delta = currentVal - invested;
@@ -750,68 +481,42 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
   const product = String(row.product ?? "");
 
   return (
-    <motion.div
-      whileHover={{ y: -1 }}
-      transition={{ type: "spring", stiffness: 380, damping: 28 }}
-      className="rounded-2xl border border-border bg-card p-4 transition-colors"
-    >
+    <motion.div whileHover={{ y: -1 }} transition={{ type: "spring", stiffness: 380, damping: 28 }}
+      className="rounded-2xl border border-border bg-card p-4 transition-colors">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="truncate text-[15px] font-bold tracking-tight">{symbol}</div>
             {product ? <Badge tone="flat">{product}</Badge> : null}
-            {tick && (
-              <span className="flex items-center gap-1 text-[10.5px] font-medium text-emerald-500">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                Live
-              </span>
-            )}
+            {tick && <span className="flex items-center gap-1 text-[10.5px] font-medium text-emerald-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />Live</span>}
           </div>
-          {name ? (
-            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground" title={name}>
-              {name}
-            </div>
-          ) : null}
+          {name ? <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground" title={name}>{name}</div> : null}
         </div>
         <div className="text-right">
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            Qty
-          </div>
-          <div className="mt-0.5 text-sm font-semibold tabular-nums">
-            {qty.toLocaleString("en-IN")}
-          </div>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Qty</div>
+          <div className="mt-0.5 text-sm font-semibold tabular-nums">{qty.toLocaleString("en-IN")}</div>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-3 border-t border-border/60 pt-3">
         <div>
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            Invested
-          </div>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Invested</div>
           <div className="mt-0.5 text-[13px] font-semibold tabular-nums">{INR(invested)}</div>
           <div className="text-[10.5px] text-muted-foreground/70">@ {INR(avg, 2)}</div>
         </div>
         <div>
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            {tick ? "Current Value" : "At last close"}
-          </div>
-          <div
-            className={cn(
-              "mt-0.5 text-[13px] font-semibold tabular-nums transition-colors duration-300",
-              tick?.flash === "up" && "text-emerald-500",
-              tick?.flash === "down" && "text-destructive"
-            )}
-          >
-            {INR(currentVal)}
-          </div>
-          <div className="text-[10.5px] text-muted-foreground/70">@ {INR(lastPrice, 2)}</div>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Current</div>
+          {tick ? (
+            <>
+              <div className={cn("mt-0.5 text-[13px] font-semibold tabular-nums transition-colors duration-300", tick.flash === "up" && "text-emerald-500", tick.flash === "down" && "text-destructive")}>{INR(currentVal)}</div>
+              <div className="text-[10.5px] text-muted-foreground/70">@ {INR(lastPrice, 2)}</div>
+            </>
+          ) : (
+            <div className="mt-0.5 text-[13px] font-semibold text-muted-foreground/50">—</div>
+          )}
         </div>
         <div>
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            Δ vs avg
-          </div>
-          <div className="mt-0.5">
-            <PnLCell value={delta} pct={pct} />
-          </div>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Δ vs avg</div>
+          <div className="mt-0.5">{tick ? <PnLCell value={delta} pct={pct} /> : <span className="text-muted-foreground/50 text-[13px]">—</span>}</div>
         </div>
       </div>
     </motion.div>
@@ -821,290 +526,161 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
 function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) => LiveTick | undefined }) {
   const [query, setQuery] = useState("");
   const [selectedLots, setSelectedLots] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
-    return (localStorage.getItem("atr.holdings.view") as "table" | "grid") || "table";
-  });
+  const [viewMode, setViewMode] = useState<"table" | "grid">(() => (localStorage.getItem("atr.holdings.view") as "table" | "grid") || "table");
 
-  const toggleView = (mode: "table" | "grid") => {
-    setViewMode(mode);
-    localStorage.setItem("atr.holdings.view", mode);
-  };
+  const toggleView = (mode: "table" | "grid") => { setViewMode(mode); localStorage.setItem("atr.holdings.view", mode); };
 
-  // Configure interactive columns for @beui/table (sortable, resizable, reorderable)
-  const columns = useMemo<TableColumn<Row>[]>(
-    () => [
-      {
-        key: "instrument",
-        header: "Instrument",
-        sortable: true,
-        width: "2.2fr",
-        sortValue: (r) => String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""),
-        cell: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "?");
-          const name = String(r.formattedInstrumentName ?? "");
-          const tick = getTick(sym);
-          return (
-            <div className="flex flex-col justify-center min-w-0 py-1">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-foreground hover:text-primary transition-colors">
-                  {sym}
-                </span>
-                {tick && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" title="Live stream active" />
-                )}
-              </div>
-              {name && (
-                <span className="text-[11px] text-muted-foreground/75 truncate" title={name}>
-                  {name}
-                </span>
-              )}
+  const totalPortfolioValue = useMemo(() =>
+    rows.reduce((s, h) => {
+      const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
+      return s + num(h.totalQuantity) * (getTick(sym)?.ltp ?? 0);
+    }, 0), [rows, getTick]);
+
+  const columns = useMemo<TableColumn<Row>[]>(() => [
+    {
+      key: "instrument", header: "Instrument", sortable: true, width: "2.2fr",
+      sortValue: (r) => String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""),
+      cell: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "?");
+        const name = String(r.formattedInstrumentName ?? "");
+        const tick = getTick(sym);
+        return (
+          <div className="flex flex-col justify-center min-w-0 py-1">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground hover:text-primary transition-colors">{sym}</span>
+              {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
             </div>
-          );
-        },
+            {name && <span className="text-[11px] text-muted-foreground/75 truncate" title={name}>{name}</span>}
+          </div>
+        );
       },
-      {
-        key: "qty",
-        header: "Quantity",
-        sortable: true,
-        align: "right",
-        width: "110px",
-        sortValue: (r) => num(r.totalQuantity),
-        cell: (r) => (
-          <span className="tabular-nums font-medium text-foreground/90">
-            {num(r.totalQuantity).toLocaleString("en-IN")}
-          </span>
-        ),
+    },
+    {
+      key: "qty", header: "Qty", sortable: true, align: "right", width: "90px",
+      sortValue: (r) => num(r.totalQuantity),
+      cell: (r) => <span className="tabular-nums font-medium text-foreground/90">{num(r.totalQuantity).toLocaleString("en-IN")}</span>,
+    },
+    {
+      key: "avg", header: "Avg Price", sortable: true, align: "right", width: "110px",
+      sortValue: (r) => num(r.averageTradedPrice),
+      cell: (r) => <span className="tabular-nums text-muted-foreground">{INR(num(r.averageTradedPrice), 2)}</span>,
+    },
+    {
+      key: "ltp", header: "LTP", sortable: true, align: "right", width: "110px",
+      sortValue: (r) => { const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""); return getTick(sym)?.ltp ?? 0; },
+      cell: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const tick = getTick(sym);
+        const ltp = tick?.ltp ?? 0;
+        return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
-      {
-        key: "avg",
-        header: "Avg Price",
-        sortable: true,
-        align: "right",
-        width: "120px",
-        sortValue: (r) => num(r.averageTradedPrice),
-        cell: (r) => (
-          <span className="tabular-nums text-muted-foreground">
-            {INR(num(r.averageTradedPrice), 2)}
-          </span>
-        ),
+    },
+    {
+      key: "value", header: "Value", sortable: true, align: "right", width: "120px",
+      sortValue: (r) => { const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""); return num(r.totalQuantity) * (getTick(sym)?.ltp ?? 0); },
+      cell: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const ltp = getTick(sym)?.ltp ?? 0;
+        return <span className="tabular-nums font-semibold text-foreground">{ltp > 0 ? INR(num(r.totalQuantity) * ltp) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
-      {
-        key: "ltp",
-        header: "LTP",
-        sortable: true,
-        align: "right",
-        width: "120px",
-        sortValue: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          return getTick(sym)?.ltp ?? num(r.previousDayClose);
-        },
-        cell: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const tick = getTick(sym);
-          const ltp = tick?.ltp ?? num(r.previousDayClose);
-          return (
-            <span
-              className={cn(
-                "tabular-nums font-semibold transition-colors duration-300",
-                tick?.flash === "up" && "text-emerald-500",
-                tick?.flash === "down" && "text-destructive",
-                !tick?.flash && "text-foreground"
-              )}
-            >
-              {INR(ltp, 2)}
-            </span>
-          );
-        },
+    },
+    {
+      key: "alloc_pct", header: "Alloc %", sortable: true, align: "right", width: "90px",
+      sortValue: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const val = num(r.totalQuantity) * (getTick(sym)?.ltp ?? 0);
+        return totalPortfolioValue > 0 ? (val / totalPortfolioValue) * 100 : 0;
       },
-      {
-        key: "value",
-        header: "Current Value",
-        sortable: true,
-        align: "right",
-        width: "140px",
-        sortValue: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const px = getTick(sym)?.ltp ?? num(r.previousDayClose);
-          return num(r.totalQuantity) * px;
-        },
-        cell: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const px = getTick(sym)?.ltp ?? num(r.previousDayClose);
-          return (
-            <span className="tabular-nums font-semibold text-foreground">
-              {INR(num(r.totalQuantity) * px)}
-            </span>
-          );
-        },
+      cell: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const ltp = getTick(sym)?.ltp ?? 0;
+        if (ltp === 0) return <div className="flex flex-col items-end gap-0.5"><span className="text-muted-foreground/50 text-[12px]">—</span></div>;
+        const val = num(r.totalQuantity) * ltp;
+        const pct = totalPortfolioValue > 0 ? (val / totalPortfolioValue) * 100 : 0;
+        return (
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="tabular-nums text-[12px] font-semibold text-foreground/80">{pct.toFixed(1)}%</span>
+            <div className="h-1 w-14 rounded-full bg-border/50 overflow-hidden">
+              <div className="h-full rounded-full bg-primary/60 transition-all duration-500" style={{ width: `${Math.min(100, pct)}%` }} />
+            </div>
+          </div>
+        );
       },
-      {
-        key: "pnl",
-        header: "Unrealized P&L",
-        sortable: true,
-        align: "right",
-        width: "140px",
-        sortValue: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const px = getTick(sym)?.ltp ?? num(r.previousDayClose);
-          const val = num(r.totalQuantity) * px;
-          const inv = num(r.totalQuantity) * num(r.averageTradedPrice);
-          return val - inv;
-        },
-        cell: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const avg = num(r.averageTradedPrice);
-          const tick = getTick(sym);
-          const ltp = tick?.ltp ?? num(r.previousDayClose);
-          const val = num(r.totalQuantity) * ltp;
-          const inv = num(r.totalQuantity) * avg;
-          const delta = val - inv;
-          return <PnLCell value={delta} size="sm" />;
-        },
+    },
+    {
+      key: "pnl", header: "Unrealized P&L", sortable: true, align: "right", width: "130px",
+      sortValue: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const ltp = getTick(sym)?.ltp ?? 0;
+        return num(r.totalQuantity) * ltp - num(r.totalQuantity) * num(r.averageTradedPrice);
       },
-      {
-        key: "pnl_pct",
-        header: "P&L %",
-        sortable: true,
-        align: "right",
-        width: "115px",
-        sortValue: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const avg = num(r.averageTradedPrice);
-          const tick = getTick(sym);
-          const ltp = tick?.ltp ?? num(r.previousDayClose);
-          return avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
-        },
-        cell: (r) => {
-          const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-          const avg = num(r.averageTradedPrice);
-          const tick = getTick(sym);
-          const ltp = tick?.ltp ?? num(r.previousDayClose);
-          const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
-          const positive = pct >= 0;
-          return (
-            <span
-              className={cn(
-                "inline-flex items-center gap-0.5 tabular-nums font-semibold text-[12.5px]",
-                positive ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
-              )}
-            >
-              {positive ? "+" : ""}
-              {pct.toFixed(2)}%
-            </span>
-          );
-        },
+      cell: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const ltp = getTick(sym)?.ltp ?? 0;
+        if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[13px]">—</span>;
+        return <PnLCell value={num(r.totalQuantity) * ltp - num(r.totalQuantity) * num(r.averageTradedPrice)} size="sm" />;
       },
-    ],
-    [getTick],
-  );
+    },
+    {
+      key: "pnl_pct", header: "P&L %", sortable: true, align: "right", width: "95px",
+      sortValue: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const avg = num(r.averageTradedPrice); const ltp = getTick(sym)?.ltp ?? 0;
+        return avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
+      },
+      cell: (r) => {
+        const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
+        const avg = num(r.averageTradedPrice); const ltp = getTick(sym)?.ltp ?? 0;
+        if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[12.5px]">—</span>;
+        const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
+        return <span className={cn("inline-flex tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
+      },
+    },
+  ], [getTick, totalPortfolioValue]);
 
-  if (rows.length === 0) {
-    return (
-      <Empty
-        icon={Briefcase}
-        title="No holdings"
-        hint="Your demat account is empty. Holdings appear here as delivery trades settle."
-      />
-    );
-  }
+  if (rows.length === 0) return <Empty icon={Briefcase} title="No holdings" hint="Your demat account is empty." />;
 
-  const totalInvested = rows.reduce(
-    (s, h) => s + num(h.totalQuantity) * num(h.averageTradedPrice),
-    0,
-  );
-  const totalAtClose = rows.reduce((s, h) => {
-    const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
-    const tick = getTick(sym);
-    const px = tick?.ltp ?? num(h.previousDayClose);
-    return s + num(h.totalQuantity) * px;
-  }, 0);
-  const totalDelta = totalAtClose - totalInvested;
+  const totalInvested = rows.reduce((s, h) => s + num(h.totalQuantity) * num(h.averageTradedPrice), 0);
+  const totalDelta = totalPortfolioValue - totalInvested;
   const totalPct = totalInvested > 0 ? (totalDelta / totalInvested) * 100 : 0;
 
   const filtered = rows.filter((r) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "").toLowerCase();
-    const name = String(r.formattedInstrumentName ?? "").toLowerCase();
-    return sym.includes(q) || name.includes(q);
+    return String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "").toLowerCase().includes(q)
+      || String(r.formattedInstrumentName ?? "").toLowerCase().includes(q);
   });
 
   return (
     <div className="space-y-3.5">
-      {/* Stripe-style Interactive Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3.5 pt-1">
         <div className="flex items-center gap-2.5">
-          <span className="text-[13px] font-medium text-muted-foreground">
-            Unrealized:
-          </span>
+          <span className="text-[13px] font-medium text-muted-foreground">Unrealized:</span>
           <PnLCell value={totalDelta} pct={totalPct} size="md" />
           {selectedLots.length > 0 && (
-            <>
-              <span className="text-xs text-muted-foreground/60">·</span>
-              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                {selectedLots.length} selected
-              </span>
-            </>
+            <><span className="text-xs text-muted-foreground/60">·</span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">{selectedLots.length} selected</span></>
           )}
         </div>
-
         <div className="flex items-center gap-2.5">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search symbols…"
-            className="h-8 w-48 rounded-lg border border-border/80 bg-card/60 px-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none transition-colors"
-          />
-
-          {/* View Switcher: Interactive Table vs Cards */}
+          <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search symbols…"
+            className="h-8 w-48 rounded-lg border border-border/80 bg-card/60 px-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none transition-colors" />
           <div className="flex items-center rounded-lg border border-border/80 bg-card/50 p-0.5 text-xs">
-            <button
-              type="button"
-              onClick={() => toggleView("table")}
-              title="Interactive Virtualized Table"
-              className={cn(
-                "rounded-md px-2 py-0.5 font-medium transition-colors",
-                viewMode === "table" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Table
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleView("grid")}
-              title="Card grid"
-              className={cn(
-                "rounded-md px-2 py-0.5 font-medium transition-colors",
-                viewMode === "grid" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Cards
-            </button>
+            <button type="button" onClick={() => toggleView("table")} className={cn("rounded-md px-2 py-0.5 font-medium transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>Table</button>
+            <button type="button" onClick={() => toggleView("grid")} className={cn("rounded-md px-2 py-0.5 font-medium transition-colors", viewMode === "grid" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>Cards</button>
           </div>
         </div>
       </div>
 
       {viewMode === "table" ? (
-        /* @beui/table: Virtualized, Sortable, Resizable & Reorderable Data Table */
         <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 shadow-xs">
-          <Table
-            data={filtered}
-            columns={columns}
+          <Table data={filtered} columns={columns}
             getRowId={(r, i) => String(r.isin ? `${r.isin}-${r.product ?? "DEL"}-${i}` : (r.nseTradingSymbol ?? r.symbol ?? i))}
-            selectable
-            resizable
-            reorderable
-            selectedRowIds={selectedLots}
-            onSelectionChange={setSelectedLots}
+            selectable resizable reorderable selectedRowIds={selectedLots} onSelectionChange={setSelectedLots}
             defaultSort={{ key: "value", direction: "desc" }}
-            height={Math.min(540, Math.max(160, filtered.length * 52 + 48))}
-            rowHeight={52}
-            className="rounded-xl border-none"
-          />
+            height={Math.min(540, Math.max(160, filtered.length * 52 + 48))} rowHeight={52} className="rounded-xl border-none" />
         </div>
       ) : (
-        /* Compact Card Grid */
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((r, i) => {
             const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
@@ -1112,162 +688,91 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
           })}
         </div>
       )}
-
-      {filtered.length === 0 && (
-        <Empty
-          icon={Briefcase}
-          title="No matching holdings"
-          hint={`No holding symbol matches "${query}".`}
-        />
-      )}
+      {filtered.length === 0 && <Empty icon={Briefcase} title="No matching holdings" hint={`No holding matches "${query}".`} />}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Tab content: Orders / Trades
+// Tab: Orders / Trades
 // ---------------------------------------------------------------------------
 
 function pickString(row: Row, ...keys: string[]): string {
-  for (const k of keys) {
-    const v = row[k];
-    if (v !== null && v !== undefined && v !== "") return String(v);
-  }
-  return "—";
+  for (const k of keys) { const v = row[k]; if (v !== null && v !== undefined && v !== "") return String(v); }
+  return "\u2014";
 }
 
 function OrdersView({ rows }: { rows: Row[] }) {
-  if (rows.length === 0) {
-    return (
-      <Empty
-        icon={ListOrdered}
-        title="No orders today"
-        hint="Every order the broker has seen today appears here. Open positions and the place-order panel are below."
-      />
-    );
-  }
+  if (rows.length === 0) return <Empty icon={ListOrdered} title="No orders today" hint="Every order the broker has seen today appears here." />;
   return (
     <div className="overflow-x-auto rounded-2xl border border-border">
       <table className="w-full text-[13px]">
-        <thead>
-          <tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
-            <th className="px-3 py-2 text-left font-semibold">Time</th>
-            <th className="px-3 py-2 text-left font-semibold">Symbol</th>
-            <th className="px-3 py-2 text-left font-semibold">Side</th>
-            <th className="px-3 py-2 text-right font-semibold">Qty</th>
-            <th className="px-3 py-2 text-right font-semibold">Price</th>
-            <th className="px-3 py-2 text-left font-semibold">Type</th>
-            <th className="px-3 py-2 text-left font-semibold">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => {
-            const side = pickString(r, "transactionType", "TransactionType", "side", "Side").toUpperCase();
-            const isBuy = side.startsWith("B");
-            return (
-              <tr
-                key={i}
-                className="border-t border-border/60 transition-colors hover:bg-primary/[0.03]"
-              >
-                <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">
-                  {pickString(r, "orderDateTime", "exchangeTimestamp", "ExchangeTimestamp", "updatedAt", "CreatedAt")}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 font-semibold">
-                  {pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2">
-                  <Badge tone={isBuy ? "good" : "bad"}>{side || "BUY"}</Badge>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {fmtNum(r.quantity ?? r.Quantity)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {fmtNum(r.price ?? r.Price)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                  {pickString(r, "orderComplexity", "OrderComplexity", "product", "Product")}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2">
-                  <StatusPill status={pickString(r, "orderStatus", "OrderStatus", "status", "Status")} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
+        <thead><tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
+          <th className="px-3 py-2 text-left font-semibold">Time</th>
+          <th className="px-3 py-2 text-left font-semibold">Symbol</th>
+          <th className="px-3 py-2 text-left font-semibold">Side</th>
+          <th className="px-3 py-2 text-right font-semibold">Qty</th>
+          <th className="px-3 py-2 text-right font-semibold">Price</th>
+          <th className="px-3 py-2 text-left font-semibold">Type</th>
+          <th className="px-3 py-2 text-left font-semibold">Status</th>
+        </tr></thead>
+        <tbody>{rows.map((r, i) => {
+          const side = pickString(r, "transactionType", "TransactionType", "side", "Side").toUpperCase();
+          return (
+            <tr key={i} className="border-t border-border/60 transition-colors hover:bg-primary/[0.03]">
+              <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{pickString(r, "orderDateTime", "exchangeTimestamp", "ExchangeTimestamp", "updatedAt", "CreatedAt")}</td>
+              <td className="whitespace-nowrap px-3 py-2 font-semibold">{pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}</td>
+              <td className="whitespace-nowrap px-3 py-2"><Badge tone={side.startsWith("B") ? "good" : "bad"}>{side || "BUY"}</Badge></td>
+              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtNum(r.quantity ?? r.Quantity)}</td>
+              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtNum(r.price ?? r.Price)}</td>
+              <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{pickString(r, "orderComplexity", "OrderComplexity", "product", "Product")}</td>
+              <td className="whitespace-nowrap px-3 py-2"><StatusPill status={pickString(r, "orderStatus", "OrderStatus", "status", "Status")} /></td>
+            </tr>
+          );
+        })}</tbody>
       </table>
     </div>
   );
 }
 
 function TradesView({ rows }: { rows: Row[] }) {
-  if (rows.length === 0) {
-    return (
-      <Empty
-        icon={BarChart3}
-        title="No trades today"
-        hint="Executed trades appear here as they happen. Cost basis, realised P&L, and brokerage all land in this view."
-      />
-    );
-  }
+  if (rows.length === 0) return <Empty icon={BarChart3} title="No trades today" hint="Executed trades appear here as they happen." />;
   return (
     <div className="overflow-x-auto rounded-2xl border border-border">
       <table className="w-full text-[13px]">
-        <thead>
-          <tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
-            <th className="px-3 py-2 text-left font-semibold">Time</th>
-            <th className="px-3 py-2 text-left font-semibold">Symbol</th>
-            <th className="px-3 py-2 text-left font-semibold">Side</th>
-            <th className="px-3 py-2 text-right font-semibold">Qty</th>
-            <th className="px-3 py-2 text-right font-semibold">Price</th>
-            <th className="px-3 py-2 text-right font-semibold">Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => {
-            const side = pickString(r, "transactionType", "TransactionType", "side", "Side").toUpperCase();
-            const isBuy = side.startsWith("B");
-            const qty = num(r.quantity ?? r.Quantity);
-            const price = num(r.tradePrice ?? r.TradePrice ?? r.price ?? r.Price);
-            return (
-              <tr
-                key={i}
-                className="border-t border-border/60 transition-colors hover:bg-primary/[0.03]"
-              >
-                <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">
-                  {pickString(r, "exchangeTimestamp", "ExchangeTimestamp", "tradeTime", "TradeTime", "orderDateTime")}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 font-semibold">
-                  {pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2">
-                  <Badge tone={isBuy ? "good" : "bad"}>{side || "BUY"}</Badge>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {qty.toLocaleString("en-IN")}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {INR(price, 2)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums">
-                  {INR(qty * price)}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
+        <thead><tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
+          <th className="px-3 py-2 text-left font-semibold">Time</th>
+          <th className="px-3 py-2 text-left font-semibold">Symbol</th>
+          <th className="px-3 py-2 text-left font-semibold">Side</th>
+          <th className="px-3 py-2 text-right font-semibold">Qty</th>
+          <th className="px-3 py-2 text-right font-semibold">Price</th>
+          <th className="px-3 py-2 text-right font-semibold">Value</th>
+        </tr></thead>
+        <tbody>{rows.map((r, i) => {
+          const side = pickString(r, "transactionType", "TransactionType", "side", "Side").toUpperCase();
+          const qty = num(r.quantity ?? r.Quantity);
+          const price = num(r.tradePrice ?? r.TradePrice ?? r.price ?? r.Price);
+          return (
+            <tr key={i} className="border-t border-border/60 transition-colors hover:bg-primary/[0.03]">
+              <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{pickString(r, "exchangeTimestamp", "ExchangeTimestamp", "tradeTime", "TradeTime", "orderDateTime")}</td>
+              <td className="whitespace-nowrap px-3 py-2 font-semibold">{pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}</td>
+              <td className="whitespace-nowrap px-3 py-2"><Badge tone={side.startsWith("B") ? "good" : "bad"}>{side || "BUY"}</Badge></td>
+              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{qty.toLocaleString("en-IN")}</td>
+              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{INR(price, 2)}</td>
+              <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums">{INR(qty * price)}</td>
+            </tr>
+          );
+        })}</tbody>
       </table>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Quick actions: live quotes + place order
+// Tab: Execute (Order Ticket + Market Depth side by side)
 // ---------------------------------------------------------------------------
 
-const selectClass =
-  "h-11 w-full rounded-full border border-border bg-transparent px-3.5 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 [&>option]:bg-card";
-
-function PlaceOrderCard() {
+function ExecuteTab({ availableMargin }: { availableMargin: number }) {
   const { toast } = useToast();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [symbol, setSymbol] = useState("RELIANCE");
@@ -1276,37 +781,31 @@ function PlaceOrderCard() {
   const [orderType, setOrderType] = useState("MARKET");
   const [price, setPrice] = useState("");
   const [state, setState] = useState<ButtonState>("idle");
-  const [showDepth, setShowDepth] = useState(true);
 
   const formattedSymbol = `${symbol.trim().toUpperCase()}${symbol.includes("-") ? "" : "-EQ"}`;
   const { getTick } = useLiveTicks(useMemo(() => [formattedSymbol], [formattedSymbol]));
   const tick = getTick(formattedSymbol);
 
-  // ── Symbol autocomplete via /symbols ───────────────────────────────────
   const [matches, setMatches] = useState<{ symbol: string; exchange: string }[]>([]);
   const [quoteBy, setQuoteBy] = useState<Record<string, { ltp: number; chg_pct: number }>>({});
   const [showMatches, setShowMatches] = useState(false);
+
   useEffect(() => {
     const q = symbol.trim().toUpperCase();
     if (q.length < 2 || q.includes("-")) { setMatches([]); setQuoteBy({}); return; }
     let cancelled = false;
     const t = window.setTimeout(() => {
-      searchSymbols(q, exchange || "NSEEQ", 8)
-        .then((r) => { if (!cancelled) setMatches(r.results || []); })
-        .catch(() => { if (!cancelled) setMatches([]); });
+      searchSymbols(q, exchange || "NSEEQ", 8).then((r) => { if (!cancelled) setMatches(r.results || []); }).catch(() => { if (!cancelled) setMatches([]); });
     }, 180);
     return () => { cancelled = true; window.clearTimeout(t); };
   }, [symbol, exchange]);
 
-  // Pull LTP + chg% for every match so the user can compare prices before
-  // committing. Only one /quote call per keystroke (debounced).
   useEffect(() => {
     if (matches.length === 0) { setQuoteBy({}); return; }
     let cancelled = false;
-    const syms = matches.map((m) => m.symbol).join(",");
     const t = window.setTimeout(async () => {
       try {
-        const res = await getQuote(syms, "NSEEQ");
+        const res = await getQuote(matches.map((m) => m.symbol).join(","), "NSEEQ");
         const map: Record<string, { ltp: number; chg_pct: number }> = {};
         for (const q of res.quotes || []) {
           const sym = String((q as Record<string, unknown>).symbol || "");
@@ -1319,8 +818,13 @@ function PlaceOrderCard() {
     return () => { cancelled = true; window.clearTimeout(t); };
   }, [matches]);
 
-  const signedQty = side === "SELL" ? -Math.abs(qty) : Math.abs(qty);
   const isLimit = orderType !== "MARKET" && orderType !== "SLM";
+  const ltp = tick?.ltp ?? 0;
+  const estimatedPrice = (isLimit && price) ? Number(price) : ltp;
+  const estimatedValue = estimatedPrice > 0 ? qty * estimatedPrice : 0;
+  const marginRequired = estimatedValue * 0.2;
+  const marginPct = availableMargin > 0 ? (marginRequired / availableMargin) * 100 : 0;
+  const canAfford = marginRequired <= availableMargin || availableMargin === 0;
 
   async function submit() {
     setState("loading");
@@ -1328,111 +832,54 @@ function PlaceOrderCard() {
       const res = await placeOrder({
         symbol: symbol.trim().toUpperCase(),
         exchange: exchange.trim().toUpperCase(),
-        quantity: signedQty,
+        quantity: side === "SELL" ? -Math.abs(qty) : Math.abs(qty),
         order_type: orderType,
         price: price === "" ? null : Number(price),
       });
       setState("success");
-      if (res.status === "rejected") {
-        sound.playReject();
-      } else {
-        sound.playFill();
-      }
-      toast({
-        title: `Order ${res.order_id} → ${res.status}`,
-        description:
-          res.reject_reason ?? `${symbol.trim().toUpperCase()} × ${qty} ${orderType}`,
-        status: res.status === "rejected" ? "error" : "success",
-      });
+      res.status === "rejected" ? sound.playReject() : sound.playFill();
+      toast({ title: `Order ${res.order_id} \u2192 ${res.status}`, description: res.reject_reason ?? `${symbol.trim().toUpperCase()} \u00d7 ${qty} ${orderType}`, status: res.status === "rejected" ? "error" : "success" });
     } catch (e) {
-      setState("error");
-      sound.playReject();
-      toast({
-        title: "Order failed",
-        description: e instanceof Error ? e.message : String(e),
-        status: "error",
-      });
+      setState("error"); sound.playReject();
+      toast({ title: "Order failed", description: e instanceof Error ? e.message : String(e), status: "error" });
     }
   }
 
   return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="inline-flex items-center gap-2">
-            <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/[0.09] text-primary">
-              <Send size={11} />
-            </span>
-            Quick Order Entry
-          </span>
-        }
-        sub="Signed quantity: negative sells. Click any depth price to copy to Limit price."
-        action={
-          <button
-            type="button"
-            onClick={() => setShowDepth(!showDepth)}
-            className="rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-          >
-            {showDepth ? "Hide Depth" : "Show Depth"}
+    <div className="grid gap-6 lg:grid-cols-[1fr_320px] xl:grid-cols-[1fr_360px]">
+      {/* Left: Order Ticket */}
+      <div className="space-y-4">
+        {/* BUY / SELL toggle */}
+        <div className="flex items-center gap-1 rounded-xl border border-border/60 bg-muted/20 p-1">
+          <button type="button" onClick={() => setSide("BUY")}
+            className={cn("flex-1 rounded-lg py-2 text-sm font-bold transition-all", side === "BUY" ? "bg-emerald-600 text-white shadow" : "text-muted-foreground hover:text-foreground")}>
+            <TrendingUp size={13} className="mr-1.5 inline" />BUY
           </button>
-        }
-      />
-      <div className="space-y-3.5 p-5">
-        <Tabs value={side} onValueChange={(v) => setSide(v as "BUY" | "SELL")} variant="segment">
-          <TabsList className="w-full">
-            <TabsTrigger value="BUY" className="flex-1">
-              <span className="inline-flex items-center gap-1.5 font-semibold">
-                <TrendingUp size={12} className="text-emerald-500" /> BUY
-              </span>
-            </TabsTrigger>
-            <TabsTrigger value="SELL" className="flex-1">
-              <span className="inline-flex items-center gap-1.5 font-semibold">
-                <TrendingDown size={12} className="text-destructive" /> SELL
-              </span>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="grid gap-3 sm:grid-cols-2">
+          <button type="button" onClick={() => setSide("SELL")}
+            className={cn("flex-1 rounded-lg py-2 text-sm font-bold transition-all", side === "SELL" ? "bg-rose-600 text-white shadow" : "text-muted-foreground hover:text-foreground")}>
+            <TrendingDown size={13} className="mr-1.5 inline" />SELL
+          </button>
+        </div>
+
+        {/* Symbol + Exchange */}
+        <div className="grid grid-cols-[1fr_140px] gap-3">
           <div className="relative">
-            <Input
-              label="Symbol"
-              value={symbol}
+            <Input label="Symbol" value={symbol}
               onChange={(v) => { setSymbol(v); setShowMatches(true); }}
               onFocus={() => setShowMatches(matches.length > 0)}
               onBlur={() => window.setTimeout(() => setShowMatches(false), 150)}
-              placeholder="RELIANCE"
-              autoComplete="off"
-            />
+              placeholder="RELIANCE" autoComplete="off" />
             {showMatches && matches.length > 0 && (
               <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-border bg-card shadow-lg">
                 {matches.map((m) => {
-                  const q = quoteBy[m.symbol];
-                  const pct = q?.chg_pct;
-                  const positive = typeof pct === "number" && pct >= 0;
+                  const q = quoteBy[m.symbol]; const pct = q?.chg_pct; const positive = typeof pct === "number" && pct >= 0;
                   return (
-                    <button
-                      key={`${m.exchange}:${m.symbol}`}
-                      type="button"
+                    <button key={`${m.exchange}:${m.symbol}`} type="button"
                       onMouseDown={(e) => { e.preventDefault(); setSymbol(m.symbol); setShowMatches(false); }}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12.5px] hover:bg-primary/[0.06]"
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="font-semibold text-foreground">{m.symbol}</span>
-                        <span className="text-[10.5px] text-muted-foreground">{m.exchange}</span>
-                      </span>
+                      className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12.5px] hover:bg-primary/[0.06]">
+                      <span className="flex items-center gap-2"><span className="font-semibold text-foreground">{m.symbol}</span><span className="text-[10.5px] text-muted-foreground">{m.exchange}</span></span>
                       <span className="flex items-center gap-2 tabular-nums">
-                        {q && q.ltp > 0 ? (
-                          <>
-                            <span className="font-semibold text-foreground">₹{q.ltp.toFixed(2)}</span>
-                            {typeof pct === "number" && Number.isFinite(pct) ? (
-                              <span className={positive ? "text-emerald-500" : "text-destructive"}>
-                                {positive ? "+" : ""}{pct.toFixed(2)}%
-                              </span>
-                            ) : null}
-                          </>
-                        ) : (
-                          <span className="text-[10.5px] text-muted-foreground/70">· · ·</span>
-                        )}
+                        {q && q.ltp > 0 ? (<><span className="font-semibold text-foreground">₹{q.ltp.toFixed(2)}</span>{typeof pct === "number" && Number.isFinite(pct) && <span className={positive ? "text-emerald-500" : "text-destructive"}>{positive ? "+" : ""}{pct.toFixed(2)}%</span>}</>) : <span className="text-muted-foreground/70 text-[10.5px]">· · ·</span>}
                       </span>
                     </button>
                   );
@@ -1440,75 +887,90 @@ function PlaceOrderCard() {
               </div>
             )}
           </div>
-          <Input label="Exchange" value={exchange} onChange={setExchange} placeholder="NSEEQ" />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Input
-            label="Quantity"
-            type="number"
-            value={String(qty)}
-            onChange={(v) => setQty(Math.max(0, Number(v) || 0))}
-          />
           <div className="flex flex-col gap-1.5">
-            <label className="px-1 text-sm font-medium text-foreground">Type</label>
-            <select
-              value={orderType}
-              onChange={(e) => setOrderType(e.target.value)}
-              className={selectClass}
-            >
-              <option value="MARKET">MARKET</option>
-              <option value="LIMIT">LIMIT</option>
-              <option value="SL">SL (stop-loss)</option>
-              <option value="SLM">SL-MKT</option>
-            </select>
+            <label className="px-1 text-sm font-medium text-foreground">Exchange</label>
+            <Select
+              value={exchange}
+              onChange={setExchange}
+              options={[
+                { value: "NSEEQ", label: "NSEEQ" },
+                { value: "BSEEQ", label: "BSEEQ" },
+                { value: "NSEFO", label: "NSEFO" },
+              ]}
+            />
           </div>
-          <Input
-            label={isLimit ? "Limit price" : "Price (optional)"}
-            value={price}
-            onChange={setPrice}
-            placeholder={isLimit ? "0.00" : "market"}
-            disabled={!isLimit && orderType === "MARKET"}
-          />
         </div>
 
-        {showDepth && (
-          <div className="pt-1">
-            <MarketDepthLadder
-              symbol={formattedSymbol}
-              depth={tick?.depth}
-              ltp={tick?.ltp}
-              onSelectPrice={(p) => {
-                setPrice(p.toFixed(2));
-                setOrderType("LIMIT");
-              }}
+        {/* Qty + Type + Price */}
+        <div className="grid grid-cols-3 gap-3">
+          <Input label="Quantity" type="number" value={String(qty)} onChange={(v) => setQty(Math.max(0, Number(v) || 0))} />
+          <div className="flex flex-col gap-1.5">
+            <label className="px-1 text-sm font-medium text-foreground">Order Type</label>
+            <Select
+              value={orderType}
+              onChange={setOrderType}
+              options={[
+                { value: "MARKET", label: "MARKET" },
+                { value: "LIMIT", label: "LIMIT" },
+                { value: "SL", label: "SL (stop-loss)" },
+                { value: "SLM", label: "SL-MKT" },
+              ]}
             />
+          </div>
+          <Input label={isLimit ? "Limit price" : "Price"} value={price} onChange={setPrice} placeholder={isLimit ? "0.00" : "market"} disabled={!isLimit && orderType === "MARKET"} />
+        </div>
+
+        {/* Live LTP strip */}
+        {ltp > 0 && (
+          <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-[12.5px]">
+            <span className="text-muted-foreground">LTP</span>
+            <span className={cn("font-bold tabular-nums transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{INR(ltp, 2)}</span>
+            {tick?.flash && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+            <span className="ml-auto text-muted-foreground/70">{formattedSymbol}</span>
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
-          <div className="text-[12px] text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {side === "BUY" ? "Buy" : "Sell"} {qty}
-            </span>{" "}
-            × {symbol || "—"} {exchange ? `@ ${exchange}` : ""}{" "}
-            {isLimit && price ? `@ ${INR(Number(price) || 0, 2)}` : "@ market"}
+        {/* Risk preview */}
+        <div className={cn("rounded-xl border px-4 py-3 text-[12px] space-y-2", canAfford ? "border-border/60 bg-muted/10" : "border-amber-500/40 bg-amber-950/20")}>
+          <div className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Order Preview</div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Estimated value</span><span className="font-semibold tabular-nums text-foreground">{estimatedValue > 0 ? INR(estimatedValue) : "\u2014"}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Margin required</span><span className="font-semibold tabular-nums text-foreground">{marginRequired > 0 ? INR(marginRequired) : "\u2014"}</span></div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground">Margin usage</span>
+            <span className={cn("font-semibold tabular-nums", marginPct > 80 ? "text-amber-400" : "text-foreground")}>{marginPct > 0 ? `${marginPct.toFixed(1)}% of available` : "\u2014"}</span>
           </div>
-          <StatefulButton
-            state={state}
-            onClick={() => void submit()}
-            loadingText="Submitting…"
-            successText="Submitted"
-            errorText="Failed — retry"
-          >
-            Submit order
-          </StatefulButton>
+          {orderType === "MARKET" && (
+            <div className="flex items-start gap-1.5 border-t border-border/40 pt-2 text-[11px] text-muted-foreground/80">
+              <Zap size={10} className="mt-0.5 shrink-0 text-amber-500" />
+              <span>MARKET orders include 0.5% protection per SEBI mandate — actual fill may differ slightly from LTP.</span>
+            </div>
+          )}
+          {!canAfford && availableMargin > 0 && (
+            <div className="flex items-start gap-1.5 border-t border-amber-500/30 pt-2 text-[11px] text-amber-400">
+              <ShieldAlert size={10} className="mt-0.5 shrink-0" />
+              <span>Estimated margin ({INR(marginRequired)}) may exceed available ({INR(availableMargin)}).</span>
+            </div>
+          )}
         </div>
-        <Hint>
-          MARKET orders carry a default 0.5% market-protection value — SEBI rejects a zero
-          value on API market orders.
-        </Hint>
+
+        {/* Submit */}
+        <StatefulButton state={state} onClick={() => void submit()}
+          loadingText="Submitting\u2026" successText="Submitted \u2713" errorText="Failed \u2014 retry"
+          className={cn("w-full h-11 text-[14px] font-bold tracking-wide", side === "BUY" ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" : "bg-rose-600 hover:bg-rose-700 text-white border-rose-600")}>
+          {side} {qty} {symbol.trim().toUpperCase() || "\u2014"}
+        </StatefulButton>
       </div>
-    </Card>
+
+      {/* Right: Market Depth */}
+      <div className="flex flex-col">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Market Depth · {formattedSymbol}
+        </div>
+        <MarketDepthLadder symbol={formattedSymbol} depth={tick?.depth} ltp={tick?.ltp}
+          onSelectPrice={(p) => { setPrice(p.toFixed(2)); setOrderType("LIMIT"); }} />
+        <p className="mt-2 text-[10.5px] text-muted-foreground/60">Click any price to populate as limit price.</p>
+      </div>
+    </div>
   );
 }
 
@@ -1516,120 +978,136 @@ function PlaceOrderCard() {
 // Main panel
 // ---------------------------------------------------------------------------
 
-const SECTIONS: { id: PortfolioSection; label: string; icon: React.ElementType }[] = [
+type TabId = PortfolioSection | "execute";
+
+const SECTIONS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "limits", label: "Limits", icon: Wallet },
   { id: "positions", label: "Positions", icon: Activity },
   { id: "holdings", label: "Holdings", icon: Briefcase },
   { id: "orders", label: "Orders", icon: ListOrdered },
   { id: "trades", label: "Trades", icon: BarChart3 },
+  { id: "execute", label: "Execute", icon: Send },
 ];
 
 export default function PortfolioPanel() {
-  const [section, setSectionState] = useState<PortfolioSection>(() => {
+  const [section, setSectionState] = useState<TabId>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("atr.portfolio.section") as PortfolioSection;
-      if (saved && ["limits", "positions", "holdings", "orders", "trades"].includes(saved)) {
-        return saved;
-      }
+      const saved = localStorage.getItem("atr.portfolio.section") as TabId;
+      if (saved && ["limits", "positions", "holdings", "orders", "trades", "execute"].includes(saved)) return saved;
     }
     return "limits";
   });
 
-  const setSection = useCallback((next: PortfolioSection) => {
-    setSectionState(next);
+  const [pnlMode, setPnlMode] = useState<"total" | "daily">(() => {
     if (typeof window !== "undefined") {
-      localStorage.setItem("atr.portfolio.section", next);
+      const saved = localStorage.getItem("atr.portfolio.pnlMode") as "total" | "daily" | null;
+      if (saved && (saved === "total" || saved === "daily")) return saved;
     }
+    return "total";
+  });
+
+  const setSection = useCallback((next: TabId) => {
+    setSectionState(next);
+    if (typeof window !== "undefined") localStorage.setItem("atr.portfolio.section", next);
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("atr.portfolio.pnlMode", pnlMode);
+  }, [pnlMode]);
 
   const { toast } = useToast();
   const [data, setData] = useState<PortfolioResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [state, setState] = useState<ButtonState>("idle");
   const [killEngaged, setKillEngaged] = useState<boolean>(false);
   const [killLoading, setKillLoading] = useState<boolean>(false);
+  const dialog = useDialog();
 
   const loadRisk = useCallback(async () => {
-    try {
-      const risk = await getRiskStatus();
-      setKillEngaged(risk?.kill_switch === true);
-    } catch {
-      // ignore
-    }
+    try { const risk = await getRiskStatus(); setKillEngaged(risk?.kill_switch === true); } catch { /* ignore */ }
   }, []);
 
+  // The broker has no push channel for account state (positions/holdings/
+  // margin) — only market prices stream over the websocket — so this has to
+  // be polled. Two things made that poll visible as a "glitch" every cycle:
+  // replacing `data` with a fresh object (even when nothing changed) forced
+  // every KPI and table to re-render and any count-up numbers to replay, and
+  // a failed poll (e.g. a 429) cleared `error` right before immediately
+  // re-setting it, flickering the error banner off and back on.
+  const lastPayloadRef = useRef<string | null>(null);
   const load = useCallback(async () => {
     setState("loading");
-    setError(null);
     try {
       const [res] = await Promise.all([getPortfolio(), loadRisk()]);
-      setData(res);
+      // `as_of` is a fresh server timestamp on every call — comparing the
+      // whole response against it would never match, defeating the dedup.
+      const serialized = JSON.stringify(res.sections);
+      if (serialized !== lastPayloadRef.current) {
+        lastPayloadRef.current = serialized;
+        setData(res);
+      }
+      setLastUpdated(new Date());
+      setError(null);
       setState("success");
     } catch (e) {
-      setData(null);
-      setError(e instanceof Error ? e.message : String(e));
-      setState("error");
+      // Preserve stale data; just show friendly error
+      setError(e instanceof Error ? e.message : String(e)); setState("error");
     }
   }, [loadRisk]);
 
   const handleToggleKillSwitch = async () => {
     const nextState = !killEngaged;
-    if (nextState) {
-      const confirm = window.confirm(
-        "EMERGENCY KILL SWITCH: Are you sure you want to halt all algorithmic trading and new order submissions immediately?"
-      );
-      if (!confirm) return;
-    }
-    // The reason is recorded in the audit trail, and it is required in both
-    // directions — releasing the switch re-enables trading, so a release with no
-    // stated reason is indistinguishable from someone clearing it by accident.
-    const reason = window.prompt(
-      nextState
-        ? "Why are you engaging the kill switch? This is recorded in the audit trail."
-        : "Why are you releasing the kill switch? This is recorded in the audit trail.",
-      "",
-    );
+    const reason = await dialog.prompt({
+      title: nextState ? "Turn the safety switch on?" : "Turn the safety switch off?",
+      description: nextState
+        ? "All trading and new orders stop immediately."
+        : "Orders can be placed again.",
+      label: "Reason",
+      placeholder: "Why? This is saved in the audit trail.",
+      required: true,
+      confirmLabel: nextState ? "Turn on" : "Turn off",
+      tone: nextState ? "danger" : "default",
+    });
     if (reason === null) return;
-    if (!reason.trim()) {
-      toast({
-        title: "A reason is required",
-        description: "The kill switch cannot be changed without one — it goes in the audit trail.",
-        status: "error",
-      });
-      return;
-    }
     setKillLoading(true);
     try {
       await setKillSwitch(nextState, reason.trim());
       setKillEngaged(nextState);
-      toast({
-        title: nextState ? "Kill Switch ENGAGED" : "Kill Switch Disarmed",
-        description: nextState
-          ? "All order submissions are blocked by the risk engine."
-          : "Risk engine cleared. New orders may be placed.",
-        status: nextState ? "error" : "success",
-      });
+      toast({ title: nextState ? "Kill Switch ENGAGED" : "Kill Switch Disarmed", description: nextState ? "All order submissions are blocked." : "Risk engine cleared. New orders may be placed.", status: nextState ? "error" : "success" });
     } catch (e) {
-      toast({
-        title: "Kill switch action failed",
-        description: e instanceof Error ? e.message : String(e),
-        status: "error",
-      });
-    } finally {
-      setKillLoading(false);
-    }
+      toast({ title: "Kill switch action failed", description: e instanceof Error ? e.message : String(e), status: "error" });
+    } finally { setKillLoading(false); }
   };
 
+  useEffect(() => { void load(); }, [load]);
+
+  // Poll every 5s, but only while the tab is actually visible — there is
+  // nothing to look at when it isn't, and polling anyway just adds to the
+  // 429s this endpoint already throws under load.
   useEffect(() => {
-    void load();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (document.visibilityState === "visible") void load();
+      timer = setTimeout(tick, 5000);
+    };
+    timer = setTimeout(tick, 5000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [load]);
 
-  const current = data?.sections?.[section];
   const counts = useMemo(() => {
-    if (!data) return {} as Record<PortfolioSection, number>;
-    return Object.fromEntries(
-      SECTIONS.map((s) => [s.id, data.sections[s.id]?.count ?? 0]),
-    ) as Record<PortfolioSection, number>;
+    if (!data) return {} as Record<TabId, number>;
+    return Object.fromEntries(SECTIONS.filter(s => s.id !== "execute").map((s) => [s.id, data.sections[s.id as PortfolioSection]?.count ?? 0])) as Record<TabId, number>;
   }, [data]);
 
   const positions = data?.sections?.positions?.rows ?? [];
@@ -1637,52 +1115,41 @@ export default function PortfolioPanel() {
 
   const liveSymbols = useMemo(() => {
     const syms = new Set<string>();
-    positions.forEach((p) => {
-      const s = String(p.symbol ?? p.tradingSymbol ?? "").trim();
-      if (s) syms.add(s);
-    });
-    holdings.forEach((h) => {
-      const s = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "").trim();
-      if (s) syms.add(s);
-    });
+    positions.forEach((p) => { const s = String(p.symbol ?? p.tradingSymbol ?? "").trim(); if (s) syms.add(s); });
+    holdings.forEach((h) => { const s = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "").trim(); if (s) syms.add(s); });
     return Array.from(syms);
   }, [positions, holdings]);
 
   const { getTick, connected, bridgeActive } = useLiveTicks(liveSymbols);
 
+  const availableMargin = useMemo(() => num(data?.sections?.limits?.rows?.[0]?.tradingLimit), [data]);
+  const currentSection = section !== "execute" ? data?.sections?.[section as PortfolioSection] : null;
+
+  function DataContent({ children }: { children: React.ReactNode }) {
+    if (error && !data) return <StaleNotice lastUpdated={lastUpdated} onRetry={() => void load()} />;
+    if (!data) return <Hint>Loading…</Hint>;
+    if (currentSection?.error) return <ErrorBox>{currentSection.error}</ErrorBox>;
+    return <>{children}</>;
+  }
+
   return (
     <div className="space-y-6">
-      <KpiStrip data={data} error={error} getTick={getTick} />
+      <KpiStrip data={data} error={error} lastUpdated={lastUpdated} getTick={getTick} pnlMode={pnlMode} setPnlMode={setPnlMode} />
 
-      {/* Main Tabbed Area */}
       <div className="rounded-2xl border border-border/80 bg-card/40 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-4">
-          <Tabs value={section} onValueChange={(v) => setSection(v as PortfolioSection)}>
+          <Tabs value={section} onValueChange={(v) => setSection(v as TabId)}>
             <TabsList className="bg-muted/40 p-1 gap-1 rounded-xl border border-border/60">
               {SECTIONS.map((s) => {
                 const Icon = s.icon;
                 const c = counts[s.id] ?? 0;
                 const active = section === s.id;
                 return (
-                  <TabsTrigger
-                    key={s.id}
-                    value={s.id}
-                    className="whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium"
-                  >
+                  <TabsTrigger key={s.id} value={s.id} className="whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium">
                     <span className="inline-flex items-center gap-1.5">
-                      <Icon size={13} /> {s.label}
-                      {c > 0 ? (
-                        <span
-                          className={cn(
-                            "rounded-full px-1.5 py-0.2 text-[10px] font-semibold tabular-nums transition-colors",
-                            active
-                              ? "bg-primary-foreground/20 text-primary-foreground font-bold"
-                              : "bg-primary/10 text-primary"
-                          )}
-                        >
-                          {c}
-                        </span>
-                      ) : null}
+                      <Icon size={13} />
+                      {s.label}
+                      {c > 0 && <span className={cn("rounded-full px-1.5 py-0.2 text-[10px] font-semibold tabular-nums transition-colors", active ? "bg-primary-foreground/20 text-primary-foreground font-bold" : "bg-primary/10 text-primary")}>{c}</span>}
                     </span>
                   </TabsTrigger>
                 );
@@ -1691,60 +1158,26 @@ export default function PortfolioPanel() {
           </Tabs>
 
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => void handleToggleKillSwitch()}
-              disabled={killLoading}
-              title={killEngaged ? "Kill switch is active. Click to disarm." : "Engage emergency kill switch to halt orders."}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border",
-                killEngaged
-                  ? "bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse hover:bg-rose-500/30"
-                  : "bg-muted/30 border-border/70 text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/60"
-              )}
-            >
-              {killEngaged ? (
-                <>
-                  <ShieldAlert size={12} className="text-rose-400" />
-                  <span>KILL SWITCH ENGAGED</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck size={12} className="text-muted-foreground/70" />
-                  <span>Kill Switch</span>
-                </>
-              )}
+            <button type="button" onClick={() => void handleToggleKillSwitch()} disabled={killLoading}
+              title={killEngaged ? "Kill switch is active. Click to disarm." : "Engage emergency kill switch."}
+              className={cn("inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border",
+                killEngaged ? "bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse hover:bg-rose-500/30" : "bg-muted/30 border-border/70 text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/60")}>
+              {killEngaged ? <><ShieldAlert size={12} className="text-rose-400" /><span>KILL ACTIVE</span></> : <><ShieldCheck size={12} className="text-muted-foreground/70" /><span>Kill Switch</span></>}
             </button>
 
             <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-              <span
-                className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  connected
-                    ? bridgeActive
-                      ? "bg-emerald-500 animate-pulse"
-                      : "bg-amber-500"
-                    : "bg-muted-foreground/50"
-                )}
-              />
-              {connected ? (bridgeActive ? "Live Stream" : "Connecting") : "Offline"}
+              <span className={cn("h-1.5 w-1.5 rounded-full", connected ? (bridgeActive ? "bg-emerald-500 animate-pulse" : "bg-amber-500") : "bg-muted-foreground/50")} />
+              {connected ? (bridgeActive ? "Live" : "Connecting") : "Offline"}
             </div>
-            {data?.as_of && !error ? (
-              <span className="hidden text-[11px] text-muted-foreground/75 sm:inline">
-                {new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+
+            {lastUpdated && !error && (
+              <span className="hidden text-[11px] text-muted-foreground/75 sm:inline tabular-nums">
+                {lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </span>
-            ) : null}
-            <StatefulButton
-              state={state}
-              variant="secondary"
-              size="sm"
-              onClick={() => void load()}
-              loadingText="…"
-              successText="Done"
-              errorText="Retry"
-              icon={<RefreshCw size={11} />}
-              className="h-7 px-2.5 text-xs"
-            >
+            )}
+
+            <StatefulButton state={state} variant="secondary" size="sm" onClick={() => void load()}
+              loadingText="\u2026" successText="Done" errorText="Retry" icon={<RefreshCw size={11} />} className="h-7 px-2.5 text-xs">
               Refresh
             </StatefulButton>
           </div>
@@ -1754,88 +1187,35 @@ export default function PortfolioPanel() {
           <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-2.5 text-xs text-rose-300">
             <div className="flex items-center gap-2 font-medium">
               <ShieldAlert size={15} className="text-rose-400 shrink-0" />
-              <span>
-                <strong>EMERGENCY KILL SWITCH ACTIVE:</strong> The risk engine is rejecting all order submissions and algo trades.
-              </span>
+              <span><strong>KILL SWITCH ACTIVE:</strong> The risk engine is rejecting all order submissions.</span>
             </div>
-            <button
-              type="button"
-              disabled={killLoading}
-              onClick={() => void handleToggleKillSwitch()}
-              className="shrink-0 font-semibold underline underline-offset-2 hover:text-white"
-            >
-              Disarm Kill Switch
-            </button>
+            <button type="button" disabled={killLoading} onClick={() => void handleToggleKillSwitch()} className="shrink-0 font-semibold underline underline-offset-2 hover:text-white">Disarm</button>
           </div>
         )}
 
-        <div className="pt-2">
-          <Tabs value={section} onValueChange={(v) => setSection(v as PortfolioSection)}>
-
+        <div className="pt-4">
+          <Tabs value={section} onValueChange={(v) => setSection(v as TabId)}>
             <TabsContent value="limits">
-              {error ? (
-                <ErrorBox>{error}</ErrorBox>
-              ) : !data ? (
-                <Hint>Loading limits…</Hint>
-              ) : current?.error ? (
-                <ErrorBox>{current.error}</ErrorBox>
-              ) : (
-                <LimitsView row={current?.rows?.[0] ?? null} />
-              )}
+              <DataContent><LimitsView row={currentSection?.rows?.[0] ?? null} /></DataContent>
             </TabsContent>
-
             <TabsContent value="positions">
-              {error ? (
-                <ErrorBox>{error}</ErrorBox>
-              ) : !data ? (
-                <Hint>Loading positions…</Hint>
-              ) : current?.error ? (
-                <ErrorBox>{current.error}</ErrorBox>
-              ) : (
-                <PositionsView rows={current?.rows ?? []} getTick={getTick} />
-              )}
+              <DataContent><PositionsView rows={currentSection?.rows ?? []} getTick={getTick} /></DataContent>
             </TabsContent>
-
             <TabsContent value="holdings">
-              {error ? (
-                <ErrorBox>{error}</ErrorBox>
-              ) : !data ? (
-                <Hint>Loading holdings…</Hint>
-              ) : current?.error ? (
-                <ErrorBox>{current.error}</ErrorBox>
-              ) : (
-                <HoldingsView rows={current?.rows ?? []} getTick={getTick} />
-              )}
+              <DataContent><HoldingsView rows={currentSection?.rows ?? []} getTick={getTick} /></DataContent>
             </TabsContent>
-
             <TabsContent value="orders">
-              {error ? (
-                <ErrorBox>{error}</ErrorBox>
-              ) : !data ? (
-                <Hint>Loading orders…</Hint>
-              ) : current?.error ? (
-                <ErrorBox>{current.error}</ErrorBox>
-              ) : (
-                <OrdersView rows={current?.rows ?? []} />
-              )}
+              <DataContent><OrdersView rows={currentSection?.rows ?? []} /></DataContent>
             </TabsContent>
-
-            <TabsContent value="trades" className="mt-4">
-              {error ? (
-                <ErrorBox>{error}</ErrorBox>
-              ) : !data ? (
-                <Hint>Loading trades…</Hint>
-              ) : current?.error ? (
-                <ErrorBox>{current.error}</ErrorBox>
-              ) : (
-                <TradesView rows={current?.rows ?? []} />
-              )}
+            <TabsContent value="trades">
+              <DataContent><TradesView rows={currentSection?.rows ?? []} /></DataContent>
+            </TabsContent>
+            <TabsContent value="execute">
+              <ExecuteTab availableMargin={availableMargin} />
             </TabsContent>
           </Tabs>
         </div>
       </div>
-
-      <PlaceOrderCard />
     </div>
   );
 }
