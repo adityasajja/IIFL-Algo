@@ -63,6 +63,33 @@ class SmaCrossover(Strategy):
                 else:
                     ctx.target(symbol, -target_qty, tag="short")
 
+    def describe_signal(self, symbol: str, ctx) -> str | None:
+        """Report the crossover state, so a trade can say why it opened.
+
+        Only called on a bar where the wrapper is about to record an entry, so
+        it does not need to be cheap for every symbol on every bar — but it is
+        written against the current row anyway, so it can never describe a
+        different bar than the one the order is placed on.
+        """
+        row = ctx.row(symbol)
+        fast, slow = row["sma_fast"], row["sma_slow"]
+        if pd.isna(fast) or pd.isna(slow):
+            return None
+        fast_prev, slow_prev = row["sma_fast_prev"], row["sma_slow_prev"]
+        close = row["close"]
+
+        if not pd.isna(fast_prev) and fast > slow and fast_prev <= slow_prev:
+            return (
+                f"SMA {self.fast} ({fast:,.2f}) crossed above "
+                f"SMA {self.slow} ({slow:,.2f}) with close at {close:,.2f}"
+            )
+        if not pd.isna(fast_prev) and fast < slow and fast_prev >= slow_prev:
+            return (
+                f"SMA {self.fast} ({fast:,.2f}) crossed below "
+                f"SMA {self.slow} ({slow:,.2f}) with close at {close:,.2f}"
+            )
+        return None
+
     def _size(self, ctx, symbol: str, price: float) -> int:
         instrument = ctx.instruments[symbol]
         notional = ctx.equity * self.allocation

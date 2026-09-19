@@ -218,10 +218,11 @@ class StrategyContext:
         tif: TimeInForce = TimeInForce.DAY,
         tag: str | None = None,
         **broker_params,
-    ) -> Order:
-        """Place an order. ``quantity`` is signed: positive buys, negative sells."""
+    ) -> Order | None:
+        """Place an order. ``quantity`` is signed: positive buys, negative sells.
+        Returns None for a zero-quantity order."""
         if quantity == 0:
-            raise ValueError("order quantity must be non-zero")
+            return None
         side = Side.BUY if quantity > 0 else Side.SELL
         order = Order(
             instrument=self.instruments[symbol],
@@ -241,7 +242,7 @@ class StrategyContext:
         """Trade the difference between current and desired position."""
         current = self.position(symbol).quantity
         delta = target_quantity - current
-        if abs(delta) < 1e-9:
+        if delta == 0 or abs(delta) < 1e-9:
             return None
         return self.order(symbol, delta, **kwargs)
 
@@ -300,6 +301,26 @@ class Strategy(ABC):
 
     def on_stop(self, ctx: StrategyContext) -> None:
         """Called after the last bar."""
+
+    # ------------------------------------------------------------------
+    def describe_signal(self, symbol: str, ctx: StrategyContext) -> str | None:
+        """Why this strategy would want to be in ``symbol`` right now.
+
+        Optional, and deliberately not abstract — a strategy that cannot explain
+        itself is still a legal strategy, it just produces trades with no
+        recorded reason, and the results page says so rather than inventing one.
+
+        When implemented, return a short human sentence built from the *measured*
+        values, e.g.::
+
+            "SMA 10 (1,431.82) crossed above SMA 30 (1,420.55)"
+
+        The point is that a backtest trade list you cannot interrogate is a
+        number you have to take on faith. This is what makes "why did this trade
+        happen" answerable a year later, and it is returned as prose rather than
+        a dict because its only consumer is a reader.
+        """
+        return None
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<{type(self).__name__} {self.params}>"

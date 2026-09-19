@@ -22,10 +22,12 @@ from atr.strategy.strategies.paper_alpha import (
     SehgalLowVolAnomaly,
     VolatilityBreakout,
 )
+from atr.strategy.strategies.momentum_breakout import MomentumBreakout
 from atr.strategy.strategies.sma_crossover import SmaCrossover
 
 STRATEGIES = {
     SmaCrossover.name: SmaCrossover,
+    MomentumBreakout.name: MomentumBreakout,
     OpeningRangeBreakout.name: OpeningRangeBreakout,
     SignalEntryStrategy.name: SignalEntryStrategy,
     CrossSectionalMomentum.name: CrossSectionalMomentum,
