@@ -949,6 +949,35 @@ export interface EvidenceReport {
 
 export const getEvidence = () => req<EvidenceReport>("/evidence");
 
+export interface TrackedSignal {
+  symbol: string;
+  entry_date: string;
+  entry_close: number;
+  rsi?: number;
+  status: "open" | "closed";
+  exit_close?: number;
+  ret_pct?: number;
+  hit?: boolean;
+}
+
+export interface ForwardTracker {
+  description: string;
+  state: "collecting" | "working" | "not_working" | "inconclusive";
+  verdict: string;
+  graded: number;
+  needed: number;
+  hits: number;
+  hit_rate_pct: number | null;
+  range_pct: [number, number] | null;
+  avg_net_pct: number | null;
+  base_rate_pct: number;
+  claimed_rate_pct: number;
+  open: TrackedSignal[];
+  recent: TrackedSignal[];
+}
+
+export const getForwardTracker = () => req<ForwardTracker>("/tracker/oversold-volatile");
+
 // ---------------------------------------------------------------------------
 // Portfolio, quotes, caches
 // ---------------------------------------------------------------------------

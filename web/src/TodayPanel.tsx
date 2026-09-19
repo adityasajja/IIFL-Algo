@@ -1,10 +1,12 @@
 import { Star } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
+  getForwardTracker,
   getInsightSettings,
   getInsights,
   saveInsightSettings,
   sendInsights,
+  type ForwardTracker,
   type HoldingFlag,
   type InsightIdea,
   type InsightsDigest,
@@ -48,6 +50,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
   const { toast } = useToast();
   const [digest, setDigest] = useState<InsightsDigest | null>(null);
   const [settings, setSettings] = useState<InsightsSettings | null>(null);
+  const [tracker, setTracker] = useState<ForwardTracker | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
@@ -64,6 +67,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
 
   useEffect(() => {
     void load();
+    getForwardTracker().then(setTracker).catch(() => setTracker(null));
   }, [load]);
 
   async function update(patch: Partial<InsightsSettings>) {
@@ -219,6 +223,8 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
         </div>
       </div>
 
+      {tracker && <TrackerCard tracker={tracker} onOpenChart={onOpenChart} />}
+
       {/* What to be told, and when. */}
       {settings && (
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card px-5 py-4">
@@ -272,6 +278,78 @@ function IdeaRow({ idea, onOpenChart }: { idea: InsightIdea; onOpenChart?: (symb
         <span>Stop near {inr(idea.stop_price)}</span>
         {idea.sector && <span className="truncate">{idea.sector}</span>}
       </div>
+    </div>
+  );
+}
+
+const STATE_TONE: Record<ForwardTracker["state"], string> = {
+  collecting: TONE.flat,
+  working: TONE.good,
+  not_working: TONE.bad,
+  inconclusive: TONE.warn,
+};
+
+/** The forward test: signals written down before the week, graded after it. */
+function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onOpenChart?: (symbol: string) => void }) {
+  const pct = Math.min(100, (t.graded / t.needed) * 100);
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-semibold">Live test</span>
+        <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-medium", STATE_TONE[t.state])}>{t.verdict}</span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t.description}. Each Friday's picks are written down, then graded a week later on whether they gained 2% or more.
+      </p>
+
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        <div>
+          <div className="text-xs text-muted-foreground">Hit rate</div>
+          <div className="text-2xl font-semibold tabular-nums">{t.hit_rate_pct == null ? "—" : `${t.hit_rate_pct}%`}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {t.range_pct ? `likely ${t.range_pct[0]}–${t.range_pct[1]}%` : "no graded picks yet"}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Any stock</div>
+          <div className="text-2xl font-semibold tabular-nums">{t.base_rate_pct}%</div>
+          <div className="text-[11px] text-muted-foreground">ordinary rate</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Avg week</div>
+          <div className={cn("text-2xl font-semibold tabular-nums", t.avg_net_pct == null ? "" : t.avg_net_pct >= 0 ? "text-emerald-500" : "text-rose-500")}>
+            {t.avg_net_pct == null ? "—" : signed(t.avg_net_pct, 2)}
+          </div>
+          <div className="text-[11px] text-muted-foreground">after costs</div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+          <span>{t.graded} of {t.needed} picks graded</span>
+          <span>{t.open.length} waiting on this week</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {t.open.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">This week's picks</span>
+          {t.open.map((s) => (
+            <button
+              key={`${s.entry_date}-${s.symbol}`}
+              type="button"
+              onClick={() => onOpenChart?.(s.symbol)}
+              className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium hover:bg-accent"
+              title={`Picked ${s.entry_date} at ${inr(s.entry_close)}`}
+            >
+              {s.symbol}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -48,6 +48,7 @@ export default defineConfig({
       "/positions": "http://127.0.0.1:8000",
       "/quote": "http://127.0.0.1:8000",
       "/research": "http://127.0.0.1:8000",
+      "/tracker": "http://127.0.0.1:8000",
       "/risk": "http://127.0.0.1:8000",
       "/scan-all": "http://127.0.0.1:8000",
       "/scan": "http://127.0.0.1:8000",
