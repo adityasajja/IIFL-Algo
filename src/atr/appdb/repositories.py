@@ -50,17 +50,25 @@ from atr.appdb.engine import utcnow
 from atr.appdb.schema import (
     api_keys,
     audit_events,
+    backtest_curves,
+    backtest_monthly,
     backtest_runs,
+    backtest_trades,
     deployments,
+    learning_observations,
+    optimization_recommendations,
     order_events,
     order_intents,
     orders,
     reconciliation_runs,
     screener_scans,
     sessions,
+    signal_contexts,
     strategies,
+    strategy_experiments,
     strategy_versions,
     system_state,
+    trade_attributions,
     trade_journal,
     user_preferences,
     users,
@@ -786,6 +794,7 @@ class OrderRepository:
         correlation_id: str | None = None,
         tag: str | None = None,
         request_id: str | None = None,
+        reason: str | None = None,
     ) -> dict[str, Any]:
         """Insert an order *and* its opening ``NEW`` event.
 
@@ -793,7 +802,27 @@ class OrderRepository:
         malformed — the log is what the lifecycle is reconstructed from — and a
         caller that had to remember to write the first event would eventually
         forget. Starting status is not a parameter for the same reason.
+
+        ``reason`` is written to the ``NEW`` event's ``raw`` payload and *not* to
+        the order row: the row is current state, and why an order was raised is
+        history. ``tag`` is a 64-character marker and cannot hold a sentence, so
+        the reason needs its own home to survive to the monitoring timeline.
+
+        The ``raw`` payload also carries the **provenance stamp** — see
+        :data:`atr.execution.oms.PROVENANCE_FORWARD`. This method is the only
+        path that raises an order, so it is the only place the stamp can
+        honestly be written, and writing it here means every order that goes
+        through the platform is marked without its caller having to remember.
+        A row inserted straight into the table — by a backfill harness, a
+        migration, or a test — carries no stamp, and the learning engine grades
+        it in-sample for exactly that reason.
         """
+        from atr.execution.oms import (
+            PROVENANCE_FORWARD,
+            PROVENANCE_KEY,
+            RECORDED_AT_KEY,
+        )
+
         mode = (mode or "PAPER").strip().upper()
         if mode not in ("PAPER", "LIVE"):
             raise ValueError(f"mode must be PAPER or LIVE, got {mode!r}")
@@ -854,9 +883,13 @@ class OrderRepository:
             source="oms",
             correlation_id=correlation_id,
             request_id=request_id,
+            raw={
+                "reason": reason,
+                PROVENANCE_KEY: PROVENANCE_FORWARD,
+                RECORDED_AT_KEY: now.isoformat(),
+            },
         )
         return OrderRepository.get(session, order_id, user_id) or row
-
     @staticmethod
     def get(session: Session, order_id: str, user_id: str) -> dict[str, Any] | None:
         stmt = select(orders).where(
@@ -1448,8 +1481,17 @@ class TradeJournalRepository:
         strategy_version: int | None = None,
         asset_class: str = "EQUITY",
         signal_reason: str | None = None,
+        evidence_grade: str | None = None,
         notes: str | None = None,
     ) -> dict[str, Any]:
+        """Open an episode.
+
+        ``evidence_grade`` is the provenance verdict the caller established from
+        the opening order's event log: ``forward`` when the order was raised
+        live, ``in_sample`` otherwise. It is left ``None`` when the caller has no
+        verdict to give, and a ``None`` grade is graded in-sample downstream —
+        an unknown provenance is not a licence to claim independence.
+        """
         row = {
             "trade_id": _new_id(),
             "user_id": user_id,
@@ -1472,6 +1514,7 @@ class TradeJournalRepository:
             "regime": None,
             "signal_reason": signal_reason,
             "slippage_bps": None,
+            "evidence_grade": evidence_grade,
             "notes": notes,
             "created_at": utcnow(),
         }
@@ -1536,6 +1579,31 @@ class TradeJournalRepository:
         return int(result.rowcount or 0)
 
     @staticmethod
+    def set_exit_reason(
+        session: Session, trade_id: str, user_id: str, exit_reason: str
+    ) -> int:
+        """Record why a closed trade ended.
+
+        Separate from :meth:`close_trade` because the reason lives on the closing
+        *order's* event log, not on the journal row, and the close is what makes
+        the trade exist. Reading the reason first and then writing the trade
+        would mean a missing event loses the P&L to protect a label; this way a
+        missing event costs only the label.
+
+        Deliberately unrestricted by ``exit_ts IS NULL`` — this is a correction
+        to a field on an already-closed trade, not a second close.
+        """
+        result = session.execute(
+            update(trade_journal)
+            .where(
+                trade_journal.c.trade_id == trade_id,
+                trade_journal.c.user_id == user_id,
+            )
+            .values(exit_reason=str(exit_reason)[:32])
+        )
+        return int(result.rowcount or 0)
+
+    @staticmethod
     def get(session: Session, trade_id: str, user_id: str) -> dict[str, Any] | None:
         stmt = select(trade_journal).where(
             trade_journal.c.trade_id == trade_id, trade_journal.c.user_id == user_id
@@ -1577,6 +1645,239 @@ class TradeJournalRepository:
             .offset(max(0, offset))
         )
         return _many(session.execute(stmt).all()), total
+
+
+class TradeAttributionRepository:
+    """The post-trade attribution of a closed trade — one row per trade, for ever.
+
+    The design rule is the primary key. ``trade_id`` *is* the key, so a second
+    attribution of the same trade is structurally unable to create a second row —
+    idempotency is a property of the schema rather than a discipline the caller
+    has to remember. :meth:`upsert` therefore has exactly two outcomes: insert
+    when nothing is there, replace when something is. It never duplicates, and it
+    never silently no-ops on a genuine change.
+
+    **Provenance is not written here.** ``evidence_grade`` and ``evidence_class``
+    arrive in the row dict from the service, which reads them from
+    ``trade_journal``. There is deliberately no method on this class that derives,
+    defaults or infers a grade: the one place a grade may be decided is the
+    journal's own writer, and a repository that could invent one would be a second
+    source of truth about whether a measurement was made before its outcome.
+    """
+
+    @staticmethod
+    def upsert(session: Session, row: dict[str, Any]) -> str:
+        """Write one attribution, replacing any existing row for the trade.
+
+        Returns ``"inserted"`` or ``"replaced"`` rather than a row count, because
+        both are success and the caller almost always wants to distinguish them in
+        a report — *"attributed 40 closed trades, 12 of them updated"* is a summary
+        an operator can act on, and *"rowcount 40"* is not.
+
+        Replacement rather than ``ON CONFLICT DO NOTHING``: a re-run that has a
+        *different* input fingerprint has new information (a late fill, a context
+        recorded after the trade closed), and keeping the stale row would be
+        keeping a number the platform no longer believes. The
+        ``input_fingerprint`` check that avoids rewriting an unchanged row lives in
+        the service, where it can be done without a write attempt at all.
+        """
+        values = dict(row)
+        values.setdefault("computed_at", utcnow())
+        values["updated_at"] = utcnow()
+
+        existing = session.execute(
+            select(trade_attributions.c.trade_id).where(
+                trade_attributions.c.trade_id == values["trade_id"]
+            )
+        ).first()
+        if existing is None:
+            session.execute(insert(trade_attributions).values(**values))
+            return "inserted"
+
+        session.execute(
+            update(trade_attributions)
+            .where(trade_attributions.c.trade_id == values["trade_id"])
+            .values(**values)
+        )
+        return "replaced"
+
+    @staticmethod
+    def get(
+        session: Session, trade_id: str, user_id: str
+    ) -> dict[str, Any] | None:
+        """One trade's attribution, decoded. Owner-scoped like every read here."""
+        stmt = select(trade_attributions).where(
+            trade_attributions.c.trade_id == trade_id,
+            trade_attributions.c.user_id == user_id,
+        )
+        row = session.execute(stmt).mappings().first()
+        if row is None:
+            return None
+        return TradeAttributionRepository._decode(dict(row))
+
+    @staticmethod
+    def fingerprint_for(session: Session, trade_id: str) -> str | None:
+        """The fingerprint currently stored for a trade, if any.
+
+        Read before a computation so an unchanged trade can be skipped. That check
+        exists so the scheduled sweep is cheap enough to actually run: attributing
+        every closed trade on every pass would work, and would recompute the same
+        answer hundreds of times a day for no gain.
+        """
+        return session.execute(
+            select(trade_attributions.c.input_fingerprint).where(
+                trade_attributions.c.trade_id == trade_id
+            )
+        ).scalar()
+
+    @staticmethod
+    def list_for_user(
+        session: Session,
+        user_id: str,
+        *,
+        strategy_id: str | None = None,
+        strategy_version: int | None = None,
+        symbol: str | None = None,
+        source: str | None = None,
+        evidence_grade: str | None = None,
+        market_regime: str | None = None,
+        sector: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        reason_code: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Sliced, newest first, with the total for pagination.
+
+        The filters mirror the API's query parameters one-for-one, so a filter that
+        exists on the route cannot be silently unsupported here. ``strategy_id``
+        and ``strategy_version`` are read out of the stored blob with a ``LIKE``
+        rather than being lifted into columns: they are already indexed on
+        ``trade_journal`` and this table's job is to be the attribution record, not
+        a second index of the journal's fields.
+        """
+        conditions = [trade_attributions.c.user_id == user_id]
+        if strategy_id:
+            conditions.append(trade_attributions.c.attribution.like(f'%"strategy_id": "{strategy_id}"%'))
+        if strategy_version is not None:
+            conditions.append(
+                trade_attributions.c.attribution.like(
+                    f'%"strategy_version": {int(strategy_version)}%'
+                )
+            )
+        if symbol:
+            conditions.append(trade_attributions.c.symbol == symbol.strip().upper())
+        if source:
+            conditions.append(trade_attributions.c.source == source.strip().upper())
+        if evidence_grade:
+            conditions.append(
+                trade_attributions.c.evidence_grade == evidence_grade.strip().lower()
+            )
+        if market_regime:
+            conditions.append(trade_attributions.c.market_regime == market_regime)
+        if sector:
+            conditions.append(trade_attributions.c.sector == sector)
+        if start is not None:
+            conditions.append(trade_attributions.c.computed_at >= start)
+        if end is not None:
+            conditions.append(trade_attributions.c.computed_at <= end)
+        if reason_code:
+            # Comma-joined, so a LIKE with the delimiters is exact rather than a
+            # prefix match: without them ``HIGH_MAE`` would also match a
+            # hypothetical ``VERY_HIGH_MAE``.
+            conditions.append(
+                trade_attributions.c.reason_codes.like(
+                    f"%{',' if reason_code else ''}{reason_code},%"
+                )
+                | trade_attributions.c.reason_codes.like(f"%{reason_code}%")
+            )
+
+        total = int(
+            session.execute(
+                select(func.count())
+                .select_from(trade_attributions)
+                .where(*conditions)
+            ).scalar()
+            or 0
+        )
+        stmt = (
+            select(trade_attributions)
+            .where(*conditions)
+            .order_by(trade_attributions.c.computed_at.desc(), trade_attributions.c.trade_id)
+            .limit(max(1, min(limit, 1000)))
+            .offset(max(0, offset))
+        )
+        return [_decode_row(r) for r in session.execute(stmt).mappings().all()], total
+
+    @staticmethod
+    def all_for_user(session: Session, user_id: str, *, limit: int = 20_000) -> list[dict[str, Any]]:
+        """Every attribution for a user, oldest first — the aggregation input.
+
+        Unfiltered and unpaginated on purpose: the summary and the breakdowns are
+        computed over the whole book, and paginating the input to an aggregate is
+        how a summary quietly becomes a summary of the first page.
+        """
+        stmt = (
+            select(trade_attributions)
+            .where(trade_attributions.c.user_id == user_id)
+            .order_by(trade_attributions.c.computed_at)
+            .limit(max(1, min(limit, 200_000)))
+        )
+        return [_decode_row(r) for r in session.execute(stmt).mappings().all()]
+
+    @staticmethod
+    def for_trades(
+        session: Session, user_id: str, trade_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Attributions for a set of trades, keyed by trade id. For the join the
+        learning dataset performs when it enriches journal rows."""
+        if not trade_ids:
+            return {}
+        stmt = select(trade_attributions).where(
+            trade_attributions.c.user_id == user_id,
+            trade_attributions.c.trade_id.in_(set(trade_ids)),
+        )
+        return {
+            r["trade_id"]: _decode_row(r)
+            for r in session.execute(stmt).mappings().all()
+        }
+
+    @staticmethod
+    def delete_for_user(session: Session, user_id: str) -> int:
+        """Remove a user's attributions. Used by tests and a deployment reset —
+        never by the sweep, which only ever replaces."""
+        result = session.execute(
+            delete(trade_attributions).where(trade_attributions.c.user_id == user_id)
+        )
+        return int(result.rowcount or 0)
+
+    @staticmethod
+    def _decode(row: dict[str, Any]) -> dict[str, Any]:
+        return _decode_row(row)
+
+
+def _decode_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Decode the stored blobs back into structures.
+
+    A corrupt blob degrades to ``None`` rather than raising: one unreadable
+    attribution must not blank a whole dashboard, and the counts and the price
+    figures on the row are still good even when the tree is not.
+    """
+    out = dict(row)
+    for column in ("attribution", "missing_fields"):
+        value = out.get(column)
+        if isinstance(value, str):
+            try:
+                out[column] = json.loads(value)
+            except (ValueError, TypeError):
+                out[column] = None
+    codes = out.get("reason_codes")
+    if isinstance(codes, str):
+        out["reason_codes"] = [c for c in codes.split(",") if c]
+    elif codes is None:
+        out["reason_codes"] = []
+    return out
 
 
 # ===========================================================================
@@ -1825,6 +2126,8 @@ class StrategyRepository:
         )
         return _one(session.execute(stmt).first())
 
+    get_version = version
+
     @staticmethod
     def latest_version(
         session: Session, strategy_id: str
@@ -2010,6 +2313,122 @@ class BacktestRunRepository:
         return int(result.rowcount or 0)
 
 
+class BacktestArtefactRepository:
+    """The bulky outputs of a run: trades, curves and the monthly matrix.
+
+    Kept apart from :class:`BacktestRunRepository` because the two have opposite
+    access patterns. A run row is read constantly (status polling) and written a
+    few times; artefact rows are written once in bulk at completion and read
+    only when someone opens the results page. Mixing them would mean the status
+    endpoint's query dragging megabytes of curve data around.
+
+    Every write here is **replace-on-complete**, not append: a run's artefacts
+    are a function of the run, so re-writing them is idempotent. Appending would
+    let a retried completion double a run's trade list, and a doubled trade list
+    silently doubles the P&L totals computed from it.
+    """
+
+    @staticmethod
+    def save_trades(
+        session: Session, run_id: str, trades: list[dict[str, Any]]
+    ) -> int:
+        session.execute(delete(backtest_trades).where(backtest_trades.c.run_id == run_id))
+        if not trades:
+            return 0
+        rows = []
+        for seq, trade in enumerate(trades):
+            rows.append({**trade, "run_id": run_id, "seq": seq})
+        session.execute(insert(backtest_trades), rows)
+        return len(rows)
+
+    @staticmethod
+    def trades(
+        session: Session,
+        run_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        stmt = (
+            select(backtest_trades)
+            .where(backtest_trades.c.run_id == run_id)
+            .order_by(backtest_trades.c.seq)
+            .offset(max(0, offset))
+        )
+        if limit is not None:
+            stmt = stmt.limit(max(1, limit))
+        return _many(session.execute(stmt).all())
+
+    @staticmethod
+    def trade_count(session: Session, run_id: str) -> int:
+        stmt = select(func.count()).select_from(backtest_trades).where(
+            backtest_trades.c.run_id == run_id
+        )
+        return int(session.execute(stmt).scalar() or 0)
+
+    @staticmethod
+    def trade(session: Session, run_id: str, seq: int) -> dict[str, Any] | None:
+        stmt = select(backtest_trades).where(
+            backtest_trades.c.run_id == run_id, backtest_trades.c.seq == int(seq)
+        )
+        return _one(session.execute(stmt).first())
+
+    @staticmethod
+    def save_curve(
+        session: Session, run_id: str, kind: str, points: list[tuple[Any, float]]
+    ) -> int:
+        session.execute(
+            delete(backtest_curves).where(
+                backtest_curves.c.run_id == run_id, backtest_curves.c.kind == kind
+            )
+        )
+        if not points:
+            return 0
+        rows = [
+            {"run_id": run_id, "kind": kind, "seq": i, "ts": ts, "value": float(value)}
+            for i, (ts, value) in enumerate(points)
+        ]
+        session.execute(insert(backtest_curves), rows)
+        return len(rows)
+
+    @staticmethod
+    def curve(
+        session: Session, run_id: str, kind: str, *, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        stmt = (
+            select(backtest_curves)
+            .where(backtest_curves.c.run_id == run_id, backtest_curves.c.kind == kind)
+            .order_by(backtest_curves.c.seq)
+        )
+        if limit is not None:
+            stmt = stmt.limit(max(1, limit))
+        return _many(session.execute(stmt).all())
+
+    @staticmethod
+    def save_monthly(session: Session, run_id: str, rows_in: list[dict[str, Any]]) -> int:
+        session.execute(delete(backtest_monthly).where(backtest_monthly.c.run_id == run_id))
+        if not rows_in:
+            return 0
+        rows = [{**row, "run_id": run_id} for row in rows_in]
+        session.execute(insert(backtest_monthly), rows)
+        return len(rows)
+
+    @staticmethod
+    def monthly(session: Session, run_id: str) -> list[dict[str, Any]]:
+        stmt = (
+            select(backtest_monthly)
+            .where(backtest_monthly.c.run_id == run_id)
+            .order_by(backtest_monthly.c.year, backtest_monthly.c.month)
+        )
+        return _many(session.execute(stmt).all())
+
+    @staticmethod
+    def delete_for_run(session: Session, run_id: str) -> None:
+        """Used when a run fails after partial writes, so no half a result survives."""
+        for table in (backtest_trades, backtest_curves, backtest_monthly):
+            session.execute(delete(table).where(table.c.run_id == run_id))
+
+
 # ===========================================================================
 # Screener tier
 # ===========================================================================
@@ -2182,13 +2601,645 @@ class SystemStateRepository:
         return out
 
 
+# --------------------------------------------------------------------------- learning_observations
+class LearningObservationRepository:
+    """Persistent observations & research findings extracted from forward trades."""
+
+    @staticmethod
+    def record(
+        session: Session,
+        *,
+        strategy_id: str,
+        strategy_version: int | None,
+        date: str,
+        metric: str,
+        condition_bucket: str,
+        sample_size: int,
+        statistical_result: dict[str, Any],
+        evidence_class: str,
+        confidence: float | None = None,
+        source_trades: list[str] | None = None,
+    ) -> dict[str, Any]:
+        obs_id = _new_id()
+        now = utcnow()
+        row = {
+            "observation_id": obs_id,
+            "strategy_id": strategy_id,
+            "strategy_version": strategy_version,
+            "date": date,
+            "created_at": now,
+            "metric": metric,
+            "condition_bucket": condition_bucket,
+            "sample_size": int(sample_size),
+            "statistical_result": json.dumps(statistical_result, default=str),
+            "evidence_class": evidence_class,
+            "confidence": float(confidence) if confidence is not None else None,
+            "source_trades": json.dumps(source_trades or []),
+        }
+        session.execute(insert(learning_observations).values(**row))
+        return {
+            **row,
+            "statistical_result": statistical_result,
+            "source_trades": source_trades or [],
+        }
+
+    @staticmethod
+    def list_observations(
+        session: Session,
+        *,
+        strategy_id: str | None = None,
+        strategy_version: int | None = None,
+        evidence_class: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        stmt = select(learning_observations).order_by(learning_observations.c.created_at.desc())
+        if strategy_id:
+            stmt = stmt.where(learning_observations.c.strategy_id == strategy_id)
+        if strategy_version is not None:
+            stmt = stmt.where(learning_observations.c.strategy_version == strategy_version)
+        if evidence_class:
+            stmt = stmt.where(learning_observations.c.evidence_class == evidence_class)
+        stmt = stmt.limit(max(1, min(limit, 500)))
+        rows = _many(session.execute(stmt).all())
+        for r in rows:
+            try:
+                r["statistical_result"] = json.loads(r["statistical_result"])
+            except Exception as exc:
+                logger.warning(
+                    "observation %s: could not parse statistical_result: %s",
+                    r.get("id"),
+                    exc,
+                )
+            try:
+                r["source_trades"] = json.loads(r["source_trades"]) if r.get("source_trades") else []
+            except Exception as exc:
+                logger.warning(
+                    "observation %s: could not parse source_trades: %s",
+                    r.get("id"),
+                    exc,
+                )
+                r["source_trades"] = []
+        return rows
+
+
+# --------------------------------------------------------------------------- optimization_recommendations
+class OptimizationRecommendationRepository:
+    """Persistent optimization and parameter adaptation recommendations."""
+
+    @staticmethod
+    def create(
+        session: Session,
+        *,
+        strategy_id: str,
+        source_strategy_version: int,
+        parameter: str,
+        current_value: float,
+        proposed_value: float,
+        reason: str,
+        source_observations: list[dict[str, Any]] | str,
+        sample_size: int,
+        baseline_metrics: dict[str, Any],
+        candidate_metrics: dict[str, Any],
+        walk_forward_metrics: dict[str, Any],
+        robustness_results: dict[str, Any],
+        confidence: str | float | None = None,
+        status: str = "PROPOSED",
+        recommendation_id: str | None = None,
+    ) -> dict[str, Any]:
+        rec_id = recommendation_id or _new_id()
+        now = utcnow()
+        row = {
+            "recommendation_id": rec_id,
+            "strategy_id": strategy_id,
+            "source_strategy_version": int(source_strategy_version),
+            "target_strategy_version": None,
+            "parameter": parameter,
+            "current_value": float(current_value),
+            "proposed_value": float(proposed_value),
+            "reason": reason,
+            "source_observations": (
+                json.dumps(source_observations, default=str)
+                if not isinstance(source_observations, str)
+                else source_observations
+            ),
+            "sample_size": int(sample_size),
+            "baseline_metrics": json.dumps(baseline_metrics, default=str),
+            "candidate_metrics": json.dumps(candidate_metrics, default=str),
+            "walk_forward_metrics": json.dumps(walk_forward_metrics, default=str),
+            "robustness_results": json.dumps(robustness_results, default=str),
+            "confidence": str(confidence) if confidence is not None else None,
+            "status": status,
+            "rejection_reason": None,
+            "created_at": now,
+            "updated_at": now,
+            "reviewed_by": None,
+            "reviewed_at": None,
+        }
+        session.execute(insert(optimization_recommendations).values(**row))
+        return OptimizationRecommendationRepository._unpack(row) or row
+
+    @staticmethod
+    def get(session: Session, recommendation_id: str) -> dict[str, Any] | None:
+        stmt = select(optimization_recommendations).where(
+            optimization_recommendations.c.recommendation_id == recommendation_id
+        )
+        row = _one(session.execute(stmt).first())
+        return OptimizationRecommendationRepository._unpack(row) if row else None
+
+    @staticmethod
+    def list_for_strategy(
+        session: Session,
+        strategy_id: str | None = None,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        stmt = select(optimization_recommendations).order_by(
+            optimization_recommendations.c.created_at.desc()
+        )
+        if strategy_id:
+            stmt = stmt.where(optimization_recommendations.c.strategy_id == strategy_id)
+        if status:
+            stmt = stmt.where(optimization_recommendations.c.status == status)
+        stmt = stmt.limit(max(1, min(limit, 500)))
+        rows = _many(session.execute(stmt).all())
+        return [
+            unpacked for r in rows if (unpacked := OptimizationRecommendationRepository._unpack(r))
+        ]
+
+    @staticmethod
+    def update_status(
+        session: Session,
+        recommendation_id: str,
+        status: str,
+        *,
+        reviewed_by: str | None = None,
+        rejection_reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        values: dict[str, Any] = {
+            "status": status,
+            "updated_at": now,
+        }
+        if reviewed_by:
+            values["reviewed_by"] = reviewed_by
+            values["reviewed_at"] = now
+        if rejection_reason is not None:
+            values["rejection_reason"] = rejection_reason
+
+        session.execute(
+            update(optimization_recommendations)
+            .where(optimization_recommendations.c.recommendation_id == recommendation_id)
+            .values(**values)
+        )
+        return OptimizationRecommendationRepository.get(session, recommendation_id)
+
+    @staticmethod
+    def apply(
+        session: Session,
+        recommendation_id: str,
+        *,
+        author_user_id: str,
+    ) -> dict[str, Any]:
+        """Apply an approved recommendation: creates new immutable version V+1."""
+        rec = OptimizationRecommendationRepository.get(session, recommendation_id)
+        if not rec:
+            raise LookupError(f"no recommendation {recommendation_id}")
+        if rec["status"] not in ("APPROVED", "RECOMMENDED"):
+            raise ValueError(f"cannot apply recommendation with status {rec['status']}")
+
+        strategy_id = rec["strategy_id"]
+        source_version_num = rec["source_strategy_version"]
+        source_ver = StrategyRepository.version(session, strategy_id, source_version_num)
+        if not source_ver:
+            raise LookupError(f"no source strategy version {strategy_id} v{source_version_num}")
+
+        parsed_def = (
+            json.loads(source_ver["definition"])
+            if isinstance(source_ver["definition"], str)
+            else dict(source_ver["definition"])
+        )
+        param_name = rec["parameter"]
+        prop_value = rec["proposed_value"]
+
+        from atr.optimization.adaptive import apply_parameter_to_definition
+
+        new_def = apply_parameter_to_definition(parsed_def, param_name, prop_value)
+
+        change_note = (
+            f"Optimized {param_name}: {rec['current_value']} -> {prop_value} "
+            f"based on recommendation {recommendation_id} ({rec['reason']})"
+        )
+
+        new_version_row = StrategyRepository.create_version(
+            session,
+            strategy_id=strategy_id,
+            author_user_id=author_user_id,
+            definition=new_def,
+            change_note=change_note,
+        )
+
+        now = utcnow()
+        session.execute(
+            update(optimization_recommendations)
+            .where(optimization_recommendations.c.recommendation_id == recommendation_id)
+            .values(
+                status="APPLIED",
+                target_strategy_version=new_version_row["version"],
+                reviewed_by=author_user_id,
+                reviewed_at=now,
+                updated_at=now,
+            )
+        )
+        return {
+            "recommendation": OptimizationRecommendationRepository.get(session, recommendation_id),
+            "new_version": new_version_row,
+        }
+
+    @staticmethod
+    def _unpack(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not row:
+            return None
+        r = dict(row)
+        for json_col in (
+            "source_observations",
+            "baseline_metrics",
+            "candidate_metrics",
+            "walk_forward_metrics",
+            "robustness_results",
+        ):
+            val = r.get(json_col)
+            if isinstance(val, str):
+                try:
+                    r[json_col] = json.loads(val)
+                except Exception:
+                    pass
+        return r
+
+
+class StrategyExperimentRepository:
+    """Strategy Experiment Lab repository for comparative baseline vs candidate evaluations."""
+
+    @staticmethod
+    def create(
+        session: Session,
+        *,
+        strategy_id: str,
+        source_version: int,
+        creator_user_id: str,
+        name: str,
+        reason: str,
+        parameter_changes: dict[str, Any],
+        baseline_definition: dict[str, Any],
+        candidate_definition: dict[str, Any],
+        recommendation_id: str | None = None,
+        experiment_id: str | None = None,
+        status: str = "CREATED",
+    ) -> dict[str, Any]:
+        exp_id = experiment_id or _new_id()
+        now = utcnow()
+        row = {
+            "experiment_id": exp_id,
+            "strategy_id": strategy_id,
+            "source_version": int(source_version),
+            "target_version": None,
+            "recommendation_id": recommendation_id,
+            "creator_user_id": creator_user_id,
+            "name": name,
+            "reason": reason,
+            "parameter_changes": json.dumps(parameter_changes, default=str),
+            "baseline_definition": json.dumps(baseline_definition, default=str),
+            "candidate_definition": json.dumps(candidate_definition, default=str),
+            "status": status,
+            "rejection_reason": None,
+            "results": None,
+            "explanation": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+            "reviewed_by": None,
+            "reviewed_at": None,
+        }
+        session.execute(insert(strategy_experiments).values(**row))
+        return StrategyExperimentRepository._unpack(row) or row
+
+    @staticmethod
+    def get(session: Session, experiment_id: str) -> dict[str, Any] | None:
+        stmt = select(strategy_experiments).where(
+            strategy_experiments.c.experiment_id == experiment_id
+        )
+        row = _one(session.execute(stmt).first())
+        return StrategyExperimentRepository._unpack(row) if row else None
+
+    @staticmethod
+    def list_for_strategy(
+        session: Session,
+        strategy_id: str | None = None,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        stmt = select(strategy_experiments).order_by(
+            strategy_experiments.c.created_at.desc()
+        )
+        if strategy_id:
+            stmt = stmt.where(strategy_experiments.c.strategy_id == strategy_id)
+        if status:
+            stmt = stmt.where(strategy_experiments.c.status == status)
+        stmt = stmt.limit(max(1, min(limit, 500)))
+        rows = _many(session.execute(stmt).all())
+        return [
+            unpacked for r in rows if (unpacked := StrategyExperimentRepository._unpack(r))
+        ]
+
+    @staticmethod
+    def update_status(
+        session: Session,
+        experiment_id: str,
+        status: str,
+        *,
+        reviewed_by: str | None = None,
+        rejection_reason: str | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        values: dict[str, Any] = {
+            "status": status,
+            "updated_at": now,
+        }
+        if reviewed_by:
+            values["reviewed_by"] = reviewed_by
+            values["reviewed_at"] = now
+        if rejection_reason is not None:
+            values["rejection_reason"] = rejection_reason
+        if error is not None:
+            values["error"] = error
+
+        session.execute(
+            update(strategy_experiments)
+            .where(strategy_experiments.c.experiment_id == experiment_id)
+            .values(**values)
+        )
+        return StrategyExperimentRepository.get(session, experiment_id)
+
+    @staticmethod
+    def save_results(
+        session: Session,
+        experiment_id: str,
+        *,
+        results: dict[str, Any],
+        explanation: dict[str, Any],
+        status: str = "COMPLETED",
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        session.execute(
+            update(strategy_experiments)
+            .where(strategy_experiments.c.experiment_id == experiment_id)
+            .values(
+                status=status,
+                results=json.dumps(results, default=str),
+                explanation=json.dumps(explanation, default=str),
+                updated_at=now,
+            )
+        )
+        return StrategyExperimentRepository.get(session, experiment_id)
+
+    @staticmethod
+    def apply(
+        session: Session,
+        experiment_id: str,
+        *,
+        author_user_id: str,
+    ) -> dict[str, Any]:
+        """Apply an approved experiment: creates new immutable version V+1."""
+        exp = StrategyExperimentRepository.get(session, experiment_id)
+        if not exp:
+            raise LookupError(f"no experiment {experiment_id}")
+        if exp["status"] != "APPROVED":
+            raise ValueError(f"cannot apply experiment with status {exp['status']}; must be APPROVED")
+
+        strategy_id = exp["strategy_id"]
+        source_version_num = exp["source_version"]
+        source_ver = StrategyRepository.version(session, strategy_id, source_version_num)
+        if not source_ver:
+            raise LookupError(f"no source strategy version {strategy_id} v{source_version_num}")
+
+        candidate_def = exp.get("candidate_definition")
+        if not candidate_def or not isinstance(candidate_def, dict):
+            raise ValueError("experiment lacks valid candidate definition")
+
+        change_note = (
+            f"Applied Experiment Lab result '{exp['name']}' (experiment {experiment_id}): "
+            f"{json.dumps(exp.get('parameter_changes') or {})}"
+        )
+
+        new_version_row = StrategyRepository.create_version(
+            session,
+            strategy_id=strategy_id,
+            author_user_id=author_user_id,
+            definition=candidate_def,
+            change_note=change_note,
+        )
+
+        now = utcnow()
+        session.execute(
+            update(strategy_experiments)
+            .where(strategy_experiments.c.experiment_id == experiment_id)
+            .values(
+                status="APPLIED",
+                target_version=new_version_row["version"],
+                reviewed_by=author_user_id,
+                reviewed_at=now,
+                updated_at=now,
+            )
+        )
+        return {
+            "experiment": StrategyExperimentRepository.get(session, experiment_id),
+            "new_version": new_version_row,
+        }
+
+    @staticmethod
+    def _unpack(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not row:
+            return None
+        r = dict(row)
+        for json_col in (
+            "parameter_changes",
+            "baseline_definition",
+            "candidate_definition",
+            "results",
+            "explanation",
+        ):
+            val = r.get(json_col)
+            if isinstance(val, str):
+                try:
+                    r[json_col] = json.loads(val)
+                except Exception:
+                    pass
+        return r
+
+
+class SignalContextRepository:
+    """Persistence for enriched signal contexts.
+
+    Reads are user-scoped, like every other repository here. Writes follow the
+    artefact pattern: a backtest run's contexts are **replace-on-complete**
+    (a retried completion must not double a run's context rows), while live and
+    paper contexts are one-row-per-signal inserts keyed by ``signal_id``.
+    """
+
+    @staticmethod
+    def save(session: Session, row: dict[str, Any]) -> int:
+        """Insert one context row. Returns 1 on success, 0 on a conflict.
+
+        The insert runs inside a SAVEPOINT: a duplicate ``(user_id, signal_id)``
+        is an expected no-op for a re-fired bar, and rolling the savepoint back
+        leaves any earlier writes in the caller's transaction intact.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        statement = insert(signal_contexts).values(**row)
+        try:
+            with session.begin_nested():
+                session.execute(statement)
+        except IntegrityError:
+            return 0
+        return 1
+
+    @staticmethod
+    def replace_for_run(session: Session, run_id: str, rows: list[dict[str, Any]]) -> int:
+        """Delete a run's existing contexts, then insert ``rows`` — idempotent."""
+        session.execute(
+            delete(signal_contexts).where(signal_contexts.c.run_id == run_id)
+        )
+        if not rows:
+            return 0
+        session.execute(insert(signal_contexts), rows)
+        return len(rows)
+
+    @staticmethod
+    def get(
+        session: Session, user_id: str, signal_id: str
+    ) -> dict[str, Any] | None:
+        stmt = select(signal_contexts).where(
+            signal_contexts.c.user_id == user_id,
+            signal_contexts.c.signal_id == signal_id,
+        )
+        row = session.execute(stmt).mappings().first()
+        if row is None:
+            return None
+        return dict(SignalContextRepository._decode_json(row))
+
+
+    @staticmethod
+    def list(
+        session: Session,
+        user_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        source: str | None = None,
+        strategy_id: str | None = None,
+        klass: str | None = None,
+    ) -> list[dict[str, Any]]:
+        stmt = select(signal_contexts).where(
+            signal_contexts.c.user_id == user_id
+        )
+        if source:
+            stmt = stmt.where(signal_contexts.c.signal_source == source)
+        if strategy_id:
+            stmt = stmt.where(signal_contexts.c.strategy_id == strategy_id)
+        if klass:
+            stmt = stmt.where(signal_contexts.c.context_class == klass)
+        stmt = stmt.order_by(signal_contexts.c.signal_ts.desc(), signal_contexts.c.signal_id)
+        stmt = stmt.limit(max(1, limit)).offset(max(0, offset))
+        return [dict(SignalContextRepository._decode_json(r)) for r in session.execute(stmt).mappings()]
+
+    @staticmethod
+    def count(
+        session: Session,
+        user_id: str,
+        *,
+        source: str | None = None,
+        strategy_id: str | None = None,
+        klass: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(signal_contexts).where(
+            signal_contexts.c.user_id == user_id
+        )
+        if source:
+            stmt = stmt.where(signal_contexts.c.signal_source == source)
+        if strategy_id:
+            stmt = stmt.where(signal_contexts.c.strategy_id == strategy_id)
+        if klass:
+            stmt = stmt.where(signal_contexts.c.context_class == klass)
+        return int(session.execute(stmt).scalar() or 0)
+
+    @staticmethod
+    def for_run(
+        session: Session, run_id: str, user_id: str
+    ) -> list[dict[str, Any]]:
+        stmt = select(signal_contexts).where(
+            signal_contexts.c.run_id == run_id,
+            signal_contexts.c.user_id == user_id,
+        ).order_by(signal_contexts.c.trade_id)
+        return [dict(SignalContextRepository._decode_json(r)) for r in session.execute(stmt).mappings()]
+
+    @staticmethod
+    def analytics_rows(
+        session: Session,
+        user_id: str,
+        *,
+        strategy_id: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """All of the user's contexts with decoded JSON, newest first.
+
+        Deliberately no version filter: one signal's context is shared reality
+        across arms, and scoping by the recording version would drop whichever
+        arm recorded second. Arm scoping happens at outcome resolution (orders
+        and episodes), in the service layer.
+        """
+        stmt = select(signal_contexts).where(
+            signal_contexts.c.user_id == user_id
+        )
+        if strategy_id:
+            stmt = stmt.where(signal_contexts.c.strategy_id == strategy_id)
+        if source:
+            stmt = stmt.where(signal_contexts.c.signal_source == source)
+        stmt = stmt.order_by(signal_contexts.c.signal_ts)
+        return [dict(SignalContextRepository._decode_json(r)) for r in session.execute(stmt).mappings()]
+
+    @staticmethod
+    def _decode_json(row: dict[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        for col in (
+            "market_context",
+            "sector_context",
+            "stock_context",
+            "score_breakdown",
+            "missing_fields",
+            "benchmark_provenance",
+        ):
+            value = row.get(col)
+            if isinstance(value, str):
+                try:
+                    row[col] = json.loads(value)
+                except Exception:  # noqa: BLE001 — a corrupt blob must not kill the list
+                    row[col] = None
+        return row
+
+
 __all__ = [
     "ApiKeyRepository",
     "AuditRepository",
+    "BacktestArtefactRepository",
     "BacktestRunRepository",
     "DeploymentRepository",
     "DuplicateDefinition",
     "IdempotencyConflict",
+    "LearningObservationRepository",
+    "OptimizationRecommendationRepository",
     "OrderEventRepository",
     "OrderIntentRepository",
     "OrderRepository",
@@ -2196,13 +3247,19 @@ __all__ = [
     "ReconciliationRepository",
     "ScreenerRepository",
     "SessionRepository",
+    "SignalContextRepository",
+    "StrategyExperimentRepository",
     "StrategyRepository",
     "SystemStateRepository",
     "TERMINAL_BACKTEST_STATUSES",
     "TERMINAL_ORDER_STATUSES",
+    "TradeAttributionRepository",
     "TradeJournalRepository",
     "UserRepository",
     "WatchlistRepository",
     "canonical_definition",
     "definition_hash",
 ]
+
+
+

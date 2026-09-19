@@ -13,7 +13,8 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, event, func, select, text
+from loguru import logger
+from sqlalchemy import Engine, create_engine, event, func, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -111,6 +112,10 @@ class AppDatabase:
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.execute("PRAGMA synchronous=NORMAL")
                 cursor.execute("PRAGMA busy_timeout=15000")
+                # Ultra-low latency memory mapping: map up to 256MB into RAM for zero-copy reads
+                cursor.execute("PRAGMA mmap_size=268435456")
+                cursor.execute("PRAGMA cache_size=-64000")  # 64MB page cache in RAM
+                cursor.execute("PRAGMA temp_store=MEMORY")
             finally:
                 cursor.close()
             # Hand transaction control to us. pysqlite otherwise emits its own
@@ -142,11 +147,76 @@ class AppDatabase:
         return self._session_factory
 
     # --------------------------------------------------------------- schema
+    #: Columns added to a table *after* it first shipped, as
+    #: ``{table: ((column, ddl_type), ...)}``.
+    #:
+    #: ``create_all`` creates a missing table and does nothing at all to an
+    #: existing one. So a column added to the model is silently absent from every
+    #: database created before it — and the symptom is not a clear error at
+    #: start-up but a ``no such column`` on every read of that table, in
+    #: production, on the operator's machine. Declaring the additions here makes
+    #: that impossible.
+    #:
+    #: Additive only, and deliberately not a migration framework: there is no
+    #: rename, no type change, no backfill. A column that needs any of those
+    #: needs a decision about the data already in it, which is not something to
+    #: do implicitly at start-up.
+    ADDITIVE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
+        "trade_journal": (
+            ("exit_reason", "VARCHAR(32)"),
+            ("evidence_grade", "VARCHAR(16)"),
+        ),
+    }
+
     def prepare(self) -> None:
-        """Create the schema if it is missing. Idempotent."""
+        """Create the schema if it is missing, and apply additive columns.
+
+        Idempotent. Safe to call on every request, which is what
+        :meth:`session` does.
+        """
         if not self._prepared:
             app_metadata.create_all(self.engine)
+            self._reconcile_additive_columns()
             self._prepared = True
+
+    def _reconcile_additive_columns(self) -> None:
+        """Add any declared post-release column that the database lacks.
+
+        Failing to add one is logged rather than raised: a read-only database
+        (or a dialect that refuses ``ALTER TABLE ADD COLUMN``) should not stop
+        the application from starting. The failure is loud in the log and the
+        affected reads degrade to "missing feature", which is the honest outcome
+        — but it must not be silent, so it is logged at error level.
+        """
+        try:
+            inspector = inspect(self.engine)
+        except Exception as exc:
+            logger.error("schema: could not inspect for additive columns: %s", exc)
+            raise RuntimeError(f"schema inspection failed: {exc}")
+        for table, columns in self.ADDITIVE_COLUMNS.items():
+            try:
+                if not inspector.has_table(table):
+                    continue
+                existing = {column["name"] for column in inspector.get_columns(table)}
+                missing = [(name, ddl) for name, ddl in columns if name not in existing]
+                if not missing:
+                    continue
+                with self.engine.begin() as conn:
+                    for name, ddl in missing:
+                        conn.execute(
+                            text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {ddl}')
+                        )
+                logger.info(
+                    "schema: added {} to {}", ", ".join(name for name, _ in missing), table
+                )
+            except Exception as exc:
+                logger.error(
+                    "schema: could not add columns to %s: %s — reads of those "
+                    "columns will report them missing",
+                    table,
+                    exc,
+                )
+                raise RuntimeError(f"schema migration failed for {table}: {exc}")
 
     @contextlib.contextmanager
     def session(self) -> Iterator[Session]:
