@@ -171,6 +171,25 @@ class InstrumentMaster:
         return self._frame
 
     def load_cached(self, exchanges: list[str]) -> pd.DataFrame:
+        frames = []
+        for ex in exchanges:
+            path = self.cache_dir / f"{ex.upper()}.json"
+            if path.exists():
+                try:
+                    rows = json.loads(path.read_text(encoding="utf8"))
+                    instruments = []
+                    for row in rows:
+                        try:
+                            instruments.append(normalize_contract(row, ex))
+                        except Exception:
+                            continue
+                    frames.append(pd.DataFrame([i.model_dump() for i in instruments]))
+                except Exception as exc:
+                    logger.warning("could not load cached contract file {}: {}", path, exc)
+        if frames:
+            self._frame = pd.concat(frames, ignore_index=True)
+            logger.info("instrument master loaded {} contracts from cache", len(self._frame))
+            return self._frame
         return self.sync(exchanges, force=False)
 
     # ------------------------------------------------------------------

@@ -14,7 +14,12 @@ from typing import Any
 
 import httpx
 from loguru import logger
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from atr.brokers.iifl.auth import Session, SessionStore, build_checksum
 
@@ -54,6 +59,20 @@ class IiflApiError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Only retry genuine transport failures and 5xx server errors.
+
+    4xx responses are client errors (bad request, unauthorized, validation
+    failures) — retrying them just amplifies load on the broker API. 5xx and
+    network errors may be transient, so they get the backoff.
+    """
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, IiflApiError):
+        return exc.status_code is not None and exc.status_code >= 500
+    return False
 
 
 def _transport(force_ipv4: bool) -> httpx.HTTPTransport | None:
@@ -100,10 +119,17 @@ class IiflClient:
         self.base_url = base_url.rstrip("/")
         self.session: Session | None = None
         self._store = session_store or SessionStore()
+        limits = httpx.Limits(
+            max_keepalive_connections=20,
+            max_connections=50,
+            keepalive_expiry=60.0,
+        )
         self._http = httpx.Client(
             base_url=self.base_url,
             timeout=timeout,
             transport=_transport(force_ipv4),
+            limits=limits,
+            http2=True,
         )
 
     # ------------------------------------------------------------------
@@ -148,7 +174,7 @@ class IiflClient:
     # Transport
     # ------------------------------------------------------------------
     @retry(
-        retry=retry_if_exception_type((httpx.TransportError, IiflApiError)),
+        retry=retry_if_exception(_is_retryable),
         wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
         stop=stop_after_attempt(3),
         reraise=True,

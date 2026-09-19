@@ -47,6 +47,7 @@ def authed_client() -> Any:
     Read-only endpoints use this: positions, holdings, funds and the order book do
     not change anything, so they do not need the paper/live gate.
     """
+    from atr.brokers.iifl.auth import SessionStore
     from atr.brokers.iifl.client import IiflClient
     from atr.config.settings import get_settings
 
@@ -55,6 +56,7 @@ def authed_client() -> Any:
         app_key=settings.iifl_app_key,
         app_secret=settings.iifl_app_secret,
         base_url=settings.iifl_base_url,
+        session_store=SessionStore(settings.iifl_session_cache),
     )
     if client.restore_session() is None:
         raise BrokerUnavailable(

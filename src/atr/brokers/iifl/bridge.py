@@ -37,6 +37,7 @@ import paho.mqtt.client as mqtt
 from loguru import logger
 
 from atr.brokers.iifl.auth import Session
+from atr.config.settings import get_settings
 from atr.brokers.iifl.codec import (
     decode_circuit,
     decode_lpp,
@@ -107,7 +108,8 @@ class BridgeClient:
         self._client.on_disconnect = self._handle_disconnect
         # The bridge presents a certificate the official SDK also bypasses.
         self._client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2)
-        self._client.tls_insecure_set(True)
+        if not get_settings().bridge_tls_verify:
+            self._client.tls_insecure_set(True)
         self._connected = threading.Event()
         self._subscribed: set[str] = set()
 
@@ -184,7 +186,26 @@ class BridgeClient:
         status = int(getattr(rc, "value", rc))
         if status == 0:
             self._connected.set()
+            # Ultra-low latency optimization: Disable Nagle's algorithm (TCP_NODELAY)
+            # on the underlying network socket to avoid buffered packet dispatch delays.
+            try:
+                import socket
+                sock = client.socket()
+                if sock is not None:
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    logger.debug("Bridge TCP_NODELAY enabled on MQTT socket")
+            except Exception as e:
+                logger.debug("Could not set TCP_NODELAY on bridge socket: {}", e)
+
             logger.info("bridge connected as {}", self.client_id)
+            # Re-subscribe all previously requested topics on reconnect
+            if self._subscribed:
+                try:
+                    self._client.subscribe([(t, 0) for t in self._subscribed])
+                    logger.info("Bridge re-subscribed {} topics after connect", len(self._subscribed))
+                except Exception as e:
+                    logger.warning("Could not re-subscribe topics on bridge connect: {}", e)
         else:
             logger.error("bridge connect failed: {} (code {})", rc, status)
         if self.on_ack:

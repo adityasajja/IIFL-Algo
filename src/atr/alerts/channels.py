@@ -31,6 +31,24 @@ class LogChannel(Channel):
         return True
 
 
+# Legacy-Markdown delimiters Telegram interprets inside a message body.
+_MARKDOWN_SPECIALS = ("_", "*", "`", "[")
+
+
+def escape_markdown(text: str) -> str:
+    """Escape legacy-Markdown delimiters so literal text survives the parser.
+
+    Signal rule names carry underscores (`trend_break`, `trailing_stop`,
+    `stop_loss`), and Telegram reads `_` as an italic delimiter. With an odd
+    number of them `sendMessage` returns 400 and the entire report is dropped;
+    with an even number the text is silently mangled into italics. Escaping
+    makes the report render exactly as written.
+    """
+    for ch in _MARKDOWN_SPECIALS:
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 class TelegramChannel(Channel):
     name = "telegram"
 
@@ -46,18 +64,28 @@ class TelegramChannel(Channel):
     def send(self, title: str, body: str) -> bool:
         if not self.configured:
             return False
-        try:
-            resp = httpx.post(
-                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-                json={"chat_id": self.chat_id,
-                      "text": f"*{title}*\n{body}",
-                      "parse_mode": "Markdown"},
-                timeout=self.timeout,
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        # Escaped Markdown first (keeps the bold title); if Telegram still
+        # rejects it, fall back to plain text. A dropped signal report is a far
+        # worse outcome than a missing bold heading.
+        payloads = [
+            {"chat_id": self.chat_id,
+             "text": f"*{escape_markdown(title)}*\n{escape_markdown(body)}",
+             "parse_mode": "Markdown"},
+            {"chat_id": self.chat_id, "text": f"{title}\n{body}"},
+        ]
+        for payload in payloads:
+            try:
+                resp = httpx.post(url, json=payload, timeout=self.timeout)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("telegram send failed: {}", exc)
+                return False
+            if resp.status_code == 200:
+                return True
+            logger.warning(
+                "telegram send rejected ({}): {}", resp.status_code, resp.text[:200]
             )
-            return resp.status_code == 200
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("telegram send failed: {}", exc)
-            return False
+        return False
 
 
 class Fast2SmsChannel(Channel):

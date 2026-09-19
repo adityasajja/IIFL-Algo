@@ -105,6 +105,29 @@ EVENT_SOURCES: frozenset[str] = frozenset(
     {"oms", "risk", "broker", "user", "reconciler"}
 )
 
+#: The provenance stamp written to an order's ``NEW`` event by the only path
+#: that can honestly write one: the OMS, at the instant it creates the order.
+#:
+#: This exists because the learning engine has to tell a trade that was raised
+#: live from one that was replayed out of history, and **timestamps alone cannot
+#: do it**. A backfill harness is free to write historical market timestamps, and
+#: a reader has no way to tell that from a record that was genuinely made at the
+#: time — which is exactly the distinction the whole evidence vocabulary rests
+#: on. So the marker is a fact the live path writes and the replay path does not:
+#: an order with no stamp is graded in-sample, conservatively, because it cannot
+#: demonstrate it was recorded before its own outcome.
+#:
+#: ``"forward"`` rather than a module-specific spelling so the value is the same
+#: word the learning dataset stores; ``atr.services.learning`` reads it back
+#: through ``evidence_grade``.
+PROVENANCE_FORWARD = "forward"
+#: The key the stamp lives under in the event's ``raw`` payload.
+PROVENANCE_KEY = "provenance"
+#: The key holding the wall-clock instant the order was created. Kept beside the
+#: stamp so a later reader can see *when* the claim was made, not only that it
+#: was made.
+RECORDED_AT_KEY = "recorded_at"
+
 
 class InvalidTransition(RuntimeError):
     """An illegal state change was attempted.
@@ -256,6 +279,11 @@ class OrderDraft:
     signal_id: str | None = None
     correlation_id: str | None = None
     tag: str | None = None
+    #: Why this order exists, in the words of the rule that raised it. Carried on
+    #: the draft so it reaches the order's ``NEW`` event, which is the only place
+    #: a monitoring screen can read the causal chain from. Without it an order is
+    #: anonymous: the fills show *what* happened and nothing shows *why*.
+    signal_reason: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> OrderDraft:
@@ -280,6 +308,9 @@ class OrderDraft:
             signal_id=row["signal_id"],
             correlation_id=row["correlation_id"],
             tag=row["tag"],
+            # Not persisted on ``orders`` (it lives on the event), so a row
+            # rebuilt from the projection has no reason to carry.
+            signal_reason=None,
         )
 
 
@@ -404,6 +435,9 @@ class LimitsRiskGate:
 __all__ = [
     "EVENT_SOURCES",
     "ORDER_STATES",
+    "PROVENANCE_FORWARD",
+    "PROVENANCE_KEY",
+    "RECORDED_AT_KEY",
     "TERMINAL_STATES",
     "VALID_TRANSITIONS",
     "InvalidTransition",

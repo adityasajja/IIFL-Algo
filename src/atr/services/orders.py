@@ -90,6 +90,7 @@ class OrderService:
 
     db: AppDatabase
     risk_gate: RiskGate
+    portfolio_gate: RiskGate | None = None
     clock: Callable[[], datetime] = field(default=utcnow)
 
     # ------------------------------------------------------------------ reads
@@ -165,6 +166,10 @@ class OrderService:
                     correlation_id=draft.correlation_id,
                     tag=draft.tag,
                     request_id=request_id,
+                    # Why the order exists, from the rule that raised it. Written
+                    # to the ``NEW`` event so the monitoring timeline can show the
+                    # causal chain rather than a column of anonymous fills.
+                    reason=draft.signal_reason,
                 )
                 order_id = order["order_id"]
                 if idempotency_key:
@@ -193,13 +198,20 @@ class OrderService:
 
     # ------------------------------------------------------------- validation
     def validate(
-        self, order_id: str, user_id: str, *, gate: RiskGate | None = None
+        self,
+        order_id: str,
+        user_id: str,
+        *,
+        gate: RiskGate | None = None,
+        portfolio_gate: RiskGate | None = None,
     ) -> str:
         """``NEW`` → ``VALIDATING`` → ``RISK_APPROVED`` | ``REJECTED``.
 
-        The only path to ``RISK_APPROVED``. See the module docstring.
+        The only path to ``RISK_APPROVED``. Enforces:
+        Strategy Risk (risk_gate) → Portfolio Risk (portfolio_gate) → RISK_APPROVED.
         """
         evaluate = gate or self.risk_gate
+        eval_portfolio = portfolio_gate or self.portfolio_gate
         with self.db.session() as session:
             row = OrderRepository.get(session, order_id, user_id)
             if row is None:
@@ -213,29 +225,48 @@ class OrderService:
                 ts=self._now(),
                 source="oms",
             )
-            decision = evaluate(OrderDraft.from_row(row))
-            if decision.allowed:
+            draft = OrderDraft.from_row(row)
+            decision = evaluate(draft)
+            if not decision.allowed:
+                logger.info("order %s rejected by strategy risk: %s", order_id, decision.reason)
                 OrderEventRepository.append(
                     session,
                     order_id=order_id,
                     from_status="VALIDATING",
-                    to_status="RISK_APPROVED",
+                    to_status="REJECTED",
                     ts=self._now(),
+                    reject_reason=decision.reason or "rejected by risk",
+                    raw={"code": decision.code} if decision.code else None,
                     source="risk",
                 )
-                return "RISK_APPROVED"
-            logger.info("order %s rejected by risk: %s", order_id, decision.reason)
+                return "REJECTED"
+
+            # Strategy risk passed. Now check portfolio risk if gate configured.
+            if eval_portfolio is not None:
+                port_decision = eval_portfolio(draft)
+                if not port_decision.allowed:
+                    logger.info("order %s rejected by portfolio risk: %s", order_id, port_decision.reason)
+                    OrderEventRepository.append(
+                        session,
+                        order_id=order_id,
+                        from_status="VALIDATING",
+                        to_status="REJECTED",
+                        ts=self._now(),
+                        reject_reason=port_decision.reason or "rejected by portfolio risk",
+                        raw={"code": port_decision.code} if port_decision.code else None,
+                        source="portfolio_risk",
+                    )
+                    return "REJECTED"
+
             OrderEventRepository.append(
                 session,
                 order_id=order_id,
                 from_status="VALIDATING",
-                to_status="REJECTED",
+                to_status="RISK_APPROVED",
                 ts=self._now(),
-                reject_reason=decision.reason or "rejected by risk",
-                raw={"code": decision.code} if decision.code else None,
                 source="risk",
             )
-            return "REJECTED"
+            return "RISK_APPROVED"
 
     # -------------------------------------------------------------- submission
     def submit(
@@ -483,6 +514,8 @@ def get_order_service(
     portfolio: Any = None,
     instruments: Any = None,
     risk: Any = None,
+    portfolio_gate: Any = None,
+    db: Any = None,
 ) -> OrderService:
     """Build the default service: durable risk state + the OMS.
 
@@ -501,13 +534,14 @@ def get_order_service(
     """
     from atr.services.risk import RiskStateService
 
-    risk = risk or RiskStateService()
+    risk = risk or RiskStateService(db=db) if db is not None else (risk or RiskStateService())
     return OrderService(
-        db=risk.db,
+        db=db or risk.db,
         risk_gate=risk.gate(
             portfolio=portfolio if portfolio is not None else _FlatPortfolio(),
             instruments=instruments if instruments is not None else _default_instruments(),
         ),
+        portfolio_gate=portfolio_gate,
     )
 
 
