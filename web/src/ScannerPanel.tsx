@@ -143,9 +143,10 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
         <StatefulButton
           state={scanState}
           variant="secondary"
+          size="sm"
           onClick={() => void load()}
           loadingText="Scanning…"
-          successText="Scanned"
+          successText="Done"
           errorText="Failed — retry"
         >
           Re-scan
@@ -173,11 +174,11 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
         {scanState === "loading"
           ? mode === "all"
             ? "Scoring cached histories…"
-            : "Fetching live IIFL dailies — about a minute."
+            : "Fetching live prices. This takes about a minute."
           : rows
-            ? `As of ${asOf} · ${breadth} · showing ${visible?.length} · click a header to sort`
+            ? `${asOf} · ${breadth} · showing ${visible?.length}`
             : mode === "all"
-              ? "Full market off the local cache — refresh nightly with `atr history sync`."
+              ? "The whole market, scored from saved prices."
               : "Momentum scan over liquid NSE names."}
       </Hint>
 
