@@ -7,12 +7,17 @@ parts that decide whether a result is real, and the tracks own only the signal.
 Three facts drive everything here:
 
 1. **Costs decide the rebalance frequency.** A delivery round trip in NSE shares
-   is ~0.23% of turnover, nearly all of it statutory. Rebalancing weekly with
-   full turnover spends ~12% of the account a year before any edge is earned.
+   costs 0.227% of turnover in statutory charges and brokerage, and 0.327% once
+   the default 5bp-a-side slippage is added. Only a rule that rotates its whole
+   book weekly pays the full 17%/yr that implies; a top-20 momentum basket
+   replaces a few names at a time and turns over far less, so the frequency
+   question is settled per rule by measuring turnover, not assumed.
 2. **Exchange-traded funds are taxed differently.** STT on shares is 0.1% a side;
-   on an exchange-traded fund it is 0.001% and only on the sell. A round trip
-   costs ~0.03% instead of ~0.23%, so the same weekly rule is viable in one
-   wrapper and hopeless in the other. This asymmetry is the search's main lead.
+   on an exchange-traded fund it is 0.001% and only on the sell. Statutory cost
+   falls from 0.227% to 0.028% a round trip — an eightfold gap. Note that
+   slippage then dominates: with 5bp a side the gap narrows to 0.327% vs 0.128%,
+   so any ETF conclusion is only as good as its slippage assumption. Vary
+   ``Costs.slippage`` before believing a high-turnover ETF result.
 3. **The stock universe is survivorship-biased.** The long-history files are
    today's index members, so names that failed are absent. Levels measured on it
    are not quotable; only like-for-like comparisons inside the same universe are.
