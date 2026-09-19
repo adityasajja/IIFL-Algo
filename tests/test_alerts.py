@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from atr.alerts.channels import LogChannel, TelegramChannel
+from atr.alerts.channels import LogChannel, TelegramChannel, escape_markdown
 from atr.alerts.engine import evaluate
 from atr.alerts.models import AlertRule
 from atr.alerts.store import AlertStore
@@ -64,3 +64,50 @@ def test_store_roundtrip(tmp_path):
 def test_channels():
     assert LogChannel().send("t", "b") is True
     assert TelegramChannel("", "").send("t", "b") is False
+
+
+def test_escape_markdown_neutralises_rule_names():
+    # Rule names carry underscores; Telegram reads "_" as an italic delimiter.
+    assert escape_markdown("trend_break") == "trend\\_break"
+    assert escape_markdown("a*b`c[d") == "a\\*b\\`c\\[d"
+
+
+def test_telegram_send_escapes_report_body(monkeypatch):
+    """Regression: an odd underscore count used to make Telegram return 400
+    and drop the whole report (2026-09-18 12:03 run)."""
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        text = "ok"
+
+    def _fake_post(url, json=None, timeout=None):
+        captured.update(json)
+        return _Resp()
+
+    monkeypatch.setattr("atr.alerts.channels.httpx.post", _fake_post)
+    ch = TelegramChannel("tok", "123")
+    assert ch.send("ATR signals", "  HINDALCO-EQ | trend_break: x") is True
+    assert captured["parse_mode"] == "Markdown"
+    assert captured["text"].count("\\_") == 1
+    assert "trend\\_break" in captured["text"]
+
+
+def test_telegram_send_falls_back_to_plain_text(monkeypatch):
+    """If Telegram rejects the Markdown payload, the report must still land."""
+    calls = []
+
+    class _Resp:
+        def __init__(self, code):
+            self.status_code = code
+            self.text = "Bad Request: can't parse entities"
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append(json)
+        return _Resp(400 if len(calls) == 1 else 200)
+
+    monkeypatch.setattr("atr.alerts.channels.httpx.post", _fake_post)
+    ch = TelegramChannel("tok", "123")
+    assert ch.send("t", "b") is True
+    assert len(calls) == 2
+    assert "parse_mode" not in calls[1]

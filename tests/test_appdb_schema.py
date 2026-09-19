@@ -39,9 +39,29 @@ EXPECTED_TABLES = frozenset(
         "strategies",
         "strategy_versions",
         "backtest_runs",
+        # Result artefacts. Separate tables rather than JSON blobs on
+        # `backtest_runs` so the trade list is queryable and paginated — a
+        # 20,000-trade run would otherwise have to be parsed whole to show page 2.
+        "backtest_trades",
+        "backtest_curves",
+        "backtest_monthly",
         "screener_scans",
+        # Controlled experiments: a candidate strategy version measured against
+        # its source, never applied to the live definition by the experiment itself.
+        "strategy_experiments",
+        # §5 learning & optimization tier
+        "learning_observations",
+        "optimization_recommendations",
+        # §7 signal context tier
+        "signal_contexts",
+        # §9 post-trade attribution tier — one row per closed trade, derived from
+        # the journal + the order-event log + the price cache. Keyed on trade_id
+        # so a re-run replaces rather than duplicates.
+        "trade_attributions",
         # §6 system tier
         "system_state",
+        # §8 portfolio tier — per-user capital allocation policy
+        "portfolio_policies",
     }
 )
 
