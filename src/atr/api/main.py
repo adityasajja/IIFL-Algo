@@ -47,6 +47,7 @@ async def _on_startup() -> None:
     install_live_price_source()
     _start_paper_runner()
     _warm_breadth_cache()
+    _warm_market_intel()
     _warm_instrument_master()
     asyncio.create_task(_insights_loop())
 
@@ -107,6 +108,24 @@ def _warm_instrument_master() -> None:
         get_instrument_master().warm()
     except Exception as exc:  # noqa: BLE001 — best effort, never fatal
         logger.warning("instrument master warm-up could not start: %s", exc)
+
+
+def _warm_market_intel() -> None:
+    """Run the full-universe market pass once at startup, off the request path.
+
+    The first Markets or Today visit otherwise pays ~5s reading ~500 parquet files.
+    """
+    import threading
+
+    def work() -> None:
+        try:
+            from atr.market_intel.service import get_market_intel_service
+
+            get_market_intel_service().compute_all()
+        except Exception as exc:  # noqa: BLE001 - best effort, never fatal
+            logger.warning("market intelligence warm-up failed: %s", exc)
+
+    threading.Thread(target=work, daemon=True, name="atr-market-intel-warm").start()
 
 
 def _warm_breadth_cache() -> None:

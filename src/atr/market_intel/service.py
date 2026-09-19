@@ -72,7 +72,7 @@ class MarketIntelService:
         self._cached_sectors: list[SectorMetrics] | None = None
         self._cached_stocks: dict[str, StockContext] | None = None
         self._cache_time: float = 0.0
-        self._ttl_seconds: float = 60.0
+        self._ttl_seconds: float = 300.0  # inputs are daily bars; 5s to rebuild
 
     # --------------------------------------------------------------------------
     # Configuration & Versioning
