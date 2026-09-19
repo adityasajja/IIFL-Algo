@@ -98,3 +98,17 @@ def test_turnover_is_charged_on_what_actually_changed_hands():
     # Sell 100% of A and buy 100% of B: turnover 2.0, but only 1.0 of notional
     # is sold and 1.0 bought, so the charge is one round trip of slippage.
     assert costs.turnover_cost(2.0, 1_000_000) == pytest.approx(2 * 0.001 * 1_000_000)
+
+
+def test_sharpe_subtracts_the_rate_you_could_have_earned_risk_free():
+    """Otherwise a rule that sits in cash scores well for taking no risk at all."""
+    from atr.research.hunt import RISK_FREE
+
+    prices = _prices(x=[100.0 * (1.0004**i) for i in range(600)])
+    weights = pd.DataFrame({"x": [1.0]}, index=prices.index[:1])
+
+    m = run_weights(prices, weights, ETF_COSTS).metrics()
+
+    assert m["sharpe"] < m["return_vol_ratio"]  # the raw ratio is the flattering one
+    expected = (m["cagr_pct"] / 100 - RISK_FREE) / (m["ann_vol_pct"] / 100)
+    assert m["sharpe"] == pytest.approx(expected, rel=1e-2)

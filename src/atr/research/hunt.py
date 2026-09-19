@@ -41,6 +41,12 @@ ETFS = ROOT / "data" / "iifl_daily" / "ETF"
 TRADING_DAYS = 252
 TRADING_WEEKS = 52
 
+#: Indian overnight/liquid-fund rate over the sample, as a decimal. Sharpe is the
+#: reward for taking risk, so the rate you could have earned risk-free has to come
+#: out first. Without this subtraction a rule that sits in cash scores well for
+#: holding no risk at all, which silently flatters every defensive strategy.
+RISK_FREE = 0.06
+
 
 # ---------------------------------------------------------------------------
 # Costs
@@ -188,7 +194,11 @@ class Result:
             "gross_cagr_pct": round(100 * gross_cagr, 2),
             "cost_drag_pct_yr": round(100 * (gross_cagr - cagr), 2),
             "ann_vol_pct": round(100 * vol, 2),
-            "sharpe": round(float(cagr / vol) if vol > 0 else 0.0, 3),
+            # Excess over the risk-free rate, which is what Sharpe means. The raw
+            # return-to-volatility ratio is kept beside it because it is what the
+            # earlier runs in this search reported.
+            "sharpe": round(float((cagr - RISK_FREE) / vol) if vol > 0 else 0.0, 3),
+            "return_vol_ratio": round(float(cagr / vol) if vol > 0 else 0.0, 3),
             "max_drawdown_pct": round(100 * drawdown, 2),
             "weekly_mean_pct": round(100 * float(weekly.mean()), 3),
             "weekly_win_rate_pct": round(100 * float((weekly > 0).mean()), 1),
