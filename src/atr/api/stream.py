@@ -12,9 +12,19 @@ import json
 import threading
 import time
 from collections import defaultdict, deque
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
+
+try:
+    import orjson
+
+    def _fast_dumps(obj: Any) -> str:
+        return orjson.dumps(obj).decode("utf-8")
+except ImportError:
+    def _fast_dumps(obj: Any) -> str:
+        return json.dumps(obj)
 
 import numpy as np
 import polars as pl
@@ -40,7 +50,33 @@ class LiveTickPayload:
     best_bid: float | None
     best_ask: float | None
     ts: str
+    epoch: float = 0.0  # Unix timestamp for precise candle alignment
     depth: list[dict[str, Any]] | None = None
+
+def _normalise_universe(
+    symbols: Iterable[str] | Mapping[str, Iterable[str]], exchange: str
+) -> dict[str, set[str]]:
+    """Coerce a symbol universe to ``{exchange: {SYMBOL, ...}}``.
+
+    Accepts either a flat iterable — every symbol on one ``exchange`` — or a
+    mapping of exchange to symbols, which is what a caller with deployments on
+    more than one exchange has to say. Both are normalised here rather than at
+    the call sites so a subscription can never be sent with a symbol whose
+    exchange was guessed.
+    """
+    if isinstance(symbols, Mapping):
+        out: dict[str, set[str]] = {}
+        for key, values in symbols.items():
+            cleaned = {
+                str(s).strip().upper() for s in (values or ()) if str(s).strip()
+            }
+            if cleaned:
+                out[str(key).strip().upper()] = cleaned
+        return out
+
+    cleaned = {str(s).strip().upper() for s in (symbols or ()) if str(s).strip()}
+    return {exchange.strip().upper(): cleaned} if cleaned else {}
+
 
 class TickBroadcaster:
     """Manages active WebSocket connections and multiplexes IIFL market ticks."""
@@ -53,7 +89,25 @@ class TickBroadcaster:
         self._topic_to_symbol: dict[str, str] = {}
         self._symbol_to_exchange: dict[str, str] = {}
         self._latest_ticks: dict[str, LiveTickPayload] = {}
+        self._tick_recv_time: dict[str, float] = {}  # symbol -> time.time() of last tick
         self._prev_close: dict[str, float] = {}
+        #: The universe a *server-side* consumer wants on the feed — today that
+        #: is the paper runner, whose deployments must be priced whether or not
+        #: anybody has a dashboard open. A set rather than a ref count because
+        #: the consumer states the universe it wants, in full, every pass; the
+        #: previous statement is the only state needed to compute the delta.
+        self._runner_symbols: set[str] = set()
+        #: The subset of that universe actually confirmed onto the bridge. Kept
+        #: apart from the wish above so a statement made while the bridge was
+        #: down is *retried* on the next one, instead of being remembered as
+        #: done — a deployment that is silently not on the feed is the failure
+        #: this whole path exists to remove.
+        self._runner_acked: set[str] = set()
+        #: Symbols that resolved to no contract. Remembered so an unresolvable
+        #: symbol is attempted once per appearance rather than re-resolved on
+        #: every pass, and forgotten as soon as it leaves the universe so a
+        #: corrected symbol list gets a fresh attempt.
+        self._runner_unresolved: set[str] = set()
         # In-memory time-series ring buffer: keeps last 5,000 raw ticks per symbol
         # O(1) appends, zero disk I/O, ultra-low sub-millisecond memory footprint
         self._ring_buffer: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=5000))
@@ -99,10 +153,23 @@ class TickBroadcaster:
                 bridge.connect(timeout=8.0)
                 self._bridge = bridge
 
-                # Resubscribe any existing symbols
-                topics = list(self._symbol_to_topic.values())
-                if topics:
-                    self._bridge.subscribe_feed(topics)
+                # Resubscribe all known topics
+                all_topics = set()
+                for sym, cnt in self._subscribed_symbols.items():
+                    if cnt > 0:
+                        t = self._symbol_to_topic.get(sym) or self._resolve_symbol(sym)
+                        if t:
+                            all_topics.add(t)
+                for sym in self._runner_symbols:
+                    t = self._symbol_to_topic.get(sym) or self._resolve_symbol(sym)
+                    if t:
+                        all_topics.add(t)
+                for t in self._symbol_to_topic.values():
+                    all_topics.add(t)
+
+                if all_topics:
+                    self._bridge.subscribe_feed(list(all_topics))
+                    logger.info("BridgeClient subscribed {} active topics on init", len(all_topics))
                 return True
             except Exception as exc:
                 logger.warning("Could not connect IIFL BridgeClient: {}", exc)
@@ -159,6 +226,7 @@ class TickBroadcaster:
                     "type": int(d.transaction_type),
                 })
 
+        epoch_now = time.time()
         payload = LiveTickPayload(
             symbol=symbol,
             exchange=self._symbol_to_exchange.get(symbol, "NSEEQ"),
@@ -174,11 +242,13 @@ class TickBroadcaster:
             best_bid=float(feed.best_bid_price) if feed.best_bid_price else None,
             best_ask=float(feed.best_ask_price) if feed.best_ask_price else None,
             ts=ts_str,
+            epoch=epoch_now,
             depth=depth_list if depth_list else None,
         )
 
         with self._lock:
             self._latest_ticks[symbol] = payload
+            self._tick_recv_time[symbol] = epoch_now
             self._ring_buffer[symbol].append({
                 "epoch": time.time(),
                 "ts": ts_str,
@@ -194,7 +264,7 @@ class TickBroadcaster:
             asyncio.run_coroutine_threadsafe(self._broadcast_tick(payload), self._loop)
 
     async def _broadcast_tick(self, tick: LiveTickPayload) -> None:
-        msg = json.dumps({"type": "tick", "data": asdict(tick)})
+        msg = _fast_dumps({"type": "tick", "data": asdict(tick)})
         dead_conns = []
         for ws, symbols in list(self._client_subscriptions.items()):
             if tick.symbol in symbols:
@@ -213,7 +283,7 @@ class TickBroadcaster:
 
         # Send initial status
         bridge_ok = self._ensure_bridge()
-        await ws.send_text(json.dumps({
+        await ws.send_text(_fast_dumps({
             "type": "status",
             "bridge_connected": bridge_ok,
             "server_time": datetime.now().isoformat()
@@ -228,9 +298,13 @@ class TickBroadcaster:
                 cnt = self._subscribed_symbols.get(s, 1) - 1
                 if cnt <= 0:
                     self._subscribed_symbols.pop(s, None)
-                    topic = self._symbol_to_topic.get(s)
-                    if topic:
-                        to_unsub.append(topic)
+                    # Only take the symbol off the feed if nobody else wants it.
+                    # A paper deployment's universe is a reason to stay
+                    # subscribed that has nothing to do with this socket.
+                    if s not in self._runner_symbols:
+                        topic = self._symbol_to_topic.get(s)
+                        if topic:
+                            to_unsub.append(topic)
                 else:
                     self._subscribed_symbols[s] = cnt
 
@@ -269,12 +343,15 @@ class TickBroadcaster:
             except Exception as e:
                 logger.warning("Bridge subscribe error: {}", e)
 
-        # Immediately return cached latest ticks if available
+        # Immediately return cached latest tick if it is fresh (< 60 s old).
+        # A tick from a previous session must never be sent as live data.
+        _now = time.time()
         for s in new_symbols_for_ws:
             cached = self._latest_ticks.get(s)
-            if cached:
+            recv_t = self._tick_recv_time.get(s, 0.0)
+            if cached and (_now - recv_t) < 60.0:
                 try:
-                    await ws.send_text(json.dumps({"type": "tick", "data": asdict(cached)}))
+                    await ws.send_text(_fast_dumps({"type": "tick", "data": asdict(cached)}))
                 except Exception:
                     break
 
@@ -291,9 +368,12 @@ class TickBroadcaster:
                     cnt = self._subscribed_symbols.get(sym_clean, 1) - 1
                     if cnt <= 0:
                         self._subscribed_symbols.pop(sym_clean, None)
-                        topic = self._symbol_to_topic.get(sym_clean)
-                        if topic:
-                            to_unsub.append(topic)
+                        # The paper runner's universe keeps the symbol on the
+                        # feed after the last browser lets it go.
+                        if sym_clean not in self._runner_symbols:
+                            topic = self._symbol_to_topic.get(sym_clean)
+                            if topic:
+                                to_unsub.append(topic)
                     else:
                         self._subscribed_symbols[sym_clean] = cnt
 
@@ -302,6 +382,129 @@ class TickBroadcaster:
                 self._bridge.unsubscribe_feed(to_unsub)
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Server-side subscriptions — a consumer that is not a browser
+    # ------------------------------------------------------------------
+    def ensure_symbols(
+        self,
+        symbols: Iterable[str] | Mapping[str, Iterable[str]],
+        exchange: str = "NSEEQ",
+    ) -> dict[str, list[str]]:
+        """Put a universe on the feed on behalf of a server-side consumer.
+
+        **This is the difference between a paper deployment that trades and one
+        that only looks like it does.** A symbol reached the feed only when a
+        *browser* asked for it: :meth:`_resolve_symbol` is called from
+        :meth:`subscribe` and nowhere else, so with no dashboard open the bridge
+        was never connected, no tick ever arrived, and :meth:`latest_price`
+        returned ``None`` for every symbol. The paper venue reads "no price" as a
+        rejection for a new order and as "resting" for an existing one, so the
+        observable result was a deployment that reported itself as running while
+        evaluating nothing — and, because ``default_price_source`` falls back to
+        the daily cache, one that would have filled at yesterday's close if it
+        filled at all. That is a paper fill at a price no exchange offered, which
+        is the one thing a paper account must never do.
+
+        **Declarative, not incremental.** The caller states the universe it
+        wants, in full; the difference against the previous statement is what is
+        sent to the bridge. The runner re-states its universe on every pass, so
+        the steady state is a set comparison and no I/O.
+
+        **Separate from the browser ref counts**, so the two kinds of consumer
+        cannot unsubscribe each other. Closing a dashboard tab must not stop a
+        paper deployment from being priced, and stopping a deployment must not
+        blank a chart somebody is watching.
+
+        **A failed statement is retried, not remembered as done.** The desired
+        universe and the universe confirmed onto the bridge are tracked
+        separately, so a call made while the bridge was down leaves its symbols
+        outstanding and the next call sends them again.
+
+        Returns ``{"added", "removed", "unresolved"}`` — the symbols newly put on
+        the feed, those taken off, and those that could not be resolved to a
+        contract. The last is reported rather than swallowed: a symbol with no
+        conid is a deployment that will never be priced from live ticks, and an
+        empty list is how a caller tells that apart from success.
+        """
+        wanted_by_exchange = _normalise_universe(symbols, exchange)
+        wanted = {s for group in wanted_by_exchange.values() for s in group}
+
+        with self._lock:
+            fresh = wanted - self._runner_acked - self._runner_unresolved
+            dropped = self._runner_acked - wanted
+            self._runner_symbols = wanted
+            # A symbol that has left the universe is forgotten entirely, so
+            # putting it back is a new attempt rather than a remembered failure.
+            self._runner_unresolved &= wanted
+            held = {s: self._subscribed_symbols.get(s, 0) for s in wanted | dropped}
+
+        added: list[str] = []
+        unresolved: list[str] = []
+        topics: list[str] = []
+
+        # Resolution happens *outside* the lock. ``_resolve_symbol`` may load the
+        # instrument master, and holding the lock across that would stall tick
+        # ingestion from the bridge thread — the very ticks this method exists to
+        # obtain.
+        for group_exchange, group in sorted(wanted_by_exchange.items()):
+            for symbol in sorted(group):
+                if symbol not in fresh:
+                    continue
+                topic = self._symbol_to_topic.get(symbol) or self._resolve_symbol(
+                    symbol, group_exchange
+                )
+                if topic is None:
+                    unresolved.append(symbol)
+                    continue
+                added.append(symbol)
+                # Only reach the exchange if no browser is already carrying it.
+                if held.get(symbol, 0) == 0:
+                    topics.append(topic)
+
+        removed: list[str] = []
+        drop_topics: list[str] = []
+        for symbol in sorted(dropped):
+            removed.append(symbol)
+            if held.get(symbol, 0) == 0:
+                topic = self._symbol_to_topic.get(symbol)
+                if topic:
+                    drop_topics.append(topic)
+
+        if topics or drop_topics:
+            subscribed = False
+            if self._ensure_bridge() and self._bridge:
+                try:
+                    if topics:
+                        self._bridge.subscribe_feed(topics)
+                    if drop_topics:
+                        self._bridge.unsubscribe_feed(drop_topics)
+                    subscribed = True
+                except Exception as e:  # noqa: BLE001 - the next pass retries
+                    logger.warning(
+                        "Bridge subscription for the paper universe failed: {}", e
+                    )
+
+            if subscribed:
+                with self._lock:
+                    self._runner_acked |= {s for s in added}
+                    self._runner_acked -= set(removed)
+            else:
+                # Nothing reached the bridge, so nothing is acked: the symbols
+                # stay outstanding and the next statement of this universe sends
+                # them again rather than assuming the job was done.
+                with self._lock:
+                    self._runner_acked -= set(removed)
+
+        if unresolved:
+            # Attempted once per appearance. Re-resolving a symbol that has no
+            # contract on every pass would cost a lookup a second and print the
+            # same warning forever; the caller reports it once, which is the
+            # signal an operator can act on.
+            with self._lock:
+                self._runner_unresolved |= set(unresolved)
+
+        return {"added": added, "removed": removed, "unresolved": unresolved}
 
     # ------------------------------------------------------------------
     # In-Memory Time-Series Ring Buffer Query Engine
@@ -321,10 +524,39 @@ class TickBroadcaster:
         sym = symbol.strip().upper()
         with self._lock:
             tick = self._latest_ticks.get(sym)
+            recv_t = self._tick_recv_time.get(sym, 0.0)
         if tick is None:
+            return None
+        # Reject stale ticks — do not let a price from a previous session
+        # become the cost basis of a paper fill.
+        if (time.time() - recv_t) > 60.0:
             return None
         price = float(tick.ltp)
         return price if price == price and price > 0 else None
+
+    def latest_tick(self, symbol: str) -> LiveTickPayload | None:
+        """The most recent full tick payload for a symbol, or None."""
+        sym = symbol.strip().upper()
+        with self._lock:
+            return self._latest_ticks.get(sym)
+
+    def latest_price_and_time(self, symbol: str) -> tuple[float | None, datetime | None]:
+        """Return (ltp, tick_datetime) for a symbol."""
+        sym = symbol.strip().upper()
+        with self._lock:
+            tick = self._latest_ticks.get(sym)
+        if tick is None:
+            return None, None
+        price = float(tick.ltp)
+        if not (price == price and price > 0):
+            return None, None
+        dt = None
+        if tick.ts:
+            try:
+                dt = datetime.fromisoformat(tick.ts)
+            except (ValueError, TypeError):
+                dt = None
+        return price, dt
 
     def latest_prices(self) -> dict[str, float]:
         """Every symbol with a live price, as ``{symbol: ltp}``.
@@ -401,7 +633,7 @@ class TickBroadcaster:
         }
 
     def get_tick_candles(self, symbol: str, interval_seconds: int = 5) -> list[dict[str, Any]]:
-        """Resample in-memory ring buffer ticks into sub-minute OHLCV candles via Polars."""
+        """Resample in-memory ring buffer ticks into sub-minute OHLCV candles via DuckDB."""
         sym_clean = symbol.strip().upper()
         with self._lock:
             buf = self._ring_buffer.get(sym_clean)
@@ -411,6 +643,15 @@ class TickBroadcaster:
 
         if not items:
             return []
+
+        try:
+            from atr.analytics.duck_engine import get_duck_engine
+            duck = get_duck_engine()
+            res = duck.resample_candles(sym_clean, ticks=items, interval_seconds=interval_seconds)
+            if res:
+                return res
+        except Exception as err:
+            logger.debug("DuckDB candle aggregation fallback: {}", err)
 
         try:
             df = pl.DataFrame(items)
@@ -432,7 +673,7 @@ class TickBroadcaster:
             )
             return agg.to_dicts()
         except Exception as err:
-            logger.warning("Error aggregating tick candles with Polars: {}", err)
+            logger.warning("Error aggregating tick candles: {}", err)
             return []
 
 

@@ -431,15 +431,31 @@ class AuthService:
             # Throttle the last-seen write: doing it on every request turns a
             # read-only dashboard poll into a write.
             last_seen = row.get("last_seen_at")
-            if not last_seen or (utcnow() - last_seen).total_seconds() > 60:
-                SessionRepository.touch(session, row["session_id"])
-
-            return Principal.build(
+            stale = not last_seen or (utcnow() - last_seen).total_seconds() > 60
+            principal = Principal.build(
                 user=user,
                 auth_method="session",
                 session_id=row["session_id"],
                 mfa_satisfied=bool(row.get("mfa_satisfied", True)),
             )
+            session_id = row["session_id"]
+
+        # The write happens *after* the read transaction has ended, in its own. Doing
+        # it inside the read transaction upgrades read to write, and SQLite refuses that
+        # instantly (no waiting) if anything else committed in between: two parallel
+        # requests from one session, a minute after the last, made one of them fail
+        # authentication with "database is locked". A missed stamp costs nothing; a
+        # failed login check costs the request.
+        if stale:
+            self._touch_session(session_id)
+        return principal
+
+    def _touch_session(self, session_id: str) -> None:
+        try:
+            with self.db.session() as session:
+                SessionRepository.touch(session, session_id)
+        except Exception as exc:  # noqa: BLE001 - never let a bookkeeping write break a request
+            logger.debug("last-seen stamp skipped: %s", exc)
 
     def resolve_api_key(self, raw_key: str | None) -> Principal | None:
         if not raw_key:
@@ -469,14 +485,23 @@ class AuthService:
             # Throttle the usage stamp: an unthrottled write here turns every
             # read-only API call into a database write.
             last_used = row.get("last_used_at")
-            if not last_used or (utcnow() - last_used).total_seconds() > 60:
-                ApiKeyRepository.touch(session, row["key_id"])
-            return Principal.build(
+            stale = not last_used or (utcnow() - last_used).total_seconds() > 60
+            key_id = row["key_id"]
+            principal = Principal.build(
                 user=user,
                 auth_method="apikey",
-                api_key_id=row["key_id"],
+                api_key_id=key_id,
                 extra_permissions=frozenset(scopes),
             )
+
+        # Same reason as for sessions: stamp in a separate transaction, best effort.
+        if stale:
+            try:
+                with self.db.session() as session:
+                    ApiKeyRepository.touch(session, key_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("api key usage stamp skipped: %s", exc)
+        return principal
 
     def resolve(self, credential: str | None) -> Principal | None:
         """Resolve either credential type. API keys are recognised by shape."""

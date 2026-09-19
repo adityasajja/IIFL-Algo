@@ -77,9 +77,9 @@ def _same_origin(origin: str, request: Request) -> bool:
 
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self'; "
+    "script-src 'self' 'unsafe-eval'; "
     # 'unsafe-inline' for styles only: React sets style attributes, and Tailwind
-    # injects a stylesheet. Scripts stay locked to 'self'.
+    # injects a stylesheet. Scripts allow eval for custom Pine Script indicator compiler.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' data: https://fonts.gstatic.com; "
     "img-src 'self' data: blob:; "

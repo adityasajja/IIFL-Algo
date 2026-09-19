@@ -30,7 +30,20 @@ from atr.instruments.service import InstrumentMaster, reset_instrument_master
 def fresh_env(tmp_path, monkeypatch):
     """Isolated settings + singletons for one test."""
     monkeypatch.setenv("APP_DB_URL", f"sqlite:///{(tmp_path / 'app.db').as_posix()}")
+    # The learning engine reads flat files (the paper ledger, the sector CSVs)
+    # from a data root that defaults to the working directory. Pointing it at
+    # tmp_path is what stops a test asserting "the book is empty" from instead
+    # reading the operator's real paper record — which is exactly what happened
+    # the first time the ledger became a source.
+    monkeypatch.setenv("ATR_DATA_ROOT", str(tmp_path / "data"))
     monkeypatch.setenv("ATR_SECRET_KEY", "unit-test-key")
+    # scrypt is deliberately ~0.2s per hash in production; every API test creates
+    # accounts, so that cost was paid dozens of times per file. The cost factor
+    # is stored in each hash, so verification still runs the real code path.
+    monkeypatch.setattr("atr.auth.passwords._N", 2**4)
+    # The broker session is a cwd-relative file by default; without this a test
+    # run on a machine with a live login talks to the operator's real broker.
+    monkeypatch.setenv("IIFL_SESSION_CACHE", str(tmp_path / "iifl_session.json"))
     # Forced to dev so the loopback bypass is reachable and the session cookie is
     # not marked Secure (which a plain-HTTP test client would refuse to store).
     monkeypatch.setenv("ENV", "dev")
@@ -50,6 +63,12 @@ def _reset_all() -> None:
     reset_auth_service()
     reset_rate_limiter()
     reset_instrument_master()
+    # The learning service caches a built dataset for the process. Leaving it
+    # alive across tests hands the next test a dataset built against the
+    # previous test's database and data root.
+    from atr.services.learning import reset_learning_service
+
+    reset_learning_service()
     # The screener caches both a frame map and (historically) a database handle.
     # Leaving it out of this list let one test's cached state survive into the
     # next, which surfaced as a foreign-key failure on a row whose parent the
@@ -57,6 +76,23 @@ def _reset_all() -> None:
     from atr.screener.service import reset_screener_service
 
     reset_screener_service()
+    # The backtest service owns a worker pool. Leaving it alive across tests
+    # lets a run from one test finish and write into the next test's database.
+    from atr.services.backtests import reset_backtest_service
+
+    reset_backtest_service()
+    # The signal context service caches a per-date universe scan and holds a
+    # MarketIntelService over the previous test's data root. Leaving it alive
+    # hands the next test contexts scored against stale breadth.
+    from atr.signal_context.service import reset_signal_context_service
+
+    reset_signal_context_service()
+    # The attribution service holds a database handle and a frame map. Leaving it
+    # alive lets a test that attributed nothing still read the previous test's
+    # rows, which would make an idempotency assertion pass for the wrong reason.
+    from atr.services.attribution import reset_attribution_service
+
+    reset_attribution_service()
 
 
 @pytest.fixture()

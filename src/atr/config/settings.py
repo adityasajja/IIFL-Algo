@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Market data bridge (MQTT)
     bridge_host: str = "bridge.iiflcapital.com"
     bridge_port: int = 8883
+    #: Verify the bridge TLS certificate. The official IIFL BridgePy SDK
+    #: bypasses verification, so the default is False for compatibility — but
+    #: enabling it is recommended for any non-local deployment.
+    bridge_tls_verify: bool = False
 
     # ---------------- Database (Postgres + TimescaleDB) ----------------
     db_host: str = "localhost"

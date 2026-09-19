@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import json
 import logging
 import time
@@ -17,12 +18,16 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from atr.config.settings import Settings, get_settings
+
+# Imported at module level (not lazily) because the warmup table is read while a
+# response is being built, and ``atr.backtest.config`` pulls in nothing heavy.
+from atr.backtest.config import WARMUP_BARS
 
 app = FastAPI(title="ATR — algo trading backend", version="0.1.0")
 
@@ -43,6 +48,28 @@ async def _on_startup() -> None:
     _start_paper_runner()
     _warm_breadth_cache()
     _warm_instrument_master()
+    asyncio.create_task(_insights_loop())
+
+
+async def _insights_loop() -> None:
+    """Send the day's read once, after the close. Checked every five minutes."""
+    from atr.insights.service import get_insights_service
+
+    def run():
+        try:
+            from atr.services.broker_access import authed_client
+
+            client = authed_client()
+        except Exception:  # noqa: BLE001 - no session: the digest uses the saved holdings
+            client = None
+        return get_insights_service().maybe_send_daily(client=client)
+
+    while True:
+        await asyncio.sleep(300)
+        try:
+            await asyncio.to_thread(run)
+        except Exception:  # noqa: BLE001 - a failed send must not stop the loop
+            logger.exception("daily insights send failed")
 
 
 def _start_paper_runner() -> None:
@@ -129,6 +156,9 @@ app.add_middleware(
 # Versioned API surface. Registered here, before the SPA catch-all further down,
 # because FastAPI matches routes in registration order — a catch-all declared
 # first would swallow every /api/v1 path.
+from atr.api.deps import get_principal, require_permission  # noqa: E402
+from atr.auth.models import Principal  # noqa: E402
+from atr.auth.rbac import Permission  # noqa: E402
 from atr.api.routers import include_routers  # noqa: E402
 
 include_routers(app)
@@ -180,8 +210,9 @@ def health() -> HealthResponse:
         from atr.brokers.iifl.auth import SessionStore
 
         session_active = SessionStore(settings.iifl_session_cache).load() is not None
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:
+        logger.warning("session check failed: %s", exc)
+        session_active = False
 
     return HealthResponse(
         status="ok",
@@ -229,7 +260,7 @@ def _db_health(ttl: float = 60.0) -> bool:
     return bool(_DB_CHECK["ok"])
 
 
-@app.post("/backtest")
+@app.post("/backtest", dependencies=[Depends(get_principal)])
 def run_backtest(request: BacktestRequest) -> dict[str, Any]:
     """Score one configuration on one dataset.
 
@@ -380,7 +411,7 @@ def place_order(request: OrderRequest, http_request: Request) -> dict[str, Any]:
 def kill_switch(
     engaged: bool = True,
     reason: str = "",
-    actor: str = "operator",
+    principal: Principal = Depends(require_permission(Permission.RISK_CONFIGURE)),
 ) -> dict[str, Any]:
     """Engage or release the global kill switch. Blocks all new orders until cleared.
 
@@ -396,6 +427,10 @@ def kill_switch(
     reason is indistinguishable from someone clearing it by accident.
     """
     from atr.services.risk import RiskStateError, RiskStateService
+
+    # The actor is who authenticated, never a query parameter: a client-supplied
+    # name would let anyone write any identity into the audit trail.
+    actor = principal.username
 
     if not reason.strip():
         raise HTTPException(
@@ -436,7 +471,11 @@ def get_execution_mode() -> dict[str, Any]:
 
 
 @app.post("/risk/execution-mode")
-def set_execution_mode(mode: str, reason: str = "", actor: str = "operator") -> dict[str, Any]:
+def set_execution_mode(
+    mode: str,
+    reason: str = "",
+    principal: Principal = Depends(require_permission(Permission.EXECUTION_MODE_CHANGE)),
+) -> dict[str, Any]:
     """Switch between `paper` and `live`.
 
     Going *live* requires an explicit reason. That is deliberate friction: the
@@ -445,6 +484,8 @@ def set_execution_mode(mode: str, reason: str = "", actor: str = "operator") -> 
     not require one — reducing risk must never be harder than taking it on.
     """
     from atr.services.risk import RiskStateError, RiskStateService
+
+    actor = principal.username
 
     if mode not in {"paper", "live"}:
         raise HTTPException(400, "mode must be 'paper' or 'live'")
@@ -558,7 +599,7 @@ def self_learning_status() -> dict[str, Any]:
     }
 
 
-@app.post("/self-learning/train")
+@app.post("/self-learning/train", dependencies=[Depends(get_principal)])
 def self_learning_train() -> dict[str, Any]:
     """Triggers an online learning cycle across historical data."""
     from atr.research.self_learning import get_self_learning_engine
@@ -573,7 +614,10 @@ def trade_signals_settings_get() -> dict[str, Any]:
     return load_settings().model_dump()
 
 
-@app.put("/trade-signals/settings")
+@app.put(
+    "/trade-signals/settings",
+    dependencies=[Depends(require_permission(Permission.RISK_CONFIGURE))],
+)
 def trade_signals_settings_put(body: dict[str, Any]) -> dict[str, Any]:
     """Update position sizing + stop-loss configuration."""
     from atr.trade_signals import TradeSignalSettings, load_settings, save_settings
@@ -598,7 +642,7 @@ def trade_signals_list(status: str | None = None) -> dict[str, Any]:
     }
 
 
-@app.post("/trade-signals/scan")
+@app.post("/trade-signals/scan", dependencies=[Depends(get_principal)])
 def trade_signals_scan() -> dict[str, Any]:
     """Trigger an immediate signal scan combining intelligent rules and quantitative research papers."""
 
@@ -662,8 +706,8 @@ def trade_signals_scan() -> dict[str, Any]:
         store = _alert_store()
         for r in store.rules():
             syms.add(r.symbol)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("alert rules load failed: %s", exc)
 
     for sym in syms:
         if q.active_count() >= ts_settings.max_active:
@@ -699,10 +743,13 @@ def trade_signals_scan() -> dict[str, Any]:
                     try:
                         if ch.send(header, body):
                             break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Telegram channel send failed: %s", exc)
+                else:
+                    if channels:
+                        logger.warning("no Telegram channel sent preview for %s", sig.id)
         except Exception as e:
-            logger.debug("trade scan failed for %s: %s", sym, e)
+            logger.warning("trade scan failed for %s: %s", sym, e)
 
     return {"scanned": len(syms) + len(frames), "new_signals": len(new_signals), "signals": new_signals}
 
@@ -859,7 +906,7 @@ def trade_signals_execute(signal_id: str, http_request: Request) -> dict[str, An
     }
 
 
-@app.post("/trade-signals/{signal_id}/skip")
+@app.post("/trade-signals/{signal_id}/skip", dependencies=[Depends(get_principal)])
 def trade_signals_skip(signal_id: str) -> dict[str, Any]:
     """Dismiss a pending signal without trading."""
     from atr.trade_signals import get_queue
@@ -890,14 +937,14 @@ def alert_rules() -> list[dict[str, Any]]:
     return [r.model_dump(mode="json") for r in _alert_store().rules()]
 
 
-@app.post("/alerts/rules")
+@app.post("/alerts/rules", dependencies=[Depends(get_principal)])
 def alert_create(body: AlertRuleIn) -> dict[str, Any]:
     from atr.alerts.models import AlertRule
 
     return _alert_store().upsert(AlertRule(**body.model_dump())).model_dump(mode="json")
 
 
-@app.patch("/alerts/rules/{rule_id}")
+@app.patch("/alerts/rules/{rule_id}", dependencies=[Depends(get_principal)])
 def alert_arm(rule_id: str, armed: bool = True) -> dict[str, Any]:
     from atr.alerts.models import AlertRule
 
@@ -909,7 +956,7 @@ def alert_arm(rule_id: str, armed: bool = True) -> dict[str, Any]:
     raise HTTPException(404, f"no such rule: {rule_id}")
 
 
-@app.delete("/alerts/rules/{rule_id}")
+@app.delete("/alerts/rules/{rule_id}", dependencies=[Depends(get_principal)])
 def alert_delete(rule_id: str) -> dict[str, bool]:
     if not _alert_store().remove(rule_id):
         raise HTTPException(404, f"no such rule: {rule_id}")
@@ -917,11 +964,11 @@ def alert_delete(rule_id: str) -> dict[str, bool]:
 
 
 @app.get("/alerts/events")
-def alert_events(limit: int = 50) -> list[dict[str, Any]]:
+def alert_events(limit: int = Query(50, ge=1, le=500)) -> list[dict[str, Any]]:
     return [e.model_dump(mode="json") for e in _alert_store().events(limit)]
 
 
-@app.post("/alerts/check")
+@app.post("/alerts/check", dependencies=[Depends(get_principal)])
 def alert_check() -> dict[str, Any]:
     """Evaluate all armed rules right now. Returns what fired."""
     from atr.alerts.channels import channels_from_settings
@@ -935,7 +982,7 @@ def alert_check() -> dict[str, Any]:
     }
 
 
-@app.post("/alerts/test")
+@app.post("/alerts/test", dependencies=[Depends(get_principal)])
 def alert_test() -> dict[str, Any]:
     """Send 'ATR test' down the channel chain. Verifies Telegram/SMS setup."""
     from atr.alerts.channels import channels_from_settings
@@ -963,7 +1010,7 @@ def get_intelligent_alert_config() -> dict[str, Any]:
     }
 
 
-@app.post("/alerts/intelligent/config")
+@app.post("/alerts/intelligent/config", dependencies=[Depends(get_principal)])
 def update_intelligent_alert_config(body: dict[str, Any]) -> dict[str, Any]:
     from atr.alerts.intelligent import (
         IntelligentAlertConfig,
@@ -980,7 +1027,7 @@ def update_intelligent_alert_config(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@app.post("/alerts/intelligent/evaluate")
+@app.post("/alerts/intelligent/evaluate", dependencies=[Depends(get_principal)])
 async def evaluate_intelligent_alerts_now() -> dict[str, Any]:
     """Force an immediate evaluation cycle across target stocks right now."""
     from atr.alerts.intelligent import get_intelligent_monitor
@@ -1014,7 +1061,7 @@ def briefing_config() -> dict[str, Any]:
     return {"config": load_config().model_dump(), "last_sent": last_sent()}
 
 
-@app.put("/briefing/config")
+@app.put("/briefing/config", dependencies=[Depends(get_principal)])
 def briefing_save(body: BriefingIn) -> dict[str, Any]:
     from atr.briefing import BriefingConfig, save_config
 
@@ -1025,7 +1072,7 @@ def briefing_save(body: BriefingIn) -> dict[str, Any]:
     return save_config(BriefingConfig(**data)).model_dump()
 
 
-@app.post("/briefing/preview")
+@app.post("/briefing/preview", dependencies=[Depends(get_principal)])
 def briefing_preview() -> dict[str, Any]:
     from atr.briefing import build_brief, load_config
 
@@ -1033,7 +1080,7 @@ def briefing_preview() -> dict[str, Any]:
     return {"message": message, "stats": stats}
 
 
-@app.post("/briefing/send")
+@app.post("/briefing/send", dependencies=[Depends(get_principal)])
 def briefing_send() -> dict[str, Any]:
     from atr.alerts.channels import channels_from_settings
     from atr.briefing import build_brief, load_config, record_sent
@@ -1130,8 +1177,16 @@ def _append_audit(*, actor: str, action: str, subject: str, detail: str | None =
 def _read_audit(limit: int = 200) -> list[dict[str, Any]]:
     if not _AUDIT_PATH.exists():
         return []
+    limit = max(1, limit)  # `lines[-0:]` is the whole file, not zero lines
     try:
-        lines = _AUDIT_PATH.read_text(encoding="utf-8").splitlines()
+        with _AUDIT_PATH.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            # Read only the tail: the trail is append-only and grows forever, so
+            # reading it all per request is O(history). ~1 KiB/entry is generous.
+            fh.seek(max(0, size - limit * 1024 - 1024))
+            chunk = fh.read().decode("utf-8", errors="replace")
+        lines = chunk.splitlines()
     except Exception:  # noqa: BLE001
         return []
     out: list[dict[str, Any]] = []
@@ -1142,7 +1197,7 @@ def _read_audit(limit: int = 200) -> list[dict[str, Any]]:
 
 
 @app.get("/audit")
-def get_audit(limit: int = 200) -> dict[str, Any]:
+def get_audit(limit: int = Query(200, ge=1, le=2000)) -> dict[str, Any]:
     """The immutable trail, newest first."""
     return {"entries": _read_audit(limit), "path": str(_AUDIT_PATH)}
 
@@ -1259,7 +1314,7 @@ class CustomScanRequest(BaseModel):
     watchlist: list[str] = Field(default_factory=list)
 
 
-@app.post("/scanner/custom")
+@app.post("/scanner/custom", dependencies=[Depends(get_principal)])
 def scanner_custom(body: CustomScanRequest) -> dict[str, Any]:
     """Evaluate user-defined indicator conditions over the local Parquet cache.
 
@@ -1388,7 +1443,7 @@ class SavedScanUpsert(BaseModel):
     conditions: list[dict[str, Any]] = Field(default_factory=list)
 
 
-@app.put("/scanner/saved/{scan_id}")
+@app.put("/scanner/saved/{scan_id}", dependencies=[Depends(get_principal)])
 def scanner_saved_upsert(scan_id: str, body: SavedScanUpsert) -> dict[str, Any]:
     """Create or overwrite a saved scan."""
     scans = _load_scans()
@@ -1400,7 +1455,7 @@ def scanner_saved_upsert(scan_id: str, body: SavedScanUpsert) -> dict[str, Any]:
     return {"saved": entry}
 
 
-@app.delete("/scanner/saved/{scan_id}")
+@app.delete("/scanner/saved/{scan_id}", dependencies=[Depends(get_principal)])
 def scanner_saved_delete(scan_id: str) -> dict[str, Any]:
     """Delete a saved scan by id."""
     scans = [s for s in _load_scans() if s["id"] != scan_id]
@@ -1435,17 +1490,36 @@ def candles(
             "interval": interval, "candles": out}
 
 
-@app.get("/symbols")
-def symbols(query: str = "", exchange: str = "NSEEQ", limit: int = 25) -> dict[str, Any]:
-    """Symbol search for the chart header. Served from the cached instrument
-    master — no broker session needed."""
+_SYMBOL_MASTERS: dict[str, tuple[float, Any]] = {}
+_SYMBOL_MASTER_TTL_S = 300.0
+
+
+def _symbol_master(exchange: str) -> Any:
+    """The instrument master for symbol search, loaded once per few minutes.
+
+    Search fires on every keystroke; rebuilding a ~10k-row master from disk each
+    time made the box lag. A five-minute TTL still picks up a fresh sync.
+    """
     from atr.brokers.iifl.contracts import InstrumentMaster
 
+    now = time.monotonic()
+    hit = _SYMBOL_MASTERS.get(exchange)
+    if hit and now - hit[0] < _SYMBOL_MASTER_TTL_S:
+        return hit[1]
     master = InstrumentMaster()
     try:
-        master.load_cached([exchange.upper()])
+        master.load_cached([exchange])
     except Exception as exc:  # noqa: BLE001 — cold cache, no client to refresh with
         raise HTTPException(503, f"instrument cache is cold — run `atr instruments sync` ({exc})")
+    _SYMBOL_MASTERS[exchange] = (now, master)
+    return master
+
+
+@app.get("/symbols")
+def symbols(query: str = "", exchange: str = "NSEEQ", limit: int = Query(25, ge=1, le=100)) -> dict[str, Any]:
+    """Symbol search for the chart header. Served from the cached instrument
+    master — no broker session needed."""
+    master = _symbol_master(exchange.upper())
     hits = master.search(query.upper() or "EQ", exchange=exchange.upper(), limit=limit)
     return {
         "results": [
@@ -1681,6 +1755,7 @@ class ResearchRequest(BaseModel):
 #: making the test stricter for no reason.
 _TUNABLE: dict[str, list[str]] = {
     "sma_crossover": ["fast", "slow"],
+    "momentum_breakout": ["lookahead", "volume_multiple", "consecutive_breakout"],
     "signals_entry": ["trend_fast_sma", "trend_slow_sma", "pullback_rsi_low", "pullback_rsi_high"],
     "opening_range_breakout": [],
     "cross_sectional_momentum": [],
@@ -1698,20 +1773,11 @@ _TUNABLE: dict[str, list[str]] = {
 #: Bars of history each strategy needs before its rules will fire. A test
 #: window shorter than this cannot produce trades, and "no trades" reads
 #: exactly like "no edge" unless we say so out loud.
-_WARMUP_NEED: dict[str, int] = {
-    "sma_crossover": 50,
-    "signals_entry": 110,
-    "opening_range_breakout": 30,
-    "cross_sectional_momentum": 130,
-    # Paper models look back ~6 months and use a 200-day SMA.
-    "paper_jegadeesh_titman": 260,
-    "paper_avellaneda_lee": 260,
-    "paper_volatility_breakout": 260,
-    "paper_multi_factor_composite": 260,
-    "paper_iima_nse_momentum": 260,
-    "paper_nism_52w_high": 260,
-    "paper_sehgal_low_vol": 260,
-}
+#:
+#: The table itself now lives in ``atr.backtest.config`` because the runner
+#: needs it too, and the backtest layer may not import this module. Kept as a
+#: name here so existing callers and the ``/strategies`` response are unchanged.
+_WARMUP_NEED: dict[str, int] = WARMUP_BARS
 
 
 def _fetch_feed(symbols: list[str], exchange: str, lookback_days: int):
@@ -1837,7 +1903,7 @@ def strategies() -> dict[str, Any]:
     }
 
 
-@app.post("/research")
+@app.post("/research", dependencies=[Depends(get_principal)])
 def research(request: ResearchRequest) -> dict[str, Any]:
     """Walk a strategy forward and report only the out-of-sample evidence.
 
@@ -2892,9 +2958,10 @@ def _login_client():
     )
 
 
-def _session_info(settings: Settings = get_settings()) -> dict[str, Any]:
+def _session_info(settings: Settings | None = None) -> dict[str, Any]:
     from atr.brokers.iifl.auth import SessionStore, login_url
 
+    settings = settings or get_settings()
     store = SessionStore(settings.iifl_session_cache)
     session = store.load()
     return {
@@ -3009,6 +3076,19 @@ async def ws_ticks(websocket: WebSocket) -> None:
 
     from atr.api.stream import get_broadcaster
 
+    # Browsers apply no CORS to websockets, so without this any page the operator
+    # visits could open ws://localhost:8000/ws/ticks and drive the broker feed.
+    from urllib.parse import urlparse
+
+    from atr.api.middleware import _ALLOWED_ORIGINS
+
+    origin = websocket.headers.get("origin")
+    if origin and origin not in _ALLOWED_ORIGINS:
+        host = (websocket.headers.get("host") or "").lower()
+        if urlparse(origin).netloc.lower() != host:
+            await websocket.close(code=1008)
+            return
+
     broadcaster = get_broadcaster()
     try:
         broadcaster.set_loop(asyncio.get_running_loop())
@@ -3037,14 +3117,14 @@ async def ws_ticks(websocket: WebSocket) -> None:
 
 
 @app.get("/ticks/history")
-def get_tick_history(symbol: str = Query(..., description="Stock symbol"), limit: int = 100) -> list[dict[str, Any]]:
+def get_tick_history(symbol: str = Query(..., description="Stock symbol"), limit: int = Query(100, ge=1, le=5000)) -> list[dict[str, Any]]:
     """Fetch raw buffered ticks from the in-memory time-series ring buffer."""
     from atr.api.stream import get_broadcaster
     return get_broadcaster().get_tick_history(symbol, limit=limit)
 
 
 @app.get("/ticks/vwap")
-def get_tick_vwap(symbol: str = Query(..., description="Stock symbol"), window: int = 900) -> dict[str, Any]:
+def get_tick_vwap(symbol: str = Query(..., description="Stock symbol"), window: int = Query(900, ge=1, le=86400)) -> dict[str, Any]:
     """Compute instant rolling VWAP over `window` seconds from in-memory ring buffer."""
     from atr.api.stream import get_broadcaster
     return get_broadcaster().get_rolling_vwap(symbol, window_seconds=window)
@@ -3077,8 +3157,11 @@ def _mount_frontend() -> None:
         def spa(path: str) -> FileResponse | JSONResponse:
             if path.startswith("api/"):
                 return JSONResponse({"detail": "not found"}, status_code=404)
-            candidate = _WEB_DIST / path
-            if path and candidate.is_file():
+            # Resolve before serving: `%2e%2e` decodes to `..` and would otherwise
+            # walk out of the dist folder to `.env` or the broker session file.
+            root = _WEB_DIST.resolve()
+            candidate = (root / path).resolve()
+            if path and candidate.is_relative_to(root) and candidate.is_file():
                 return FileResponse(candidate)
             return FileResponse(_WEB_DIST / "index.html")
 

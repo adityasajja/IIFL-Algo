@@ -32,6 +32,15 @@ def install_live_price_source() -> None:
     built, the paper engine keeps working against the daily cache, and
     ``GET /api/v1/paper/runner`` will show no signals rather than the API failing
     to boot.
+
+    **Two wirings, not one, and the second is the one that mattered.** Reading a
+    price out of the stream (the source) does nothing unless the symbols are
+    actually *on* the stream (the subscriber). The broadcaster resolves a symbol
+    to a contract only from ``subscribe()`` — the browser path — so a paper
+    deployment with no dashboard open was never subscribed to anything, its price
+    lookups all returned ``None``, and the venue silently fell back to yesterday's
+    close. Both seams are installed here, from the one layer allowed to see both
+    sides.
     """
     try:
         from atr.api.stream import get_broadcaster
@@ -41,6 +50,7 @@ def install_live_price_source() -> None:
         paper_service.install_live_source(
             paper_service.live_tick_source(broadcaster=broadcaster)
         )
+        paper_service.install_live_subscriber(broadcaster.ensure_symbols)
         logger.info("paper engine price source: live ticks (cache fallback)")
     except Exception as exc:  # noqa: BLE001 - never fatal
         logger.warning("live price source not installed: %s", exc)
@@ -51,3 +61,4 @@ def clear_live_price_source() -> None:
     from atr.services import paper as paper_service
 
     paper_service.install_live_source(None)
+    paper_service.install_live_subscriber(None)

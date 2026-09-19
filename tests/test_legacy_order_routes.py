@@ -19,6 +19,11 @@ test cannot catch a *new* call site that reintroduces the same bug; a grep can.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+_OPERATOR = SimpleNamespace(username="operator")
+_ADITYA = SimpleNamespace(username="aditya")
+
 import inspect
 
 import pytest
@@ -168,10 +173,10 @@ def test_the_legacy_kill_switch_reaches_the_durable_state(app_db, monkeypatch):
     """It used to write a module-level dict, so a restart re-armed trading."""
     from atr.services.risk import RiskStateService
 
-    api_main.kill_switch(True, reason="legacy route test")
+    api_main.kill_switch(True, reason="legacy route test", principal=_OPERATOR)
     assert RiskStateService(app_db).kill_switch_engaged() is True
 
-    api_main.kill_switch(False, reason="legacy route test done")
+    api_main.kill_switch(False, reason="legacy route test done", principal=_OPERATOR)
     assert RiskStateService(app_db).kill_switch_engaged() is False
 
 
@@ -179,16 +184,16 @@ def test_the_legacy_kill_switch_requires_a_reason():
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as exc:
-        api_main.kill_switch(True, reason="")
+        api_main.kill_switch(True, reason="", principal=_OPERATOR)
     assert exc.value.detail["code"] == "reason_required"
 
 
 def test_the_legacy_mode_endpoint_writes_the_durable_state(app_db):
     from atr.services.risk import RiskStateService
 
-    api_main.set_execution_mode("live", reason="legacy route test")
+    api_main.set_execution_mode("live", reason="legacy route test", principal=_OPERATOR)
     assert RiskStateService(app_db).execution_mode() == "live"
-    api_main.set_execution_mode("paper", reason="")
+    api_main.set_execution_mode("paper", reason="", principal=_OPERATOR)
 
 
 def test_an_unreadable_risk_store_reports_paper_not_live(monkeypatch):
@@ -202,3 +207,75 @@ def test_an_unreadable_risk_store_reports_paper_not_live(monkeypatch):
     state = api_main._risk_state()
     assert state["mode"] == "paper"
     assert state["live"] is False
+
+
+# ================================================================= legacy write auth
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", "/risk/kill-switch?engaged=true&reason=x"),
+        ("post", "/risk/execution-mode?mode=live&reason=x"),
+        ("put", "/trade-signals/settings"),
+        ("post", "/briefing/send"),
+        ("post", "/alerts/rules"),
+        ("post", "/backtest"),
+    ],
+)
+def test_legacy_write_routes_refuse_an_anonymous_caller(client, method, path):
+    """With auth required, an anonymous request must not reach a write handler.
+
+    The kill switch and execution mode used to answer anyone, and took the audit
+    ``actor`` from the query string, so an anonymous caller could release the
+    switch and sign the trail as someone else.
+    """
+    response = getattr(client, method)(path, json={})
+    assert response.status_code == 401, response.text
+
+
+def test_the_kill_switch_actor_is_the_authenticated_user_not_a_query_param(auth_client):
+    response = auth_client.post(
+        "/risk/kill-switch",
+        params={"engaged": True, "reason": "halt", "actor": "someone-else"},
+    )
+    assert response.status_code == 200, response.text
+    entries = auth_client.get("/audit").json()["entries"]
+    assert entries[0]["actor"] == "owner"
+
+
+@pytest.mark.skipif(
+    not (api_main._WEB_DIST / "index.html").exists(), reason="frontend not built"
+)
+@pytest.mark.parametrize(
+    "path", ["/%2e%2e/package.json", "/%2e%2e/%2e%2e/pyproject.toml", "/..%2f..%2fpyproject.toml"]
+)
+def test_the_spa_fallback_cannot_read_files_outside_the_build(client, path):
+    """`%2e%2e` decodes to `..`; an unchecked join served .env and the broker token."""
+    response = client.get(path)
+    assert "[project]" not in response.text
+    assert '"name": "atr-web"' not in response.text
+
+
+def test_audit_limit_zero_is_not_the_whole_file(tmp_path, monkeypatch):
+    """`lines[-0:]` is every line; a zero limit must not dump the full trail."""
+    import json
+
+    path = tmp_path / "audit.jsonl"
+    path.write_text("\n".join(json.dumps({"n": i}) for i in range(50)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(api_main, "_AUDIT_PATH", path)
+    assert len(api_main._read_audit(0)) == 1
+    assert [e["n"] for e in api_main._read_audit(3)] == [49, 48, 47]
+
+
+def test_query_limits_are_bounded(auth_client):
+    assert auth_client.get("/audit?limit=0").status_code == 422
+    assert auth_client.get("/audit?limit=999999").status_code == 422
+    assert auth_client.get("/ticks/history?symbol=X&limit=10000000").status_code == 422
+
+
+def test_the_tick_websocket_refuses_a_foreign_origin(client):
+    """A page on another site must not be able to open the tick stream."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/ticks", headers={"origin": "https://evil.example"}):
+            pass
