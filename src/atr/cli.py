@@ -119,6 +119,8 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--no-build", action="store_true", help="skip the build/missing check")
 
     # ------------------------------------------------------------------
+    sub.add_parser("backup", help="write a backup of the database and state now")
+
     hist = sub.add_parser("history", help="bulk history cache + full-market scan")
     hist.add_argument("action", choices=["sync", "scan-all", "refresh-eod"])
     hist.add_argument("--exchange", default="NSEEQ")
@@ -739,6 +741,16 @@ def _run_live(args) -> int:
     logger.info("streaming {} for {}s ...", topics, args.seconds)
     time.sleep(args.seconds)
     bridge.disconnect()
+    return 0
+
+
+def _run_backup(args) -> int:
+    from atr.config.settings import get_settings
+    from atr.infra.backup import backup_now
+    from atr.market_intel.service import DATA_ROOT
+
+    settings = get_settings()
+    print(backup_now(DATA_ROOT, settings.backup_dir, keep=settings.backup_keep))
     return 0
 
 
@@ -1570,6 +1582,7 @@ def main(argv: list[str] | None = None) -> int:
         "login": _run_login,
         "instruments": _run_instruments,
         "history": _run_history,
+        "backup": _run_backup,
         "alerts": _run_alerts,
         "brief": _run_brief,
         "learn": _run_learn,

@@ -51,6 +51,23 @@ async def _on_startup() -> None:
     _warm_instrument_master()
     asyncio.create_task(_insights_loop())
     asyncio.create_task(_eod_refresh_loop())
+    asyncio.create_task(_jobs_loop())
+
+
+async def _jobs_loop() -> None:
+    """Run the once-a-day jobs (currently the nightly backup)."""
+    from atr.config.settings import get_settings
+    from atr.infra.backup import backup_now
+    from atr.jobs.daily import DailyJob, JobStore, run_forever
+    from atr.market_intel.service import DATA_ROOT
+
+    settings = get_settings()
+    backup = DailyJob(
+        "backup",
+        lambda: backup_now(DATA_ROOT, settings.backup_dir, keep=settings.backup_keep),
+        at=(2, 30),
+    )
+    await run_forever([backup], JobStore(DATA_ROOT))
 
 
 async def _eod_refresh_loop() -> None:
