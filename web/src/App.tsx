@@ -831,7 +831,7 @@ export default function App() {
         {tab === "trading" && (
           <TradingTabContainer sub={tradingSub} onSubChange={(s) => setTab("trading", s)} />
         )}
-        {tab === "paper" && <PaperDeploymentPanel />}
+        {tab === "paper" && <PaperDeploymentPanel onOpenStrategies={() => setTab("strategies")} />}
         {tab === "evidence" && (
           <EvidenceTabContainer sub={evidenceSub} onSubChange={(s) => setTab("evidence", s)} />
         )}

@@ -108,7 +108,7 @@ const POLL_MS = 4000;
 
 type View = "deploy" | "monitor" | "compare";
 
-export default function PaperDeploymentPanel() {
+export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrategies?: () => void }) {
   const { toast } = useToast();
 
   const [view, setView] = useState<View>("deploy");
@@ -464,31 +464,14 @@ export default function PaperDeploymentPanel() {
         {/* The runner is a platform process, not a user's resource, so its state
             is shown on every view: "no signals fired" and "nothing is watching
             for signals" look identical from the timeline alone. */}
-        <div className="flex items-center gap-2 text-xs">
-          <span className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/60 px-2.5 py-1">
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full",
-                runner?.running
-                  ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                  : "bg-red-500",
-              )}
-            />
-            <span className="text-muted-foreground">
-              runner {runner?.running ? "running" : "stopped"}
-            </span>
-          </span>
-          <span className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/60 px-2.5 py-1">
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full",
-                runner?.in_market_hours ? "bg-emerald-500" : "bg-amber-500",
-              )}
-            />
-            <span className="text-muted-foreground">
-              {runner?.in_market_hours ? "session open" : "session closed"}
-            </span>
-          </span>
+        <div
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          title={runner?.running ? "The paper runner is watching for signals." : "The paper runner is not running, so nothing will trade."}
+        >
+          <span className={cn("h-2 w-2 rounded-full", runner?.running ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+          {runner?.running ? "Runner on" : "Runner off"}
+          <span className="text-border">·</span>
+          {runner?.in_market_hours ? "Market open" : "Market closed"}
         </div>
       </div>
 
@@ -517,6 +500,7 @@ export default function PaperDeploymentPanel() {
         />
       ) : view === "deploy" ? (
         <DeployForm
+          onOpenStrategies={onOpenStrategies}
           options={options}
           deployable={deployable}
           chosen={chosen}
@@ -649,7 +633,7 @@ function PositionSizingSection({
   return (
     <Section
       n={5}
-      title="Position sizing & risk budgeting"
+      title="Position size"
       note="Deterministic position sizing formula and multi-tier limit capping."
     >
       <div className="space-y-4">
@@ -855,6 +839,7 @@ function DeployForm({
   onDeploy,
   onOpen,
   deployments,
+  onOpenStrategies,
 }: {
   options: BacktestOptions | null;
   deployable: StrategyOption[];
@@ -882,23 +867,23 @@ function DeployForm({
   onDeploy: () => void;
   onOpen: (id: string) => void;
   deployments: Deployment[];
+  onOpenStrategies?: () => void;
 }) {
   const [pickedUniverse, setPickedUniverse] = useState(false);
 
   if (deployable.length === 0) {
     return (
       <Card>
-        <CardHeader
-          title="Nothing to deploy yet"
-          sub="A paper deployment pins one immutable strategy version."
-        />
-        <div className="p-5 pt-3">
-          <Callout tone="warn" title="No saved strategies with versions">
-            Built-in engines are not versioned, and a deployment that named one
-            could not be reproduced — the rules behind a paper fill would be the
-            rules as of today, not the rules as of the trade. Save a strategy and
-            commit at least one version first; it will appear here.
-          </Callout>
+        <div className="flex flex-col items-center gap-3 px-5 py-12 text-center">
+          <div className="text-sm font-medium">Nothing to deploy yet</div>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            Save a strategy and commit a version first. A paper run needs a fixed version so its results can be trusted.
+          </p>
+          {onOpenStrategies && (
+            <Button variant="secondary" size="sm" onClick={onOpenStrategies}>
+              Go to Strategies
+            </Button>
+          )}
         </div>
       </Card>
     );
@@ -909,12 +894,11 @@ function DeployForm({
       <Card>
         <CardHeader
           title="Deploy to paper"
-          sub="Everything here is stored on the deployment row, so its behaviour is reproducible from that row alone."
         />
         <div className="space-y-4 p-5 pt-3">
           <Section
             n={1}
-            title="Strategy & version"
+            title="Strategy"
             note="The version is pinned. A later edit creates a new version; this deployment keeps running the rules it was deployed with."
           >
             <div className="grid gap-3.5 sm:grid-cols-2">
@@ -972,7 +956,7 @@ function DeployForm({
               />
               <Field
                 label="Max open positions"
-                hint="a blast radius, not a strategy parameter"
+                
               >
                 <input
                   className={selectClass}
@@ -990,7 +974,7 @@ function DeployForm({
             note="Symbols go to the runner as config; the runner reads its universe from there and nowhere else."
           >
             <div className="grid gap-3.5 sm:grid-cols-2">
-              <Field label="Universe" hint="loads its symbols in below">
+              <Field label="Universe" >
                 <Select
                   value={universe}
                   onChange={(v) => {
@@ -1050,7 +1034,7 @@ function DeployForm({
             </div>
           </Section>
 
-          <Section n={4} title="Timeframe & risk" note="The trailing stop the runner applies to every paper position.">
+          <Section n={4} title="Timeframe and stop" note="The trailing stop the runner applies to every paper position.">
             <div className="grid gap-3.5 sm:grid-cols-3">
               <Field
                 label="Timeframe"
@@ -1111,7 +1095,7 @@ function DeployForm({
 
       <div className="space-y-4">
         <Card>
-          <CardHeader title="Existing deployments" sub={`${deployments.length} total`} />
+          <CardHeader title="Existing deployments" sub={undefined} />
           <div className="max-h-[420px] space-y-2 overflow-y-auto p-4 pt-3">
             {deployments.length === 0 ? (
               <Hint>None yet. Everything you deploy appears here.</Hint>
@@ -1140,14 +1124,6 @@ function DeployForm({
             )}
           </div>
         </Card>
-
-        <Callout tone="info" title="What happens on deploy">
-          The loop loads history for warmup, then evaluates the pinned rules once
-          a second against the live feed. A signal goes through the risk gate,
-          then the OMS, then the paper venue — the same path a live order takes,
-          with only the venue swapped. You can stop the API and restart it; the
-          deployment re-attaches and keeps its book.
-        </Callout>
       </div>
     </div>
   );
@@ -2598,10 +2574,7 @@ function Section({
           {n}
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold">{title}</div>
-          {note && (
-            <div className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">{note}</div>
-          )}
+          <div className="text-[13px] font-semibold" title={note}>{title}</div>
         </div>
       </div>
       {children}
