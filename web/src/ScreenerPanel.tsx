@@ -213,7 +213,8 @@ function ConditionRow({
   const unavailable = spec && !spec.available;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="flex items-center gap-2">
       <Select
         size="sm"
         value={draft.indicator}
@@ -242,7 +243,9 @@ function ConditionRow({
           aria-label="period"
         />
       ) : null}
+      </div>
 
+      <div className="flex flex-wrap items-center gap-2">
       <Select
         size="sm"
         value={draft.op}
@@ -310,11 +313,12 @@ function ConditionRow({
       {unavailable ? (
         <span className="text-[11px] text-muted-foreground">requires {spec?.requires}</span>
       ) : null}
+      </div>
 
       <button
         type="button"
         onClick={onRemove}
-        className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+        className="ml-auto rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
         aria-label="remove condition"
       >
         <X className="h-3.5 w-3.5" />
@@ -588,7 +592,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
       <Card>
         <CardHeader
           title="Screen builder"
-          sub="Conditions are evaluated over cached daily bars. The result explains every match."
+          sub="Find stocks that match all of your rules."
           action={
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setSaveOpen((v) => !v)}>
