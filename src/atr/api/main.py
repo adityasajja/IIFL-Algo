@@ -1259,6 +1259,22 @@ def scan(symbols: str | None = None) -> dict[str, Any]:
     return {"as_of": date.today().isoformat(), "rows": rows, "errors": errors}
 
 
+def _frames_as_of(frames: dict[str, Any]) -> str:
+    """The date of the newest bar in the data, not today's date.
+
+    A scan over a cache that stopped updating last week must say so.
+    """
+    newest = None
+    for df in frames.values():
+        try:
+            ts = df["ts"].iloc[-1]
+        except Exception:  # noqa: BLE001 - a frame without timestamps is skipped
+            continue
+        if newest is None or ts > newest:
+            newest = ts
+    return newest.date().isoformat() if newest is not None else ""
+
+
 _SCAN_CACHE: dict[str, Any] = {"data": None, "as_of": 0.0, "exchange": ""}
 
 
@@ -1271,7 +1287,6 @@ def scan_all(exchange: str = "NSEEQ") -> dict[str, Any]:
     switches instant.
     """
     import time
-    from datetime import date
 
     import pandas as pd
 
@@ -1299,7 +1314,7 @@ def scan_all(exchange: str = "NSEEQ") -> dict[str, Any]:
     scan = pd.DataFrame(rows).sort_values("score", ascending=False)
     up = int((scan["trend"] == "UP").sum())
     result = {
-        "as_of": date.today().isoformat(),
+        "as_of": _frames_as_of(frames),
         "universe": len(frames),
         "scored": len(scan),
         "breadth_up": up,
@@ -1341,7 +1356,6 @@ def scanner_custom(body: CustomScanRequest) -> dict[str, Any]:
     Returns matching symbols with standard score metrics + condition values.
     """
     import time
-    from datetime import date
 
     from atr.data.history import load_cached
     from atr.scanner import UNIVERSE
@@ -1368,7 +1382,7 @@ def scanner_custom(body: CustomScanRequest) -> dict[str, Any]:
 
     elapsed = round(time.monotonic() - t0, 2)
     return {
-        "as_of": date.today().isoformat(),
+        "as_of": _frames_as_of(frames),
         "universe_size": len(frames),
         "matched": len(results),
         "elapsed_s": elapsed,
