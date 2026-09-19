@@ -1,12 +1,17 @@
 import { AlertOctagon, Gauge, IndianRupee, ShieldCheck, ShieldOff, Target } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { getRiskStatus, setKillSwitch, type RiskStatus } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { AnimatedNumber } from "./components/ui/animated-number";
+import { NumberTicker } from "./components/ui/number-ticker";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Badge, Callout, fmtMoney, fmtNum } from "./components/ui/stat";
 import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
+import { setVisibleInterval } from "./lib/visibleInterval";
+import { useDialog } from "./components/ui/dialog-context";
 
 /**
  * Risk — the "improve / maintain" half of the loop.
@@ -17,6 +22,7 @@ import { cn } from "./lib/utils";
  */
 export default function RiskPanel() {
   const { toast } = useToast();
+  const dialog = useDialog();
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [armed, setArmed] = useState<"kill" | "clear" | null>(null);
@@ -33,28 +39,25 @@ export default function RiskPanel() {
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 15_000);
+    const t = setVisibleInterval(() => void load(), 15_000);
     return () => clearInterval(t);
   }, [load]);
 
   const toggle = async (engage: boolean) => {
-    // Required in both directions and recorded in the audit trail — releasing
-    // re-enables trading, so a silent release is the more dangerous of the two.
-    const reason = window.prompt(
-      engage
-        ? "Why are you engaging the kill switch? This is recorded in the audit trail."
-        : "Why are you releasing the kill switch? This is recorded in the audit trail.",
-      "",
-    );
+    // A reason is required in both directions and recorded in the audit trail:
+    // releasing re-enables trading, so a silent release is the more dangerous.
+    const reason = await dialog.prompt({
+      title: engage ? "Turn the safety switch on?" : "Turn the safety switch off?",
+      description: engage
+        ? "No new orders will be placed until you turn it off."
+        : "Orders can be placed again.",
+      label: "Reason",
+      placeholder: "Why? This is saved in the audit trail.",
+      required: true,
+      confirmLabel: engage ? "Turn on" : "Turn off",
+      tone: engage ? "danger" : "default",
+    });
     if (reason === null) return;
-    if (!reason.trim()) {
-      toast({
-        title: "A reason is required",
-        description: "The kill switch cannot be changed without one.",
-        status: "error",
-      });
-      return;
-    }
     setBtn("loading");
     try {
       await setKillSwitch(engage, reason.trim());
@@ -188,30 +191,40 @@ export default function RiskPanel() {
         <Kpi
           icon={<IndianRupee className="h-3.5 w-3.5" />}
           label="Trading capital"
-          value={lim ? fmtMoney(lim.capital) : "—"}
+          value={
+            lim ? <AnimatedNumber value={lim.capital} format={(n) => fmtMoney(n)} /> : "—"
+          }
           hint="Base for every sizing calculation"
         />
         <Kpi
           icon={<Target className="h-3.5 w-3.5" />}
           label="Risk per trade"
-          value={lim ? `${fmtNum(lim.risk_per_trade_pct, 1)}%` : "—"}
+          value={
+            lim ? (
+              <AnimatedNumber value={lim.risk_per_trade_pct} format={(n) => `${fmtNum(n, 1)}%`} />
+            ) : (
+              "—"
+            )
+          }
           hint={riskPerTrade ? `${fmtMoney(riskPerTrade)} at risk` : undefined}
         />
         <Kpi
           icon={<Gauge className="h-3.5 w-3.5" />}
           label="Max concurrent"
-          value={lim ? String(lim.max_active) : "—"}
+          value={lim ? <NumberTicker value={lim.max_active} /> : "—"}
           hint="Open signals allowed at once"
         />
         <Kpi
           icon={<IndianRupee className="h-3.5 w-3.5" />}
           label="Available margin"
           value={
-            m.availableMargin !== undefined
-              ? fmtMoney(m.availableMargin)
-              : m.openingCashLimit !== undefined
-                ? fmtMoney(m.openingCashLimit)
-                : "—"
+            m.availableMargin !== undefined ? (
+              <AnimatedNumber value={m.availableMargin} format={(n) => fmtMoney(n)} />
+            ) : m.openingCashLimit !== undefined ? (
+              <AnimatedNumber value={m.openingCashLimit} format={(n) => fmtMoney(n)} />
+            ) : (
+              "—"
+            )
           }
           hint={risk?.margin_error ? "broker unreachable" : "reported by IIFL"}
         />
@@ -274,9 +287,9 @@ function Kpi({
   value,
   hint,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
-  value: string;
+  value: ReactNode;
   hint?: string;
 }) {
   return (

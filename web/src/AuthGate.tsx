@@ -1,4 +1,4 @@
-import { AlertTriangle, KeyRound, Loader2, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
+import { AlertTriangle, KeyRound, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ApiError,
@@ -12,6 +12,7 @@ import {
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox } from "./components/ui/card";
+import { PageLoader } from "./components/ui/loading";
 import { Input } from "./components/ui/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 
@@ -183,9 +184,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
   if (!status) {
     return (
       <Shell>
-        <div className="grid place-items-center py-6 text-muted-foreground">
-          <Loader2 className="size-5 animate-spin" />
-        </div>
+        <PageLoader />
       </Shell>
     );
   }

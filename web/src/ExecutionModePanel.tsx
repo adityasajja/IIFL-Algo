@@ -14,6 +14,8 @@ import { Badge, Callout } from "./components/ui/stat";
 import { Switch } from "./components/ui/switch";
 import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
+import { setVisibleInterval } from "./lib/visibleInterval";
+import { formatDetail, formatIst, humanizeEvent } from "./lib/format";
 
 /**
  * Execution mode — paper or live.
@@ -49,7 +51,7 @@ export default function ExecutionModePanel() {
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 20_000);
+    const t = setVisibleInterval(() => void load(), 20_000);
     return () => clearInterval(t);
   }, [load]);
 
@@ -300,7 +302,7 @@ export default function ExecutionModePanel() {
                   {audit.map((e, i) => (
                     <tr key={`${e.ts}-${i}`} className="border-b border-border/40 last:border-0">
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {e.ts.replace("T", " ").slice(0, 19)}
+                        {formatIst(e.ts)} <span className="text-[10px]">IST</span>
                       </td>
                       <td className="px-3 py-2">
                         <span
@@ -313,11 +315,13 @@ export default function ExecutionModePanel() {
                                 : "bg-muted text-muted-foreground",
                           )}
                         >
-                          {e.action}
+                          {humanizeEvent(e.action)}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-foreground">{e.subject}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{e.detail ?? "—"}</td>
+                      <td className="max-w-[28rem] truncate px-3 py-2 text-muted-foreground" title={e.detail ?? undefined}>
+                        {formatDetail(e.detail)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -106,6 +106,15 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
             >
               I already have an auth code →
             </button>
+            {onClose ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Not now — backtests, research and paper trading work without it
+              </button>
+            ) : null}
           </div>
         </div>
       ) : (
