@@ -33,6 +33,7 @@ import {
 import { ErrorBox, Hint } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Select } from "./components/ui/select";
+import { Button } from "./components/ui/button";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Badge, fmtNum } from "./components/ui/stat";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
@@ -108,19 +109,12 @@ function StatusPill({ status }: { status: string }) {
 // Inline "stale data" notice used in tab content
 // ---------------------------------------------------------------------------
 
-function StaleNotice({ lastUpdated, onRetry }: { lastUpdated: Date | null; onRetry: () => void }) {
+function StaleNotice({ onRetry }: { lastUpdated: Date | null; onRetry: () => void }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-400 mb-3">
-      <Clock size={12} className="shrink-0" />
-      <span>
-        Market data delayed
-        {lastUpdated
-          ? ` \u00b7 Last updated ${lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
-          : ""}
-      </span>
-      <button type="button" onClick={onRetry} className="ml-auto underline hover:text-amber-300">
-        Retry
-      </button>
+    <div className="flex flex-col items-center gap-3 py-10 text-center">
+      <Clock size={18} className="text-muted-foreground" />
+      <div className="text-sm text-muted-foreground">Your broker data isn't available right now.</div>
+      <Button variant="secondary" size="sm" onClick={onRetry}>Try again</Button>
     </div>
   );
 }
@@ -208,24 +202,24 @@ function KpiStrip({
       )}
       <div className="grid grid-cols-2 divide-y divide-border/60 sm:divide-y-0 sm:divide-x sm:grid-cols-4">
         <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Available Margin</div>
+          <div className="text-xs text-muted-foreground">Available margin</div>
           <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.tradingLimit)}</div>
           <div className="mt-1 text-xs text-muted-foreground">{noData ? "Loading\u2026" : `${INR(kpis.utilized)} utilized`}</div>
         </div>
         <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cash Balance</div>
+          <div className="text-xs text-muted-foreground">Cash</div>
           <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.cashFunds)}</div>
           <div className="mt-1 text-xs text-muted-foreground truncate">
-            {kpis.blockedForPayout > 0 ? `${INR(kpis.blockedForPayout)} blocked` : "Settled free funds"}
+            {kpis.blockedForPayout > 0 ? `${INR(kpis.blockedForPayout)} blocked` : "Free funds"}
           </div>
         </div>
         <div className="p-4 sm:p-5">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Holdings Value</div>
+          <div className="text-xs text-muted-foreground">Holdings</div>
           <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.holdingsAtClose)}</div>
           <div className="mt-1 text-xs text-muted-foreground">
             {noData ? "Loading\u2026" : (
               <span>
-                {kpis.holdingsCount} lots ·{" "}
+                {kpis.holdingsCount} {kpis.holdingsCount === 1 ? "stock" : "stocks"} ·{" "}
                 <span className={kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "text-emerald-500" : "text-destructive"}>
                   {kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "+" : ""}{INR(kpis.holdingsAtClose - kpis.holdingsInvested)} unrealized
                 </span>
@@ -234,8 +228,8 @@ function KpiStrip({
           </div>
         </div>
         <div className="p-4 sm:p-5">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Intraday P&L</div>
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <div className="text-xs text-muted-foreground">P&L</div>
             <div className="flex items-center gap-0.5 rounded border border-border/60 p-0.5 text-[10px]">
               <button type="button" onClick={() => setPnlMode("total")}
                 className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "total" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
@@ -1159,39 +1153,24 @@ export default function PortfolioPanel() {
 
           <div className="flex items-center gap-2.5">
             <button type="button" onClick={() => void handleToggleKillSwitch()} disabled={killLoading}
-              title={killEngaged ? "Kill switch is active. Click to disarm." : "Engage emergency kill switch."}
-              className={cn("inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border",
-                killEngaged ? "bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse hover:bg-rose-500/30" : "bg-muted/30 border-border/70 text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/60")}>
-              {killEngaged ? <><ShieldAlert size={12} className="text-rose-400" /><span>KILL ACTIVE</span></> : <><ShieldCheck size={12} className="text-muted-foreground/70" /><span>Kill Switch</span></>}
+              title={killEngaged ? "Orders are blocked. Click to allow orders again." : "Block all new orders."}
+              className={cn("inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors",
+                killEngaged ? "border-rose-500/50 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20" : "border-border/70 text-muted-foreground hover:border-border hover:text-foreground")}>
+              {killEngaged ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
+              {killEngaged ? "Allow orders" : "Stop orders"}
             </button>
 
-            <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-              <span className={cn("h-1.5 w-1.5 rounded-full", connected ? (bridgeActive ? "bg-emerald-500 animate-pulse" : "bg-amber-500") : "bg-muted-foreground/50")} />
-              {connected ? (bridgeActive ? "Live" : "Connecting") : "Offline"}
-            </div>
-
-            {lastUpdated && !error && (
-              <span className="hidden text-[11px] text-muted-foreground/75 sm:inline tabular-nums">
-                {lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
-            )}
+            <span
+              title={connected ? (bridgeActive ? "Live prices" : "Connecting to prices") : "Prices offline"}
+              className={cn("h-2 w-2 rounded-full", connected ? (bridgeActive ? "bg-emerald-500" : "bg-amber-500") : "bg-muted-foreground/40")}
+            />
 
             <StatefulButton state={state} variant="secondary" size="sm" onClick={() => void load()}
-              loadingText="\u2026" successText="Done" errorText="Retry" icon={<RefreshCw size={11} />} className="h-7 px-2.5 text-xs">
+              loadingText="\u2026" successText="Done" errorText="Refresh" icon={<RefreshCw size={11} />} className="h-7 px-2.5 text-xs">
               Refresh
             </StatefulButton>
           </div>
         </div>
-
-        {killEngaged && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-2.5 text-xs text-rose-300">
-            <div className="flex items-center gap-2 font-medium">
-              <ShieldAlert size={15} className="text-rose-400 shrink-0" />
-              <span><strong>KILL SWITCH ACTIVE:</strong> The risk engine is rejecting all order submissions.</span>
-            </div>
-            <button type="button" disabled={killLoading} onClick={() => void handleToggleKillSwitch()} className="shrink-0 font-semibold underline underline-offset-2 hover:text-white">Disarm</button>
-          </div>
-        )}
 
         <div className="pt-4">
           <Tabs value={section} onValueChange={(v) => setSection(v as TabId)}>
