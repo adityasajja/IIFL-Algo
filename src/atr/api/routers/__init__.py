@@ -1,6 +1,6 @@
 """Versioned API routers (``/api/v1``).
 
-The legacy unversioned routes in :mod:`atr.api.main` are untouched. These are the
+The legacy unversioned routes in :mod:`atr.api.legacy` are untouched. These are the
 new surface: each route declares the permission it needs as a dependency, so the
 check cannot be forgotten in the body.
 """

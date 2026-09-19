@@ -289,7 +289,8 @@ class IntelligentMonitorManager:
         if not cfg.enabled and not force:
             return []
 
-        from atr.api.main import _alert_store, _authed_client
+        from atr.api.legacy.alerts import _alert_store
+        from atr.api.legacy.common import _authed_client
 
         client = _authed_client()
         store = _alert_store()

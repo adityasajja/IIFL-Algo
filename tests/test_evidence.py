@@ -344,7 +344,7 @@ def test_buy_and_hold_is_equal_weight():
 
 
 def test_evidence_endpoint_reports_missing_file_with_a_hint(monkeypatch, tmp_path):
-    from atr.api import main as M
+    from atr.api.legacy import validation as M
 
     monkeypatch.setattr(M, "_EVIDENCE_PATH", tmp_path / "absent.json")
     payload = M.evidence_report()
@@ -355,7 +355,7 @@ def test_evidence_endpoint_reports_missing_file_with_a_hint(monkeypatch, tmp_pat
 def test_evidence_endpoint_counts_credible_findings(monkeypatch, tmp_path):
     import json
 
-    from atr.api import main as M
+    from atr.api.legacy import validation as M
 
     path = tmp_path / "evidence.json"
     path.write_text(json.dumps({
@@ -374,7 +374,7 @@ def test_evidence_endpoint_counts_credible_findings(monkeypatch, tmp_path):
 
 
 def test_evidence_endpoint_survives_corrupt_json(monkeypatch, tmp_path):
-    from atr.api import main as M
+    from atr.api.legacy import validation as M
 
     path = tmp_path / "evidence.json"
     path.write_text("{not json", encoding="utf8")

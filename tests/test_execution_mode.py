@@ -22,6 +22,21 @@ import json
 import pytest
 
 
+def _restart(monkeypatch, tmp_path):
+    """A fresh copy of the route modules, as after a server restart, with one namespace over them."""
+    from types import SimpleNamespace
+
+    from atr.api.legacy import common, risk, system
+
+    for module in (common, risk, system):
+        importlib.reload(module)
+    monkeypatch.setattr(common, "_AUDIT_PATH", tmp_path / "audit.jsonl")
+    names = {}
+    for module in (common, system, risk):
+        names.update({k: v for k, v in vars(module).items() if not k.startswith("__")})
+    return SimpleNamespace(**names)
+
+
 @pytest.fixture()
 def api(tmp_path, monkeypatch, fresh_env):
     """Fresh API module with its audit file and app store redirected into tmp_path.
@@ -31,10 +46,7 @@ def api(tmp_path, monkeypatch, fresh_env):
     a module-level dict, so a shared store would leak one test's live mode into the
     next. Each test starting from the safe default is the property under test.
     """
-    mod = importlib.import_module("atr.api.main")
-    importlib.reload(mod)
-    monkeypatch.setattr(mod, "_AUDIT_PATH", tmp_path / "audit.jsonl")
-    return mod
+    return _restart(monkeypatch, tmp_path)
 
 
 # ─── the default ──────────────────────────────────────────────────────────────
@@ -153,8 +165,7 @@ def test_the_kill_switch_survives_a_restart(api, tmp_path, monkeypatch):
     """It used to live in a module-level dict, so a bounce re-armed trading."""
     api.kill_switch(True, reason="broker returning stale ticks", principal=_OPERATOR)
 
-    fresh = importlib.reload(importlib.import_module("atr.api.main"))
-    monkeypatch.setattr(fresh, "_AUDIT_PATH", tmp_path / "audit.jsonl")
+    fresh = _restart(monkeypatch, tmp_path)
     assert fresh.get_execution_mode()["kill_switch"] is True
     assert fresh._kill_switch_engaged() is True
 
@@ -174,12 +185,8 @@ def test_trail_survives_a_restart(api, tmp_path, monkeypatch):
     """A record that vanishes on restart is not an audit trail."""
     api.set_execution_mode("live", reason="persisted", principal=_OPERATOR)
 
-    from atr.api import main as mod
-
-    monkeypatch.setattr(mod, "_AUDIT_PATH", tmp_path / "audit.jsonl")
     # A fresh module object, same file on disk.
-    fresh = importlib.reload(importlib.import_module("atr.api.main"))
-    monkeypatch.setattr(fresh, "_AUDIT_PATH", tmp_path / "audit.jsonl")
+    fresh = _restart(monkeypatch, tmp_path)
 
     entries = fresh.get_audit(limit=200)["entries"]
     assert any(e.get("detail") == "persisted" for e in entries)

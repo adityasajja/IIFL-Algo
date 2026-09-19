@@ -28,7 +28,17 @@ import inspect
 
 import pytest
 
-from atr.api import main as api_main
+import importlib
+import pkgutil
+
+from atr.api import legacy
+from atr.api.legacy import common, frontend, orders, risk, signals
+
+# The safety checks below must cover every root-path route module, not just one of them:
+# a new call site anywhere in the package is what they exist to catch.
+LEGACY_MODULES = [
+    importlib.import_module(f"{legacy.__name__}.{m.name}") for m in pkgutil.iter_modules(legacy.__path__)
+]
 
 BODY = {"symbol": "RELIANCE", "quantity": 10, "order_type": "MARKET"}
 
@@ -104,7 +114,7 @@ def _attribute_names(module) -> set[str]:
 
 def test_the_signal_execute_route_no_longer_names_a_member_that_does_not_exist():
     """``OrderType.SL_MARKET`` never existed. This is the regression pin."""
-    assert "SL_MARKET" not in _attribute_names(api_main)
+    assert not any("SL_MARKET" in _attribute_names(m) for m in LEGACY_MODULES)
 
 
 def test_the_stop_loss_leg_resolves_to_a_real_enum_member():
@@ -123,14 +133,14 @@ def test_no_legacy_route_calls_the_broker_directly_any_more():
     removed, and reintroducing it would put a route back in front of the broker
     with no risk gate and no event log.
     """
-    assert "place_order" not in _called_attributes(api_main), (
-        "api/main.py calls a broker's place_order directly; route it through "
+    assert not any("place_order" in _called_attributes(m) for m in LEGACY_MODULES), (
+        "a legacy route module calls a broker's place_order directly; route it through "
         "atr.services.execution so the risk gate and the event log cannot be skipped"
     )
 
 
 def test_the_manual_route_goes_through_the_execution_service():
-    source = inspect.getsource(api_main.place_order)
+    source = inspect.getsource(orders.place_order)
     assert "ExecutionService" in source
     assert "OrderDraft" in source
     assert "get_order_service" in source
@@ -138,7 +148,7 @@ def test_the_manual_route_goes_through_the_execution_service():
 
 def test_the_signal_route_keys_each_leg_so_a_double_click_cannot_place_twice():
     """There was no guard at all before: two clicks placed two brackets."""
-    source = inspect.getsource(api_main.trade_signals_execute)
+    source = inspect.getsource(signals.trade_signals_execute)
     assert "idempotency_key_for" in source
     assert "leg_index" in source
 
@@ -153,7 +163,8 @@ def test_the_signal_route_puts_the_trigger_where_the_broker_reads_it():
 
     keywords = {
         kw.arg
-        for node in ast.walk(_module_ast(api_main))
+        for module in LEGACY_MODULES
+        for node in ast.walk(_module_ast(module))
         if isinstance(node, ast.Call)
         for kw in node.keywords
     }
@@ -163,7 +174,7 @@ def test_the_signal_route_puts_the_trigger_where_the_broker_reads_it():
 
 def test_the_signal_route_reports_which_leg_failed(auth_client):
     """A half-placed bracket must say what is live and what is not."""
-    source = inspect.getsource(api_main.trade_signals_execute)
+    source = inspect.getsource(signals.trade_signals_execute)
     assert "venue_failed" in source
     assert '"placed": placed' in source
 
@@ -173,10 +184,10 @@ def test_the_legacy_kill_switch_reaches_the_durable_state(app_db, monkeypatch):
     """It used to write a module-level dict, so a restart re-armed trading."""
     from atr.services.risk import RiskStateService
 
-    api_main.kill_switch(True, reason="legacy route test", principal=_OPERATOR)
+    risk.kill_switch(True, reason="legacy route test", principal=_OPERATOR)
     assert RiskStateService(app_db).kill_switch_engaged() is True
 
-    api_main.kill_switch(False, reason="legacy route test done", principal=_OPERATOR)
+    risk.kill_switch(False, reason="legacy route test done", principal=_OPERATOR)
     assert RiskStateService(app_db).kill_switch_engaged() is False
 
 
@@ -184,16 +195,16 @@ def test_the_legacy_kill_switch_requires_a_reason():
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as exc:
-        api_main.kill_switch(True, reason="", principal=_OPERATOR)
+        risk.kill_switch(True, reason="", principal=_OPERATOR)
     assert exc.value.detail["code"] == "reason_required"
 
 
 def test_the_legacy_mode_endpoint_writes_the_durable_state(app_db):
     from atr.services.risk import RiskStateService
 
-    api_main.set_execution_mode("live", reason="legacy route test", principal=_OPERATOR)
+    risk.set_execution_mode("live", reason="legacy route test", principal=_OPERATOR)
     assert RiskStateService(app_db).execution_mode() == "live"
-    api_main.set_execution_mode("paper", reason="", principal=_OPERATOR)
+    risk.set_execution_mode("paper", reason="", principal=_OPERATOR)
 
 
 def test_an_unreadable_risk_store_reports_paper_not_live(monkeypatch):
@@ -204,7 +215,7 @@ def test_an_unreadable_risk_store_reports_paper_not_live(monkeypatch):
         raise RuntimeError("store unavailable")
 
     monkeypatch.setattr(risk_module.RiskStateService, "snapshot", explode)
-    state = api_main._risk_state()
+    state = risk._risk_state()
     assert state["mode"] == "paper"
     assert state["live"] is False
 
@@ -243,7 +254,7 @@ def test_the_kill_switch_actor_is_the_authenticated_user_not_a_query_param(auth_
 
 
 @pytest.mark.skipif(
-    not (api_main._WEB_DIST / "index.html").exists(), reason="frontend not built"
+    not (frontend._WEB_DIST / "index.html").exists(), reason="frontend not built"
 )
 @pytest.mark.parametrize(
     "path", ["/%2e%2e/package.json", "/%2e%2e/%2e%2e/pyproject.toml", "/..%2f..%2fpyproject.toml"]
@@ -261,9 +272,9 @@ def test_audit_limit_zero_is_not_the_whole_file(tmp_path, monkeypatch):
 
     path = tmp_path / "audit.jsonl"
     path.write_text("\n".join(json.dumps({"n": i}) for i in range(50)) + "\n", encoding="utf-8")
-    monkeypatch.setattr(api_main, "_AUDIT_PATH", path)
-    assert len(api_main._read_audit(0)) == 1
-    assert [e["n"] for e in api_main._read_audit(3)] == [49, 48, 47]
+    monkeypatch.setattr(common, "_AUDIT_PATH", path)
+    assert len(common._read_audit(0)) == 1
+    assert [e["n"] for e in common._read_audit(3)] == [49, 48, 47]
 
 
 def test_query_limits_are_bounded(auth_client):
