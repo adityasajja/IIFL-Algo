@@ -552,8 +552,16 @@ export default function App() {
       setShowLogin(false);
       prompted.current = false;
     } else if (!prompted.current) {
-      setShowLogin(true);
       prompted.current = true;
+      // Ask once per browser session; after that the Log in button up top is enough.
+      let seen = false;
+      try {
+        seen = sessionStorage.getItem("atr.login.prompted") === "1";
+        sessionStorage.setItem("atr.login.prompted", "1");
+      } catch {
+        // storage can be blocked; then it simply asks again
+      }
+      if (!seen) setShowLogin(true);
     }
   }, [auth]);
 
