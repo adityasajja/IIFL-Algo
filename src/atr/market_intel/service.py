@@ -401,7 +401,7 @@ class MarketIntelService:
             if ema50_series is not None and "ts" in df.columns:
                 days = 90
                 flags = closes.tail(days).to_numpy() >= ema50_series.tail(days).to_numpy()
-                labels = pd.to_datetime(df["ts"]).tail(days).dt.strftime("%Y-%m-%d").to_numpy()
+                labels = pd.to_datetime(df["ts"].tail(days)).dt.strftime("%Y-%m-%d").to_numpy()
                 for label, flag in zip(labels, flags):
                     tally = breadth_days.setdefault(label, [0, 0])
                     tally[0] += int(flag)
