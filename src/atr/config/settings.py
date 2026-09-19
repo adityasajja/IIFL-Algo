@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     #: Users, sessions, watchlists, audit. SQLite by default so a fresh clone
     #: can log in with nothing installed; point at Postgres to share state.
     app_db_url: str = "sqlite:///data/app.db"
+    #: Where nightly backups go. Point it at another disk or a synced folder: a copy
+    #: on the same drive does not survive that drive failing.
+    backup_dir: str = "data/backups"
+    #: How many of the newest backups to keep.
+    backup_keep: int = 14
     #: Self-registration. Off by default — a trading platform should not accept
     #: strangers. The first account is created through the bootstrap route.
     allow_signup: bool = False
