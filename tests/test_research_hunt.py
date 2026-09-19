@@ -112,3 +112,22 @@ def test_sharpe_subtracts_the_rate_you_could_have_earned_risk_free():
     assert m["sharpe"] < m["return_vol_ratio"]  # the raw ratio is the flattering one
     expected = (m["cagr_pct"] / 100 - RISK_FREE) / (m["ann_vol_pct"] / 100)
     assert m["sharpe"] == pytest.approx(expected, rel=1e-2)
+
+
+def test_a_pooled_win_does_not_claim_to_beat_the_benchmark_in_both_halves():
+    """The failure mode: winning on pooled figures while losing one half badly."""
+    from atr.research.hunt import compare
+
+    rising = _prices(x=[100.0 * (1.03**i) for i in range(400)])
+    flat = _prices(x=[100.0 + 0.01 * i for i in range(400)])
+    hold = pd.DataFrame({"x": [1.0]}, index=rising.index[:1])
+    strong, weak = run_weights(rising, hold, ETF_COSTS), run_weights(flat, hold, ETF_COSTS)
+
+    pooled = compare("r", strong, weak)
+    assert pooled["beats_on_pooled_sample"] is True
+    assert pooled["beats_in_both_halves"] is None  # not claimed without evidence
+    assert "pooled only" in pooled["note"]
+
+    # Losing the early half must sink the both-halves claim even when pooled wins.
+    checked = compare("r", strong, weak, halves=((weak, strong), (strong, weak)))
+    assert checked["beats_in_both_halves"] is False

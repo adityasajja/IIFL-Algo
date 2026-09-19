@@ -320,14 +320,36 @@ def _z(p: float) -> float:
     return NormalDist().inv_cdf(min(max(p, 1e-9), 1 - 1e-9))
 
 
-def compare(name: str, result: Result, benchmark: Result) -> dict:
-    """A rule next to its benchmark, with the difference stated plainly."""
+def compare(
+    name: str,
+    result: Result,
+    benchmark: Result,
+    *,
+    halves: tuple[tuple[Result, Result], tuple[Result, Result]] | None = None,
+) -> dict:
+    """A rule next to its benchmark, with the difference stated plainly.
+
+    Pass ``halves`` as ``((early_rule, early_bench), (late_rule, late_bench))``.
+    Pooling the whole sample hides the failure mode that matters: a rule can win
+    on pooled figures while losing a half badly, because the benchmark's own good
+    half drags the average. Without ``halves`` this reports only the pooled
+    comparison and says so, rather than claiming the rule beats anything.
+    """
     a, b = result.metrics(), benchmark.metrics()
-    return {
+    out = {
         "name": name,
         "strategy": a,
         "benchmark": b,
         "excess_cagr_pct": round(a["cagr_pct"] - b["cagr_pct"], 2),
         "sharpe_gap": round(a["sharpe"] - b["sharpe"], 3),
-        "beats_benchmark": a["sharpe"] > b["sharpe"] and a["cagr_pct"] > b["cagr_pct"],
+        "beats_on_pooled_sample": a["sharpe"] > b["sharpe"] and a["cagr_pct"] > b["cagr_pct"],
     }
+    if halves is None:
+        out["beats_in_both_halves"] = None
+        out["note"] = "pooled only — a pooled win can hide a losing half; pass halves= to test it"
+        return out
+
+    gaps = [r.metrics()["sharpe"] - h.metrics()["sharpe"] for r, h in halves]
+    out["half_sharpe_gaps"] = [round(g, 3) for g in gaps]
+    out["beats_in_both_halves"] = bool(out["beats_on_pooled_sample"] and all(g > 0 for g in gaps))
+    return out
