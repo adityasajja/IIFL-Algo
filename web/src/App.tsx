@@ -4,7 +4,6 @@ import {
   AnimatedSidebarFooter,
   AnimatedSidebarGroup,
   AnimatedSidebarGroupContent,
-  AnimatedSidebarGroupLabel,
   AnimatedSidebarHeader,
   AnimatedSidebarInset,
   AnimatedSidebarMenu,
@@ -16,6 +15,7 @@ import {
 import {
   BarChart3,
   Bell,
+  Ellipsis,
   Briefcase,
   FlaskConical,
   Home,
@@ -24,14 +24,17 @@ import {
   LogOut,
   Palette,
   PanelLeft,
+  Radio,
   Search,
   Server,
   ShieldAlert,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import AlertsPanel from "./AlertsPanel";
 import AuthGate from "./AuthGate";
 import BacktestPanel from "./BacktestPanel";
+import BacktestWorkflowPanel from "./BacktestWorkflowPanel";
 import ChartsPanel from "./ChartsPanel";
 import CustomScannerPanel from "./CustomScannerPanel";
 import ExecutionModePanel from "./ExecutionModePanel";
@@ -44,14 +47,22 @@ import { EnvironmentBanner } from "./components/ui/environment-banner";
 import { ThemeToggle } from "./components/ui/theme-toggle";
 import LoginBanner from "./LoginBanner";
 import PortfolioPanel from "./PortfolioPanel";
-import NotificationsPanel from "./NotificationsPanel";
+import PortfolioControlCenter from "./PortfolioControlCenter";
+import BriefingPanel from "./BriefingPanel";
+import TodayPanel from "./TodayPanel";
+import AnalyticsPanel from "./AnalyticsPanel";
+import { LearningPanel } from "./LearningPanel";
+import { OptimizationPanel } from "./OptimizationPanel";
 import OverviewPanel from "./OverviewPanel";
+import PaperDeploymentPanel from "./PaperDeploymentPanel";
 import ResearchPanel from "./ResearchPanel";
 import EvidencePanel from "./EvidencePanel";
 import RiskPanel from "./RiskPanel";
 import StrategiesPanel from "./StrategiesPanel";
 import ScannerPanel from "./ScannerPanel";
 import ScreenerPanel from "./ScreenerPanel";
+import MarketIntelligencePanel from "./MarketIntelligencePanel";
+import SignalExplorerPanel from "./SignalExplorerPanel";
 import SystemPanel from "./SystemPanel";
 import {
   appLogout,
@@ -64,9 +75,12 @@ import { useSession } from "./lib/useSession";
 import {
   IconBell,
   IconBrief,
+  IconAttribution,
+  IconBrain,
   IconFlask,
   IconHome,
   IconLayers,
+  IconRadio,
   IconScan,
   IconServer,
   IconShield,
@@ -80,69 +94,81 @@ export type Tab =
   | "strategies"
   | "signals"
   | "trading"
+  | "paper"
   | "evidence"
+  | "learning"
+  | "analytics"
+  | "optimization"
   | "risk"
   | "system";
 
-export type MarketsSub = "scanner" | "custom" | "screener" | "charts";
-export type SignalsSub = "brief" | "alerts" | "queue";
-export type EvidenceSub = "research" | "measured" | "findings" | "backtest";
-export type TradingSub = "portfolio" | "mode";
+export type MarketsSub = "intelligence" | "scanner" | "custom" | "screener" | "charts";
+export type SignalsSub = "today" | "brief" | "alerts" | "queue" | "context";
+export type EvidenceSub = "backtest" | "workflow" | "research" | "measured" | "findings";
+export type TradingSub = "portfolio" | "control-center" | "mode";
 
 /**
  * Navigation follows the trader's loop, not the codebase's module list:
  * see the world → decide → act → track → learn → improve → maintain.
  *
- * Dashboard  = where am I
- * Markets    = what is happening
- * Strategies = what I would do about it, and whether it works
- * Signals    = what it is telling me right now
- * Trading    = what I have done
- * Evidence   = proof, out of sample
- * Risk       = how much can go wrong
- * System     = is the machinery healthy
+ * Dashboard    = where am I
+ * Markets      = what is happening
+ * Strategies   = what I would do about it, and whether it works
+ * Signals      = what it is telling me right now
+ * Trading      = what I have done
+ * Paper        = what the system is doing on its own, with my money as paper
+ * Evidence     = proof, out of sample
+ * Learning     = what the trade history says
+ * Optimization = controlled parameter adaptation with user approval
+ * Risk         = how much can go wrong
+ * System       = is the machinery healthy
+ *
+ * Paper sits beside Trading under "Act" rather than inside it, because it is a
+ * different activity: Trading is you placing orders, Paper is a deployed
+ * strategy placing them itself. The two have separate books — a paper
+ * deployment has its own capital allocation and its own P&L — so nesting one
+ * under the other would present one account as the other.
  */
-const GROUPS: { label: string; items: { id: Tab; name: string; icon: (p: { size?: number }) => ReactNode }[] }[] = [
-  {
-    label: "Observe",
-    items: [
-      { id: "dashboard", name: "Dashboard", icon: IconHome },
-      { id: "watchlist", name: "Watchlist", icon: ListChecks },
-      { id: "markets", name: "Markets", icon: IconScan },
-    ],
-  },
-  {
-    label: "Decide",
-    items: [
-      { id: "strategies", name: "Strategies", icon: IconLayers },
-      { id: "signals", name: "Signals", icon: IconBell },
-    ],
-  },
-  {
-    label: "Act",
-    items: [{ id: "trading", name: "Trading", icon: IconBrief }],
-  },
-  {
-    label: "Learn",
-    items: [{ id: "evidence", name: "Evidence", icon: IconFlask }],
-  },
-  {
-    label: "Maintain",
-    items: [
-      { id: "risk", name: "Risk", icon: IconShield },
-      { id: "system", name: "System", icon: IconServer },
-    ],
-  },
+type NavItem = { id: Tab; name: string; icon: (p: { size?: number }) => ReactNode };
+
+/**
+ * Five pages carry the daily loop: how am I, what should I look at, what is the market
+ * doing, what am I following, what do I hold. Everything else is the machinery behind
+ * that (building and proving strategies, running them on paper, reviewing, limits,
+ * plumbing) and lives under "More" so the rail is not thirteen items long. The command
+ * palette still reaches every page.
+ */
+const PRIMARY: NavItem[] = [
+  { id: "dashboard", name: "Dashboard", icon: IconHome },
+  { id: "signals", name: "Signals", icon: IconBell },
+  { id: "markets", name: "Markets", icon: IconScan },
+  { id: "watchlist", name: "Watchlist", icon: ListChecks },
+  { id: "trading", name: "Trading", icon: IconBrief },
+];
+
+const MORE: NavItem[] = [
+  { id: "strategies", name: "Strategies", icon: IconLayers },
+  { id: "paper", name: "Paper", icon: IconRadio },
+  { id: "evidence", name: "Evidence", icon: IconFlask },
+  { id: "learning", name: "Learning", icon: IconBrain },
+  { id: "analytics", name: "Attribution", icon: IconAttribution },
+  { id: "optimization", name: "Optimization", icon: SlidersHorizontal },
+  { id: "risk", name: "Risk", icon: IconShield },
+  { id: "system", name: "System", icon: IconServer },
 ];
 
 const TITLES: Record<Tab, { title: string; sub: string }> = {
   dashboard: { title: "Dashboard", sub: "Where you stand right now" },
   watchlist: { title: "Watchlist", sub: "Your own symbols, your own columns" },
-  markets: { title: "Markets", sub: "Scanner and charts across 2600+ NSE names" },
+  markets: { title: "Markets", sub: "How the market is doing, plus scans and charts" },
   strategies: { title: "Strategies", sub: "What the system would do, and whether it has earned trust" },
-  signals: { title: "Signals", sub: "Buy & sell triggers, quantitative rules, and the morning brief" },
+  signals: { title: "Signals", sub: "What the market is doing and what is worth your attention" },
   trading: { title: "Trading", sub: "Positions, holdings, margin, order book — and what mode you are in" },
+  paper: { title: "Paper", sub: "Deploy a strategy version, watch it trade, and stop it" },
   evidence: { title: "Evidence", sub: "Proof on prices the strategy has never seen" },
+  learning: { title: "Learning", sub: "What the trade history says — findings only, never changes" },
+  analytics: { title: "Attribution", sub: "What happened to each closed trade, why, and how well it was executed" },
+  optimization: { title: "Optimization", sub: "Controlled adaptation, walk-forward OOS gating & robustness plateaus" },
   risk: { title: "Risk", sub: "Live limits, exposure and the kill switch" },
   system: { title: "System", sub: "History cache, contract files, broker session" },
 };
@@ -163,7 +189,11 @@ const VALID_TABS = new Set<Tab>([
   "strategies",
   "signals",
   "trading",
+  "paper",
   "evidence",
+  "learning",
+  "analytics",
+  "optimization",
   "risk",
   "system",
 ]);
@@ -180,6 +210,11 @@ const LEGACY_TABS: Record<string, Tab> = {
   portfolio: "trading",
   research: "evidence",
   backtest: "evidence",
+  // Anything that used to mean "a strategy running by itself" now belongs to
+  // Paper rather than to Trading, which is a different book.
+  deployments: "paper",
+  deployment: "paper",
+  live: "paper",
 };
 
 /**
@@ -233,12 +268,14 @@ function MarketsTabContainer({
         value={sub}
         onChange={onSubChange}
         options={[
+          { id: "intelligence" as MarketsSub, label: "Intelligence" },
           { id: "scanner" as MarketsSub, label: "Momentum scan" },
           { id: "custom" as MarketsSub, label: "Custom scan" },
           { id: "screener" as MarketsSub, label: "Screener" },
           { id: "charts" as MarketsSub, label: "Charts" },
         ]}
       />
+      {sub === "intelligence" && <MarketIntelligencePanel />}
       {sub === "scanner" && <ScannerPanel onOpenChart={onOpenChart} />}
       {sub === "custom" && <CustomScannerPanel onOpenChart={onOpenChart} />}
       {sub === "screener" && <ScreenerPanel onOpenChart={onOpenChart} />}
@@ -263,14 +300,18 @@ function SignalsTabContainer({
         value={sub}
         onChange={onSubChange}
         options={[
-          { id: "brief" as SignalsSub, label: "Morning brief" },
-          { id: "alerts" as SignalsSub, label: "Alerts" },
+          { id: "today" as SignalsSub, label: "Today" },
           { id: "queue" as SignalsSub, label: "Trade queue" },
+          { id: "alerts" as SignalsSub, label: "Alerts" },
+          { id: "brief" as SignalsSub, label: "Morning brief" },
+          { id: "context" as SignalsSub, label: "Signal context" },
         ]}
       />
-      {sub === "brief" && <NotificationsPanel onOpenChart={() => onOpenChart("")} />}
+      {sub === "today" && <TodayPanel onOpenChart={onOpenChart} />}
+      {sub === "brief" && <BriefingPanel />}
       {sub === "alerts" && <AlertsPanel onOpenChart={onOpenChart} />}
       {sub === "queue" && <TradeSignalsPanel onOpenChart={onOpenChart} />}
+      {sub === "context" && <SignalExplorerPanel />}
     </div>
   );
 }
@@ -289,10 +330,12 @@ function TradingTabContainer({
         value={sub}
         onChange={onSubChange}
         options={[
+          { id: "control-center" as TradingSub, label: "Portfolio Control Center" },
           { id: "portfolio" as TradingSub, label: "Positions & orders" },
           { id: "mode" as TradingSub, label: "Execution mode" },
         ]}
       />
+      {sub === "control-center" && <PortfolioControlCenter />}
       {sub === "portfolio" && <PortfolioPanel />}
       {sub === "mode" && <ExecutionModePanel />}
     </div>
@@ -314,16 +357,18 @@ function EvidenceTabContainer({
         value={sub}
         onChange={onSubChange}
         options={[
+          { id: "backtest" as EvidenceSub, label: "Backtest workflow" },
           { id: "research" as EvidenceSub, label: "Walk-forward harness" },
           { id: "measured" as EvidenceSub, label: "Measured results" },
           { id: "findings" as EvidenceSub, label: "Findings & verdicts" },
-          { id: "backtest" as EvidenceSub, label: "In-sample backtest" },
+          { id: "workflow" as EvidenceSub, label: "Legacy backtest" },
         ]}
       />
+      {sub === "backtest" && <BacktestWorkflowPanel />}
       {sub === "research" && <ResearchPanel forcedTab={researchTab} onTabChange={setResearchTab} />}
       {sub === "measured" && <ResearchPanel forcedTab="measured" onTabChange={setResearchTab} />}
       {sub === "findings" && <EvidencePanel />}
-      {sub === "backtest" && <BacktestPanel />}
+      {sub === "workflow" && <BacktestPanel />}
     </div>
   );
 }
@@ -362,13 +407,13 @@ export default function App() {
   const initial = getInitialRoute();
   const [tab, setTabState] = useState<Tab>(initial.tab);
   const [marketsSub, setMarketsSub] = useState<MarketsSub>(
-    (initial.sub as MarketsSub) ?? "scanner",
+    (initial.sub as MarketsSub) ?? "intelligence",
   );
   const [signalsSub, setSignalsSub] = useState<SignalsSub>(
-    (initial.sub as SignalsSub) ?? "brief",
+    (initial.sub as SignalsSub) ?? "today",
   );
   const [evidenceSub, setEvidenceSub] = useState<EvidenceSub>(
-    (initial.sub as EvidenceSub) ?? "research",
+    (initial.sub as EvidenceSub) ?? "backtest",
   );
   const [tradingSub, setTradingSub] = useState<TradingSub>(
     (initial.sub as TradingSub) ?? "portfolio",
@@ -481,6 +526,23 @@ export default function App() {
   const dbUp = health?.database === true;
   const accountInitials = (principal?.display_name || principal?.username || "?").slice(0, 2);
   const [showLogin, setShowLogin] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(() => {
+    try {
+      return localStorage.getItem("atr.sidebar.more") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const moreVisible = moreOpen || MORE.some((i) => i.id === tab);
+  const toggleMore = () => {
+    const next = !moreVisible;
+    setMoreOpen(next);
+    try {
+      localStorage.setItem("atr.sidebar.more", next ? "1" : "0");
+    } catch {
+      // remembering the choice is a convenience
+    }
+  };
   const prompted = useRef(false);
 
   useEffect(() => {
@@ -502,9 +564,11 @@ export default function App() {
       { id: "go-strategies", label: "Go to Strategies", group: "Navigate", icon: BarChart3, hint: "4", keywords: ["registry", "validated", "paper", "models"], onSelect: () => setTab("strategies") },
       { id: "go-signals", label: "Go to Signals", group: "Navigate", icon: Bell, hint: "5", keywords: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning"], onSelect: () => setTab("signals") },
       { id: "go-trading", label: "Go to Trading", group: "Navigate", icon: Briefcase, hint: "6", keywords: ["portfolio", "holdings", "positions", "limits", "order book", "trade book"], onSelect: () => setTab("trading") },
-      { id: "go-evidence", label: "Go to Evidence (walk-forward)", group: "Navigate", icon: FlaskConical, hint: "7", keywords: ["research", "validate", "out of sample", "deflated sharpe", "backtest", "measured"], onSelect: () => setTab("evidence") },
-      { id: "go-risk", label: "Go to Risk", group: "Navigate", icon: ShieldAlert, hint: "8", keywords: ["kill switch", "limits", "exposure", "halt", "stop"], onSelect: () => setTab("risk") },
-      { id: "go-system", label: "Go to System", group: "Navigate", icon: Server, hint: "9", keywords: ["cache", "contracts", "session", "health", "history"], onSelect: () => setTab("system") },
+      { id: "go-paper", label: "Go to Paper", group: "Navigate", icon: Radio, hint: "7", keywords: ["deploy", "deployment", "paper trading", "simulate", "monitor", "strategy running", "pause", "stop", "reset", "capital"], onSelect: () => setTab("paper") },
+      { id: "go-evidence", label: "Go to Evidence (walk-forward)", group: "Navigate", icon: FlaskConical, hint: "8", keywords: ["research", "validate", "out of sample", "deflated sharpe", "backtest", "measured"], onSelect: () => setTab("evidence") },
+      { id: "go-optimization", label: "Go to Strategy Optimization", group: "Navigate", icon: SlidersHorizontal, hint: "opt", keywords: ["optimization", "adaptive", "parameters", "walk-forward", "robustness", "recommendation"], onSelect: () => setTab("optimization") },
+      { id: "go-risk", label: "Go to Risk", group: "Navigate", icon: ShieldAlert, hint: "9", keywords: ["kill switch", "limits", "exposure", "halt", "stop"], onSelect: () => setTab("risk") },
+      { id: "go-system", label: "Go to System", group: "Navigate", icon: Server, hint: "0", keywords: ["cache", "contracts", "session", "health", "history"], onSelect: () => setTab("system") },
       { id: "toggle-theme", label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", group: "View", icon: Palette, keywords: ["appearance"], onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
       { id: "login", label: "Log in with IIFL", group: "Session", icon: LogIn, keywords: ["auth", "session", "broker"], onSelect: () => setShowLogin(true) },
       { id: "sign-out", label: "Sign out of ATR", group: "Session", icon: LogOut, keywords: ["logout", "account", "leave", "end session"], onSelect: () => void signOut() },
@@ -559,20 +623,36 @@ export default function App() {
         </AnimatedSidebarHeader>
 
         <AnimatedSidebarContent className="px-2 pt-1">
-          {GROUPS.map((g) => (
-            <AnimatedSidebarGroup key={g.label} className="pb-2">
-              <AnimatedSidebarGroupLabel className="group-data-[state=collapsed]/sidebar:hidden">
-                {g.label}
-              </AnimatedSidebarGroupLabel>
-              <AnimatedSidebarGroupContent>
-                <AnimatedSidebarMenu>
-                  {g.items.map((it) => {
+          <AnimatedSidebarGroup className="pb-2">
+            <AnimatedSidebarGroupContent>
+              <AnimatedSidebarMenu>
+                {[...PRIMARY].map((it) => {
+                  const Icon = it.icon;
+                  return (
+                    <AnimatedSidebarMenuItem key={it.id}>
+                      <AnimatedSidebarMenuButton
+                        isActive={tab === it.id}
+                        icon={<Icon size={16} />}
+                        onSelect={() => setTab(it.id)}
+                      >
+                        {it.name}
+                      </AnimatedSidebarMenuButton>
+                    </AnimatedSidebarMenuItem>
+                  );
+                })}
+                <AnimatedSidebarMenuItem>
+                  <AnimatedSidebarMenuButton icon={<Ellipsis size={16} />} onSelect={toggleMore}>
+                    {moreVisible ? "Less" : "More"}
+                  </AnimatedSidebarMenuButton>
+                </AnimatedSidebarMenuItem>
+                {moreVisible &&
+                  MORE.map((it) => {
                     const Icon = it.icon;
                     return (
                       <AnimatedSidebarMenuItem key={it.id}>
                         <AnimatedSidebarMenuButton
                           isActive={tab === it.id}
-                          icon={<Icon />}
+                          icon={<Icon size={16} />}
                           onSelect={() => setTab(it.id)}
                         >
                           {it.name}
@@ -580,17 +660,16 @@ export default function App() {
                       </AnimatedSidebarMenuItem>
                     );
                   })}
-                </AnimatedSidebarMenu>
-              </AnimatedSidebarGroupContent>
-            </AnimatedSidebarGroup>
-          ))}
+              </AnimatedSidebarMenu>
+            </AnimatedSidebarGroupContent>
+          </AnimatedSidebarGroup>
         </AnimatedSidebarContent>
 
         <AnimatedSidebarFooter className="gap-3 border-none p-3">
           {/* Who is signed in. Distinct from the broker session below it: this is
               the platform account (what you may change), that is the IIFL session
               (what you may trade). Both matter, neither implies the other. */}
-          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1 group-data-[state=collapsed]/sidebar:justify-center">
+          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1">
             <span
               title={`${principal?.username ?? "?"} · ${principal?.role ?? ""}`}
               className={cn(
@@ -613,13 +692,13 @@ export default function App() {
               onClick={() => void signOut()}
               title="Sign out of ATR"
               aria-label="Sign out of ATR"
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-data-[state=collapsed]/sidebar:hidden"
             >
               <LogOut aria-hidden="true" className="size-4" />
             </button>
           </div>
 
-          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1 group-data-[state=collapsed]/sidebar:justify-center">
+          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1">
             <span
               className={cn(
                 "grid size-9 shrink-0 place-items-center rounded-full text-[10px] font-bold group-data-[state=collapsed]/sidebar:hidden",
@@ -742,9 +821,13 @@ export default function App() {
         {tab === "trading" && (
           <TradingTabContainer sub={tradingSub} onSubChange={(s) => setTab("trading", s)} />
         )}
+        {tab === "paper" && <PaperDeploymentPanel />}
         {tab === "evidence" && (
           <EvidenceTabContainer sub={evidenceSub} onSubChange={(s) => setTab("evidence", s)} />
         )}
+        {tab === "learning" && <LearningPanel />}
+        {tab === "analytics" && <AnalyticsPanel />}
+        {tab === "optimization" && <OptimizationPanel />}
         {tab === "risk" && <RiskPanel />}
         {tab === "system" && <SystemPanel />}
         </main>
