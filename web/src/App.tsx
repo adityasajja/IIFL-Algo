@@ -358,11 +358,11 @@ function EvidenceTabContainer({
         value={sub}
         onChange={onSubChange}
         options={[
-          { id: "backtest" as EvidenceSub, label: "Backtest workflow" },
-          { id: "research" as EvidenceSub, label: "Walk-forward harness" },
-          { id: "measured" as EvidenceSub, label: "Measured results" },
-          { id: "findings" as EvidenceSub, label: "Findings & verdicts" },
-          { id: "workflow" as EvidenceSub, label: "Legacy backtest" },
+          { id: "backtest" as EvidenceSub, label: "Backtest" },
+          { id: "research" as EvidenceSub, label: "Walk-forward" },
+          { id: "measured" as EvidenceSub, label: "Results" },
+          { id: "findings" as EvidenceSub, label: "Findings" },
+          { id: "workflow" as EvidenceSub, label: "Older backtest" },
         ]}
       />
       {sub === "backtest" && <BacktestWorkflowPanel />}

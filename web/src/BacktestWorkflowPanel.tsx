@@ -481,7 +481,6 @@ function ConfigForm({
       <Card>
         <CardHeader
           title="Configure the run"
-          sub="Everything here is stored with the run, so it can be replayed exactly."
         />
         <div className="space-y-4 p-5 pt-3">
           {/* 1 — strategy and version */}
@@ -513,9 +512,9 @@ function ConfigForm({
                 label="Version"
                 hint={
                   selected?.kind === "builtin"
-                    ? "built-ins are not versioned"
+                    ? undefined
                     : (selected?.versions.length ?? 0) === 0
-                      ? "this saved strategy has no versions yet"
+                      ? "no versions saved yet"
                       : undefined
                 }
               >
@@ -542,11 +541,8 @@ function ConfigForm({
             {selected && (
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px]">
                 <Badge tone={selected.kind === "saved" ? "good" : "flat"}>
-                  {selected.kind === "saved" ? "saved strategy" : "built-in engine"}
+                  {selected.kind === "saved" ? "Saved" : "Built-in"}
                 </Badge>
-                {selected.key && (
-                  <span className="font-mono text-muted-foreground">{selected.key}</span>
-                )}
                 {selected.description && (
                   <span className="text-muted-foreground">{selected.description}</span>
                 )}
@@ -557,7 +553,7 @@ function ConfigForm({
           {/* 2 — what to run over */}
           <Section n={2} title="Universe & window">
             <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Universe" hint="or type symbols below">
+              <Field label="Universe">
                 <Select
                   value={form.universe}
                   onChange={(v) => set("universe", v)}
@@ -677,13 +673,13 @@ function ConfigForm({
                 />
               )}
 
-              <Field label="Stop loss %" hint="blank = none">
+              <Field label="Stop loss %">
                 <Input value={form.stopLoss} onChange={(v) => set("stopLoss", v)} />
               </Field>
-              <Field label="Target %" hint="blank = none">
+              <Field label="Target %">
                 <Input value={form.takeProfit} onChange={(v) => set("takeProfit", v)} />
               </Field>
-              <Field label="Trailing stop %" hint="ratchets from the high-water mark">
+              <Field label="Trailing stop %">
                 <Input value={form.trailingStop} onChange={(v) => set("trailingStop", v)} />
               </Field>
             </div>
@@ -757,10 +753,6 @@ function ConfigForm({
                 </>
               )}
             </Button>
-            <Hint>
-              Returns a run id immediately and executes on a worker — the page polls
-              for progress rather than holding the request open.
-            </Hint>
           </div>
         </div>
       </Card>
@@ -794,8 +786,7 @@ function Section({
           {n}
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold">{title}</div>
-          {note && <div className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">{note}</div>}
+          <div className="text-[13px] font-semibold" title={note}>{title}</div>
         </div>
       </div>
       {children}
