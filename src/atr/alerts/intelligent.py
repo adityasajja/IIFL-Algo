@@ -110,7 +110,6 @@ def evaluate_stock_signals(
     last_rsi = round(float(rsi_vals.iloc[-1]), 1) if not rsi_vals.empty else 50.0
 
     last_s20 = float(s20.iloc[-1]) if not s20.empty else last
-    last_s50 = float(s50.iloc[-1]) if not s50.empty else last
     prev_s20 = float(s20.iloc[-2]) if len(s20) > 1 else last_s20
 
     # -----------------

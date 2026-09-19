@@ -279,7 +279,6 @@ class MarketIntelService:
         # Benchmark metrics
         nifty_close = 0.0
         nifty_1d_pct = 0.0
-        nifty_1w_pct = 0.0
         nifty_1m_pct = 0.0
         nifty_trend_pct = 0.0
         nifty_above_ema20 = True
@@ -292,8 +291,6 @@ class MarketIntelService:
             nifty_close = float(b_closes.iloc[-1])
             if len(b_closes) >= 2:
                 nifty_1d_pct = float((nifty_close / b_closes.iloc[-2] - 1.0) * 100.0)
-            if len(b_closes) >= 5:
-                nifty_1w_pct = float((nifty_close / b_closes.iloc[-5] - 1.0) * 100.0)
             if len(b_closes) >= 22:
                 nifty_1m_pct = float((nifty_close / b_closes.iloc[-22] - 1.0) * 100.0)
 

@@ -280,7 +280,6 @@ def evaluate_robustness(
 
     metrics_by_value: dict[str, dict[str, float]] = {}
     peak_sharpe = -np.inf
-    peak_val = proposed_val
 
     for v in tested_values:
         cand_def = apply_parameter_to_definition(
@@ -297,7 +296,6 @@ def evaluate_robustness(
             }
             if m.sharpe > peak_sharpe:
                 peak_sharpe = m.sharpe
-                peak_val = v
         except Exception:
             metrics_by_value[str(v)] = {
                 "sharpe": 0.0,

@@ -563,7 +563,7 @@ def evaluate_sehgal_low_vol_anomaly(
     touch_s20 = (float(lows.iloc[-1]) <= s20 * 1.01 and last_close >= s20 * 0.99)
     if vol_30 < 0.28 and last_close > s50 and touch_s20:
         stop = round(s20 - 1.0 * atr_val, 2)
-        risk = max(last_price_val := last_close - stop, 0.01)
+        risk = max(last_close - stop, 0.01)
         target = round(last_close + 2.0 * risk, 2)
         rr = round((target - last_close) / risk, 2)
 

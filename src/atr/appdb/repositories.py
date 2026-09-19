@@ -42,6 +42,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from loguru import logger
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session

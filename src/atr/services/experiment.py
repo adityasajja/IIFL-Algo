@@ -284,7 +284,6 @@ class StrategyExperimentService:
 
         baseline_def = exp["baseline_definition"]
         candidate_def = exp["candidate_definition"]
-        strategy_id = exp["strategy_id"]
 
         try:
             # 1. Evaluate Baseline Backtest

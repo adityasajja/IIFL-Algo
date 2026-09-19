@@ -180,7 +180,6 @@ class SelfLearningEngine:
             scored += 1
             last = float(df["close"].iloc[-1])
             s20 = float(df["close"].rolling(20).mean().iloc[-1])
-            s50 = float(df["close"].rolling(50).mean().iloc[-1]) if len(df) >= 50 else s20
 
             if last > s20:
                 uptrend += 1
