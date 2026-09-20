@@ -1043,6 +1043,36 @@ export interface PnlMonth {
   unpriced?: string[];
 }
 
+export interface PnlDayRow {
+  symbol: string;
+  pnl: number;
+  // Paper trades
+  source?: string;
+  side?: string | null;
+  quantity?: number | null;
+  entry?: number | null;
+  exit?: number | null;
+  pnl_pct?: number | null;
+  note?: string | null;
+  // Real holdings
+  previous_close?: number;
+  close?: number;
+  change_pct?: number;
+}
+
+export interface PnlDayDetail {
+  scope: "paper" | "real";
+  date: string;
+  rows: PnlDayRow[];
+  total: number;
+  gainers: number;
+  losers: number;
+  unpriced: string[];
+}
+
+export const getPnlDay = (scope: "paper" | "real", date: string) =>
+  req<PnlDayDetail>(`/pnl/day?scope=${scope}&date=${date}`);
+
 export const getPnlCalendar = (scope: "paper" | "real", month?: string) =>
   req<PnlMonth>(`/pnl/calendar?scope=${scope}${month ? `&month=${month}` : ""}`);
 
