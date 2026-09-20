@@ -25,6 +25,10 @@ class DailyJob:
     run: Callable[[], Any]
     at: tuple[int, int] = (2, 0)  # local hour and minute after which it is due
     weekdays_only: bool = False
+    #: A job that fails is tried again this many times, this many minutes apart, the same day.
+    #: For jobs that depend on something outside the app, like a broker login being live.
+    retries: int = 0
+    retry_minutes: int = 30
 
 
 class JobStore:
@@ -48,6 +52,8 @@ def is_due(job: DailyJob, state: dict[str, Any], now: datetime) -> bool:
     if job.weekdays_only and now.weekday() >= 5:
         return False
     if state.get("ran_on") == now.date().isoformat():
+        if state.get("ok") is False and state.get("attempts", 1) <= job.retries:
+            return now - datetime.fromisoformat(state["at"]) >= timedelta(minutes=job.retry_minutes)
         return False
     return (now.hour, now.minute) >= job.at
 
@@ -57,7 +63,9 @@ def run_if_due(job: DailyJob, store: JobStore, now: datetime | None = None) -> b
     now = now or datetime.now()
     if not is_due(job, store.read(job.name), now):
         return False
-    state: dict[str, Any] = {"ran_on": now.date().isoformat(), "at": now.isoformat(timespec="seconds")}
+    before = store.read(job.name)
+    attempts = before.get("attempts", 0) + 1 if before.get("ran_on") == now.date().isoformat() else 1
+    state: dict[str, Any] = {"ran_on": now.date().isoformat(), "at": now.isoformat(timespec="seconds"), "attempts": attempts}
     try:
         job.run()
         state["ok"] = True
