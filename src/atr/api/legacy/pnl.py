@@ -36,3 +36,22 @@ def pnl_calendar_month(
         view["holdings_source"] = held["source"]
         view["unpriced"] = pnl_calendar.unpriced_holdings(DATA_ROOT, held["holdings"])
     return view
+
+
+@router.get("/pnl/day", dependencies=[Depends(get_principal)])
+def pnl_day(
+    scope: Literal["paper", "real"],
+    day: str = Query(..., alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+) -> dict[str, Any]:
+    """What is behind one calendar day: the trades that closed (paper) or the holdings that moved (real)."""
+    try:
+        date.fromisoformat(day)
+    except ValueError as exc:
+        raise HTTPException(400, "date must be a real YYYY-MM-DD") from exc
+    if scope == "paper":
+        rows = pnl_calendar.paper_day_detail(DATA_ROOT, day)
+        return {"scope": scope, "date": day, "rows": rows, "total": round(sum(r["pnl"] for r in rows), 2),
+                "gainers": sum(1 for r in rows if r["pnl"] > 0), "losers": sum(1 for r in rows if r["pnl"] < 0), "unpriced": []}
+    held = load_holdings(DATA_ROOT)
+    detail = pnl_calendar.real_day_detail(DATA_ROOT, held["holdings"], day)
+    return {"scope": scope, "date": day, **detail, "holdings_source": held["source"]}
