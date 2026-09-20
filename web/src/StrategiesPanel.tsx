@@ -1,4 +1,4 @@
-import { AlertTriangle, Plus, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, Play, Plus, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   createSavedStrategy,
@@ -6,8 +6,9 @@ import {
   listDeployments,
   listSavedStrategies,
   removeSavedStrategy,
+  createDeployment,
+  startDeployment,
   listStrategyVersions,
-  validateStrategy,
   type SavedStrategy,
   type StrategyValidation,
   type StrategyVersion,
@@ -51,6 +52,7 @@ export default function StrategiesPanel({
   // was noise; the engines still exist for backtests and the Evidence page.
   return (
     <Authoring
+      onOpenPaper={onOpenPaper}
       tiles={<StrategyTiles running={running} onOpenPaper={onOpenPaper} />}
     />
   );
@@ -70,14 +72,32 @@ function readable(e: unknown): string {
   return raw;
 }
 
-function Authoring({ tiles }: { tiles: React.ReactNode }) {
+/** The rules a person fills in, turned into the stored definition (same shape the engine reads). */
+function buildDefinition(r: { lookback: string; volume: string; stop: string; target: string }) {
+  const lookback = Number(r.lookback);
+  const volume = Number(r.volume);
+  const stop = Number(r.stop);
+  const target = Number(r.target);
+  const entry = { breakout_lookback: lookback, breakout_proximity_pct: 2.0, volume_multiple: volume, volume_lookback: lookback, min_history_bars: 60 };
+  const exit = { stop_loss_pct: stop, take_profit_pct: target, trailing_stop_pct: null, trend_sma: 0, trend_confirm_bars: 3, rsi_overbought: null, min_history_bars: 60 };
+  return {
+    rules: { entry, exit },
+    engine_key: "signals_entry",
+    params: { ...entry, ...exit, lookback: 120, allocation: 0.1, max_positions: 5 },
+  };
+}
+
+function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper: () => void }) {
   const [saved, setSaved] = useState<SavedStrategy[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [versions, setVersions] = useState<StrategyVersion[]>([]);
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [rules, setRules] = useState({ lookback: "20", volume: "1.5", stop: "5", target: "10" });
+  const [runFor, setRunFor] = useState<number | null>(null);
+  const [stocks, setStocks] = useState("");
+  const [capital, setCapital] = useState("500000");
   const [report, setReport] = useState<StrategyValidation | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,12 +141,6 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
     } finally {
       setBusy(null);
     }
-  };
-
-  const parsedDraft = (): unknown => {
-    const text = draft.trim();
-    if (!text) return null;
-    return JSON.parse(text) as unknown;
   };
 
   const current = saved.find((s) => s.strategy_id === selected) ?? null;
@@ -205,7 +219,7 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={() => setEditing((v) => !v)} className={ghost}>
-                      {editing ? "Close editor" : "Edit rules"}
+                      {editing ? "Close" : "Set rules"}
                     </button>
                     <button
                       type="button"
@@ -235,9 +249,17 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
                         )}
                         {v.change_note && <div className="mt-0.5 text-xs text-muted-foreground">{v.change_note}</div>}
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        <RelativeTime value={v.created_at} absolute={false} className="text-muted-foreground" />
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-muted-foreground">
+                          <RelativeTime value={v.created_at} absolute={false} className="text-muted-foreground" />
+                        </span>
+                        {v.deployable && (
+                          <button type="button" onClick={() => setRunFor(v.version)} className={ghost}>
+                            <Play className="h-3 w-3" />
+                            Run on paper
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {versions.length === 0 && (
@@ -245,53 +267,96 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
                   )}
                 </div>
 
-                {editing ? (
-                  <div className="space-y-3 border-t border-border p-4">
-                    <textarea
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      rows={8}
-                      spellCheck={false}
-                      placeholder={'{\n  "rules": {\n    "entry": { "breakout_lookback": 20, "min_history_bars": 60 },\n    "exit": { "stop_loss_pct": 5.0, "take_profit_pct": 10.0 }\n  }\n}'}
-                      className="w-full rounded-xl border border-border bg-transparent px-3 py-2 font-mono text-[11.5px] leading-relaxed outline-none focus:border-primary/50"
+                {runFor !== null && (
+                  <div className="space-y-2 border-t border-border p-4">
+                    <input
+                      autoFocus
+                      value={stocks}
+                      onChange={(e) => setStocks(e.target.value)}
+                      placeholder="Stocks, e.g. RELIANCE, TCS, INFY"
+                      className="w-full rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
                     />
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        Practice money ₹
+                        <input
+                          value={capital}
+                          onChange={(e) => setCapital(e.target.value)}
+                          inputMode="numeric"
+                          className="w-28 rounded-full border border-border bg-transparent px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary/50"
+                        />
+                      </label>
                       <button
                         type="button"
-                        disabled={busy !== null || !selected}
-                        title="Checks that the rules will run. It does not say whether they make money."
+                        disabled={busy !== null || !stocks.trim() || !Number(capital)}
                         onClick={() =>
-                          run("validate", async () => {
-                            const body = draft.trim() ? { definition: parsedDraft() } : { version: null };
-                            setReport(await validateStrategy(selected as string, body));
-                          })
-                        }
-                        className={ghost}
-                      >
-                        <ShieldCheck className="h-3 w-3" />
-                        {busy === "validate" ? "Checking…" : "Check rules"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy !== null || !selected || !draft.trim()}
-                        title="Saves a new version. A saved version can't be edited later."
-                        onClick={() =>
-                          run("version", async () => {
-                            const created = await createStrategyVersion(selected as string, {
-                              definition: parsedDraft(),
+                          run("paper", async () => {
+                            const symbols = stocks.split(/[\s,]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+                            const made = await createDeployment({
+                              strategy_id: selected as string,
+                              strategy_version: runFor,
+                              capital: Number(capital),
+                              mode: "PAPER",
+                              config: { symbols, exchange: "NSEEQ", timeframe: "1d", max_open_positions: 10 },
                             });
-                            setReport(created.validation);
-                            setNotice(`Saved version ${created.version}.`);
-                            setDraft("");
-                            await pick(selected as string);
+                            await startDeployment(made.deployment_id);
+                            setRunFor(null);
+                            onOpenPaper();
                           })
                         }
                         className={ghost}
                       >
-                        <Plus className="h-3 w-3" />
-                        {busy === "version" ? "Saving…" : "Save as new version"}
+                        {busy === "paper" ? "Starting…" : "Start"}
+                      </button>
+                      <button type="button" onClick={() => setRunFor(null)} className={cn(ghost, "text-muted-foreground")}>
+                        Cancel
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {editing ? (
+                  <div className="space-y-3 border-t border-border p-4">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {(
+                        [
+                          ["lookback", "Buy a breakout over (days)"],
+                          ["volume", "Volume times normal"],
+                          ["stop", "Stop loss %"],
+                          ["target", "Take profit %"],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <label key={key} className="space-y-1 text-xs text-muted-foreground">
+                          {label}
+                          <input
+                            value={rules[key]}
+                            onChange={(e) => setRules({ ...rules, [key]: e.target.value })}
+                            inputMode="decimal"
+                            className="w-full rounded-xl border border-border bg-transparent px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy !== null || !selected || Object.values(rules).some((x) => !Number(x))}
+                      title="Saves these rules as a new version. A saved version can't be edited later."
+                      onClick={() =>
+                        run("version", async () => {
+                          const created = await createStrategyVersion(selected as string, {
+                            definition: buildDefinition(rules),
+                          });
+                          setReport(created.validation);
+                          setNotice(`Saved version ${created.version}.`);
+                          setEditing(false);
+                          await pick(selected as string);
+                        })
+                      }
+                      className={ghost}
+                    >
+                      <Plus className="h-3 w-3" />
+                      {busy === "version" ? "Saving…" : "Save rules"}
+                    </button>
                   </div>
                 ) : null}
               </div>
@@ -335,7 +400,7 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
                     setName("");
                     setAbout("");
                     setCreating(false);
-                    setNotice(`Created “${row.name}”. Add its rules to make it deployable.`);
+                    setNotice(`Created “${row.name}”. Set its rules, then run it on paper.`);
                     await refresh(row.strategy_id);
                     setEditing(true);
                   })
