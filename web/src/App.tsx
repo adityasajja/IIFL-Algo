@@ -534,9 +534,12 @@ export default function App() {
       return false;
     }
   });
-  const moreVisible = moreOpen || MORE.some((i) => i.id === tab);
+  // The list is open or closed as the person chose. The old rule also held it open whenever
+  // the current page belonged to it, so "Less" did nothing while you were on, say, System.
+  // Folded, it still shows the page you are on, so you can tell where you are.
+  const shownMore = moreOpen ? MORE : MORE.filter((i) => i.id === tab);
   const toggleMore = () => {
-    const next = !moreVisible;
+    const next = !moreOpen;
     setMoreOpen(next);
     try {
       localStorage.setItem("atr.sidebar.more", next ? "1" : "0");
@@ -651,24 +654,23 @@ export default function App() {
                 })}
                 <AnimatedSidebarMenuItem>
                   <AnimatedSidebarMenuButton icon={<Ellipsis size={16} />} onSelect={toggleMore}>
-                    {moreVisible ? "Less" : "More"}
+                    {moreOpen ? "Less" : "More"}
                   </AnimatedSidebarMenuButton>
                 </AnimatedSidebarMenuItem>
-                {moreVisible &&
-                  MORE.map((it) => {
-                    const Icon = it.icon;
-                    return (
-                      <AnimatedSidebarMenuItem key={it.id}>
-                        <AnimatedSidebarMenuButton
-                          isActive={tab === it.id}
-                          icon={<Icon size={16} />}
-                          onSelect={() => setTab(it.id)}
-                        >
-                          {it.name}
-                        </AnimatedSidebarMenuButton>
-                      </AnimatedSidebarMenuItem>
-                    );
-                  })}
+                {shownMore.map((it) => {
+                  const Icon = it.icon;
+                  return (
+                    <AnimatedSidebarMenuItem key={it.id}>
+                      <AnimatedSidebarMenuButton
+                        isActive={tab === it.id}
+                        icon={<Icon size={16} />}
+                        onSelect={() => setTab(it.id)}
+                      >
+                        {it.name}
+                      </AnimatedSidebarMenuButton>
+                    </AnimatedSidebarMenuItem>
+                  );
+                })}
               </AnimatedSidebarMenu>
             </AnimatedSidebarGroupContent>
           </AnimatedSidebarGroup>
