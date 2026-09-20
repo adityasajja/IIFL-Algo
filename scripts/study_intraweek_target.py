@@ -71,22 +71,26 @@ def simulate(w: pd.DataFrame, stop: float | None) -> pd.DataFrame:
     exit_px = np.full(len(w), np.nan)
     reason = np.array([""] * len(w), dtype=object)
     live = np.ones(len(w), bool)
+    day = np.full(len(w), DAYS - 1)
     for k in range(DAYS):
         o, h, l = w[f"o{k}"].to_numpy(), w[f"h{k}"].to_numpy(), w[f"l{k}"].to_numpy()
         if k > 0:  # gaps: only possible after the entry day
             gap_up, gap_dn = live & (o >= tgt), live & (o <= stp)
             exit_px[gap_up], reason[gap_up] = o[gap_up], "target"
             exit_px[gap_dn], reason[gap_dn] = o[gap_dn], "stop"
+            day[gap_up | gap_dn] = k
             live &= ~(gap_up | gap_dn)
         hit_stop, hit_tgt = live & (l <= stp), live & (h >= tgt)
         stopped = hit_stop  # stop wins a tie: the pessimistic reading of a bar that touched both
         exit_px[stopped], reason[stopped] = stp[stopped], "stop"
         won = hit_tgt & ~stopped
         exit_px[won], reason[won] = tgt[won], "target"
+        day[stopped | won] = k
         live &= ~(stopped | won)
     exit_px[live], reason[live] = w["close_end"].to_numpy()[live], "friday"
     out = w[["symbol", "date", "rsi", "vol20", "ret5", "ret20", "dist_ema50", "dist_52w_high", "gap_open"]].copy()
     out["ret"] = exit_px / entry - 1
+    out["day"] = day  # 0 = Monday, the day of entry
     out["reason"] = reason
     return out
 
