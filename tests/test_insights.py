@@ -262,3 +262,25 @@ def test_a_locked_database_cannot_fail_the_login_check(auth_client, monkeypatch)
 
     monkeypatch.setattr(auth_service.SessionRepository, "touch", staticmethod(locked))
     assert auth_client.get("/api/v1/auth/me").status_code == 200
+
+
+def test_normalize_reads_the_field_names_the_broker_actually_uses():
+    """The broker sends nseTradingSymbol/totalQuantity/averageTradedPrice; missing these
+    once saved an empty snapshot and the page said 'no holdings on record'."""
+    rows = [{"nseTradingSymbol": "HINDALCO-EQ", "totalQuantity": 15, "averageTradedPrice": 647.72}]
+
+    assert normalize(rows) == [{"symbol": "HINDALCO-EQ", "qty": 15, "avg_price": 647.72}]
+
+
+def test_an_empty_snapshot_falls_back_to_the_saved_holdings_export(tmp_path):
+    (tmp_path / "insights").mkdir()
+    (tmp_path / "insights" / "holdings.json").write_text('{"as_of": "2026-09-19T00:00:00+00:00", "holdings": []}')
+    (tmp_path / "portfolio").mkdir()
+    (tmp_path / "portfolio" / "holdings.csv").write_text(
+        "nseTradingSymbol,totalQuantity,averageTradedPrice\nTCS-EQ,4,3100.5\n"
+    )
+
+    got = load_holdings(tmp_path)
+
+    assert got["source"] == "export"
+    assert got["holdings"] == [{"symbol": "TCS-EQ", "qty": 4, "avg_price": 3100.5}]

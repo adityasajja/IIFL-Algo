@@ -25,12 +25,16 @@ def normalize(rows: Any) -> list[dict[str, Any]]:
         rows = rows.get("result", [])
     out: list[dict[str, Any]] = []
     for h in rows or []:
-        raw = str(h.get("symbol") or h.get("TradingSymbol") or h.get("tradingSymbol") or "").strip()
+        raw = str(
+            h.get("symbol") or h.get("TradingSymbol") or h.get("tradingSymbol") or h.get("nseTradingSymbol") or ""
+        ).strip()
         if not raw:
             continue
         symbol = raw if raw.endswith("-EQ") else f"{raw}-EQ"
-        qty = int(float(h.get("qty") or h.get("TotalQty") or h.get("quantity") or 0))
-        avg = float(h.get("avg_price") or h.get("BuyAvgRate") or h.get("averagePrice") or 0)
+        qty = int(float(h.get("qty") or h.get("TotalQty") or h.get("quantity") or h.get("totalQuantity") or 0))
+        avg = float(
+            h.get("avg_price") or h.get("BuyAvgRate") or h.get("averagePrice") or h.get("averageTradedPrice") or 0
+        )
         if qty > 0:
             out.append({"symbol": symbol, "qty": qty, "avg_price": avg})
     return out
@@ -51,7 +55,29 @@ def load_holdings(data_root: Path, client: Any | None = None) -> dict[str, Any]:
     if path.exists():
         try:
             saved = json.loads(path.read_text(encoding="utf8"))
-            return {"holdings": saved.get("holdings", []), "source": "snapshot", "as_of": saved.get("as_of")}
+            if saved.get("holdings"):  # an empty snapshot says nothing, so keep looking
+                return {"holdings": saved["holdings"], "source": "snapshot", "as_of": saved.get("as_of")}
         except (OSError, ValueError):
             pass
+    exported = _from_export(data_root)
+    if exported:
+        return exported
     return {"holdings": [], "source": "none", "as_of": None}
+
+
+def _from_export(data_root: Path) -> dict[str, Any] | None:
+    """The broker's own holdings export, if one was saved to ``data/portfolio``."""
+    path = Path(data_root) / "portfolio" / "holdings.csv"
+    if not path.exists():
+        return None
+    try:
+        import pandas as pd
+
+        rows = normalize(pd.read_csv(path).to_dict("records"))
+    except Exception as exc:  # noqa: BLE001 - a bad export must not break the page
+        logger.info("holdings export unreadable: {}", exc)
+        return None
+    if not rows:
+        return None
+    as_of = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
+    return {"holdings": rows, "source": "export", "as_of": as_of}
