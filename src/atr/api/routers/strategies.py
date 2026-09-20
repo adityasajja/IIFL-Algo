@@ -137,6 +137,19 @@ def seed_example_strategy(
         raise _fail(exc) from exc
 
 
+@router.get("/universe/researched", dependencies=[_READ])
+def researched_universe() -> dict[str, Any]:
+    """The long-history stocks the strategy research was run on.
+
+    A paper run over this list trades the same names the research measured, so its
+    result can be set beside the research's.
+    """
+    from atr.research.hunt import stock_universe
+
+    symbols = stock_universe(min_bars=1500)
+    return {"symbols": symbols, "total": len(symbols)}
+
+
 @router.get("", dependencies=[_READ])
 @router.get("/", dependencies=[_READ], include_in_schema=False)
 def list_strategies(

@@ -82,3 +82,8 @@ def test_the_name_of_a_removed_strategy_can_be_used_again(auth_client):
     again = auth_client.post("/api/v1/strategies", json={"name": "ufur"})
 
     assert again.status_code == 201, again.text
+
+
+def test_the_researched_stock_list_is_offered_for_a_paper_run(auth_client):
+    body = auth_client.get("/api/v1/strategies/universe/researched").json()
+    assert body["total"] == len(body["symbols"])
