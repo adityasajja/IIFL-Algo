@@ -2023,7 +2023,13 @@ class StrategyRepository:
                 strategies.c.user_id == user_id,
                 strategies.c.archived_at.is_(None),
             )
-            .values(archived_at=now, updated_at=now)
+            .values(
+                archived_at=now,
+                updated_at=now,
+                # The name is unique per user, archived rows included. Tag it so the
+                # name can be used again.
+                name=strategies.c.name + " (removed " + strategy_id[:6] + ")",
+            )
         )
         return int(result.rowcount or 0)
 

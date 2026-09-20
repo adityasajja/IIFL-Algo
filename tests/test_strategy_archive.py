@@ -61,3 +61,13 @@ def test_removing_a_strategy_that_does_not_exist_is_a_404(auth_client):
 
 def test_removal_needs_a_signed_in_account(client):
     assert client.delete("/api/v1/strategies/anything").status_code == 401
+
+
+def test_the_name_of_a_removed_strategy_can_be_used_again(auth_client):
+    first = auth_client.post("/api/v1/strategies", json={"name": "ufur"})
+    assert first.status_code == 201, first.text
+    assert auth_client.delete(f"/api/v1/strategies/{first.json()['strategy_id']}").status_code == 200
+
+    again = auth_client.post("/api/v1/strategies", json={"name": "ufur"})
+
+    assert again.status_code == 201, again.text
