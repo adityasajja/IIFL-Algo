@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from atr.api.deps import get_principal
 from atr.insights.holdings import load_holdings
@@ -13,6 +14,12 @@ from atr.market_intel.service import DATA_ROOT
 from atr.services import pnl_calendar
 
 router = APIRouter()
+
+
+class RealisedIn(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    amount: float = Field(ge=-1e9, le=1e9, description="Profit (or loss, negative) made by trading that day, in rupees")
+    note: str = Field("", max_length=200)
 
 
 @router.get("/pnl/calendar", dependencies=[Depends(get_principal)])
@@ -55,3 +62,21 @@ def pnl_day(
     held = load_holdings(DATA_ROOT)
     detail = pnl_calendar.real_day_detail(DATA_ROOT, held["holdings"], day)
     return {"scope": scope, "date": day, **detail, "holdings_source": held["source"]}
+
+
+@router.put("/pnl/realised", dependencies=[Depends(get_principal)])
+def record_trading_profit(body: RealisedIn) -> dict[str, Any]:
+    """Record what trading made (or lost) on a day. Replaces any earlier entry for that day."""
+    try:
+        day = date.fromisoformat(body.date)
+    except ValueError as exc:
+        raise HTTPException(400, "date must be a real YYYY-MM-DD") from exc
+    if day > date.today():
+        raise HTTPException(400, "that day has not happened yet")
+    pnl_calendar.set_realised(DATA_ROOT, body.date, body.amount, note=body.note)
+    return {"date": body.date, "amount": body.amount}
+
+
+@router.delete("/pnl/realised", dependencies=[Depends(get_principal)])
+def remove_trading_profit(day: str = Query(..., alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$")) -> dict[str, bool]:
+    return {"removed": pnl_calendar.clear_realised(DATA_ROOT, day)}

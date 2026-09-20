@@ -174,3 +174,57 @@ def test_a_holding_missing_a_bar_cannot_credit_a_multi_day_move_to_one_day(tmp_p
     assert [r["symbol"] for r in third["rows"]] == ["A-EQ"]  # B had no bar, so it is unpriced that day
     fourth = pc.real_day_detail(tmp_path, holdings, "2026-09-04")
     assert "B-EQ" in fourth["unpriced"]  # and the next: its previous session's bar is missing too
+
+
+def test_trading_profit_is_added_to_the_day_and_appears_as_its_own_line(tmp_path, monkeypatch):
+    holdings = [{"symbol": "A-EQ", "qty": 10, "avg_price": 1}]
+    series = {"A-EQ": _closes([100, 102, 105])}
+    monkeypatch.setattr(pc, "_closes", lambda root, sym: series[sym])
+    pc.refresh_real(tmp_path, holdings, today=pd.Timestamp("2026-09-03").date())
+
+    pc.set_realised(tmp_path, "2026-09-03", 11000, note="intraday")
+
+    day = pc.real_days(tmp_path)["2026-09-03"]
+    assert day.realised == 11000 and day.pnl == pytest.approx(30 + 11000)  # 10 shares x Rs 3, plus the trading profit
+    detail = pc.real_day_detail(tmp_path, holdings, "2026-09-03")
+    assert detail["holdings_total"] == pytest.approx(30)
+    assert detail["realised"]["note"] == "intraday"
+    assert detail["total"] == pytest.approx(11030)
+
+
+def test_a_day_with_only_trading_profit_still_appears_on_the_calendar(tmp_path):
+    pc.set_realised(tmp_path, "2026-09-18", 11000)  # a Friday with no holdings reading at all
+
+    days = pc.real_days(tmp_path)
+
+    assert days["2026-09-18"].pnl == 11000
+    assert pc.month_view(days, "2026-09")["total"] == 11000
+
+
+def test_the_nightly_refresh_does_not_bake_trading_profit_into_the_stored_series(tmp_path, monkeypatch):
+    holdings = [{"symbol": "A-EQ", "qty": 10, "avg_price": 1}]
+    monkeypatch.setattr(pc, "_closes", lambda root, sym: _closes([100, 102, 105]))
+    today = pd.Timestamp("2026-09-03").date()
+    pc.refresh_real(tmp_path, holdings, today=today)
+    pc.set_realised(tmp_path, "2026-09-03", 500)
+
+    pc.refresh_real(tmp_path, holdings, today=pd.Timestamp("2026-09-04").date())
+    pc.refresh_real(tmp_path, holdings, today=pd.Timestamp("2026-09-04").date())
+
+    assert pc.real_days(tmp_path)["2026-09-03"].pnl == pytest.approx(30 + 500)  # counted once, however often it refreshes
+    assert json.loads(pc.store_path(tmp_path).read_text())["days"]["2026-09-03"]["pnl"] == pytest.approx(30)
+
+
+def test_a_recorded_profit_can_be_replaced_or_removed_and_bad_input_is_refused(tmp_path):
+    pc.set_realised(tmp_path, "2026-09-18", 100)
+    pc.set_realised(tmp_path, "2026-09-18", 250)
+    assert pc.real_days(tmp_path)["2026-09-18"].pnl == 250
+
+    assert pc.clear_realised(tmp_path, "2026-09-18") is True
+    assert pc.clear_realised(tmp_path, "2026-09-18") is False
+    assert "2026-09-18" not in pc.real_days(tmp_path)
+
+    with pytest.raises(ValueError):
+        pc.set_realised(tmp_path, "2026-13-45", 1)
+    with pytest.raises(ValueError):
+        pc.set_realised(tmp_path, "2026-09-18", float("nan"))

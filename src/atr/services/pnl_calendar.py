@@ -11,13 +11,15 @@ virtual size (``VIRTUAL_TICKET``) and the calendar says so.
 prices. That is what a portfolio screen shows as "today's P&L". Days computed after
 the fact from *today's* holdings are marked ``estimated``, because the book may have
 looked different then; a day recorded on its own date from the holdings at that time is
-not. Realised profit on individual sells needs the broker's tradebook, which this does
-not read.
+not. Profit from buying and selling is a separate record, ``realised_pnl.json``: entered by
+hand, or from the broker's tradebook where it can be read. A day's figure on the
+calendar is the two added together, and the day view shows them as separate lines.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -42,6 +44,7 @@ class Day:
     wins: int = 0
     losses: int = 0
     estimated: bool = False
+    realised: float = 0.0  # profit from buying and selling, included in ``pnl``
 
 
 # --------------------------------------------------------------------------- paper
@@ -116,12 +119,66 @@ def store_path(data_root: Path) -> Path:
     return Path(data_root) / "portfolio" / "pnl_daily.json"
 
 
-def real_days(data_root: Path) -> dict[str, Day]:
+def realised_path(data_root: Path) -> Path:
+    return Path(data_root) / "portfolio" / "realised_pnl.json"
+
+
+def realised_entries(data_root: Path) -> dict[str, dict[str, Any]]:
+    """Trading profit recorded per day: ``{date: {amount, source, note, updated}}``."""
+    try:
+        return json.loads(realised_path(data_root).read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_realised(data_root: Path, day: str, amount: float, *, note: str = "", source: str = "manual") -> None:
+    """Record (or replace) the profit made by trading on ``day``."""
+    date.fromisoformat(day)  # a real date, or this raises
+    if not math.isfinite(amount):
+        raise ValueError("amount must be a finite number")
+    entries = realised_entries(data_root)
+    entries[day] = {"amount": round(float(amount), 2), "source": source, "note": note.strip()[:200],
+                    "updated": datetime.now().isoformat(timespec="seconds")}
+    _write_json(realised_path(data_root), entries)
+
+
+def clear_realised(data_root: Path, day: str) -> bool:
+    entries = realised_entries(data_root)
+    if day not in entries:
+        return False
+    del entries[day]
+    _write_json(realised_path(data_root), entries)
+    return True
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=1), encoding="utf8")
+    tmp.replace(path)  # a crash mid-write never leaves half a file
+
+
+def _stored_days(data_root: Path) -> dict[str, Day]:
+    """The holdings series exactly as stored, with no trading profit mixed in."""
     try:
         saved = json.loads(store_path(data_root).read_text(encoding="utf8"))
     except (OSError, ValueError):
         return {}
-    return {k: Day(**v) for k, v in saved.get("days", {}).items()}
+    keep = ("date", "pnl", "trades", "wins", "losses", "estimated")
+    return {k: Day(**{f: v[f] for f in keep if f in v}) for k, v in saved.get("days", {}).items()}
+
+
+def real_days(data_root: Path) -> dict[str, Day]:
+    """Each day's holdings change plus any trading profit recorded for it."""
+    days = _stored_days(data_root)
+    for when, entry in realised_entries(data_root).items():
+        amount = float(entry["amount"])
+        d = days.get(when)
+        if d is None:  # a trading day with no holdings reading still belongs on the calendar
+            days[when] = Day(date=when, pnl=amount, trades=0, realised=amount)
+        else:
+            d.pnl, d.realised = round(d.pnl + amount, 2), amount
+    return days
 
 
 def _closes(data_root: Path, symbol: str) -> pd.Series | None:
@@ -161,8 +218,11 @@ def compute_real(
     out: dict[str, float] = {}
     for when, row in change.tail(sessions).iterrows():
         priced = row.dropna()
-        if len(priced) / len(holdings) < MIN_COVERAGE:
-            continue  # too few holdings have a price that day: a partial number would mislead
+        # Measured against the holdings that have any price history at all: a stock with none
+        # (a trade-to-trade "BE" share, say) can never be priced, so it must not count against
+        # every day. What it leaves out is reported separately as unpriced.
+        if len(priced) / change.shape[1] < MIN_COVERAGE:
+            continue  # too few of the priceable holdings have a price that day: a partial number would mislead
         out[when.date().isoformat()] = float((priced * qty[priced.index]).sum())
     return out
 
@@ -179,7 +239,7 @@ def refresh_real(data_root: Path, holdings: list[dict[str, Any]], *, today: date
     computed = compute_real(holdings, closes)
     if not computed:
         return 0
-    days = real_days(data_root)
+    days = _stored_days(data_root)  # never the merged view: writing that back would count trading profit twice
     last_session = max(computed)
     today_iso = (today or date.today()).isoformat()
     changed = 0
@@ -190,14 +250,10 @@ def refresh_real(data_root: Path, holdings: list[dict[str, Any]], *, today: date
             continue
         days[when] = Day(date=when, pnl=round(pnl, 2), trades=len(holdings), estimated=not exact)
         changed += 1
-    path = store_path(data_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps({"updated": datetime.now().isoformat(timespec="seconds"), "days": {k: asdict(v) for k, v in sorted(days.items())}}),
-        encoding="utf8",
+    _write_json(
+        store_path(data_root),
+        {"updated": datetime.now().isoformat(timespec="seconds"), "days": {k: asdict(v) for k, v in sorted(days.items())}},
     )
-    tmp.replace(path)
     return changed
 
 
@@ -318,9 +374,13 @@ def real_day_detail(data_root: Path, holdings: list[dict[str, Any]], day: str) -
                 }
             )
     rows.sort(key=lambda r: -abs(r["pnl"]))
+    holdings_total = round(sum(r["pnl"] for r in rows), 2)
+    trading = realised_entries(data_root).get(day)
     return {
         "rows": rows,
-        "total": round(sum(r["pnl"] for r in rows), 2),
+        "holdings_total": holdings_total,
+        "realised": trading,  # None when nothing has been recorded for the day
+        "total": round(holdings_total + (trading["amount"] if trading else 0.0), 2),
         "gainers": sum(1 for r in rows if r["pnl"] > 0),
         "losers": sum(1 for r in rows if r["pnl"] < 0),
         "unpriced": [h["symbol"] for h in holdings if h["symbol"] not in priced],

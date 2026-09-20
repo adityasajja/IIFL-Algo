@@ -67,12 +67,26 @@ async def _jobs_loop() -> None:
         # The broker cache stops updating when the login lapses, so top up the held names
         # from public bars first, or the latest days would be missing from the calendar.
         from atr.data.eod_refresh import refresh
+        from atr.data.gap_repair import repair
 
-        refresh(DATA_ROOT, [h["symbol"] for h in holdings])
+        symbols = [h["symbol"] for h in holdings]
+        refresh(DATA_ROOT, symbols)
+        if client is not None:
+            # Then fill any single missing session from the broker's own history, since a
+            # missing day blanks that stock's change on the next day.
+            repair(client, DATA_ROOT, symbols)
         refresh_real(DATA_ROOT, holdings)
 
+    def capture_tradebook() -> None:
+        from atr.services.broker_access import authed_client
+        from atr.services.tradebook import capture_day
+
+        capture_day(authed_client(), DATA_ROOT)  # raises without a session or when refused, so it retries
+
     real_pnl = DailyJob("real_pnl", record_real_pnl, at=(17, 50), weekdays_only=True)
-    await run_forever([backup, tracker, gap, real_pnl], JobStore(DATA_ROOT))
+    # After the close and before the day-scoped records reset; tried again if the login is not live.
+    tradebook = DailyJob("tradebook", capture_tradebook, at=(15, 45), weekdays_only=True, retries=6, retry_minutes=20)
+    await run_forever([backup, tracker, gap, real_pnl, tradebook], JobStore(DATA_ROOT))
 
 
 async def _eod_refresh_loop() -> None:
