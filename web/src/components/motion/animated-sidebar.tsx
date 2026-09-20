@@ -1133,6 +1133,10 @@ export function AnimatedSidebarMenuButton({
     "text-muted-foreground transition-colors hover:text-foreground",
     "focus-visible:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
     isActive && "text-foreground",
+    // In the icon rail the item is just an icon. Side padding and the label gap left only
+    // 14px of room for a 20px icon box, so the icon spilled 3px right of centre in a
+    // 38x36 highlight. A square button with the icon centred fixes both.
+    panel.collapsed && "mx-auto w-9 justify-center gap-0 px-0",
     disabled && "cursor-not-allowed opacity-40",
     className,
   );
