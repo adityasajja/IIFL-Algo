@@ -87,3 +87,28 @@ def test_the_name_of_a_removed_strategy_can_be_used_again(auth_client):
 def test_the_researched_stock_list_is_offered_for_a_paper_run(auth_client):
     body = auth_client.get("/api/v1/strategies/universe/researched").json()
     assert body["total"] == len(body["symbols"])
+
+
+def test_a_name_the_feed_would_misread_is_given_its_exact_spelling(monkeypatch):
+    from types import SimpleNamespace
+
+    from atr.api.routers import strategies as router
+
+    class Master:
+        def load_cached(self, exchanges):
+            pass
+
+        def find(self, symbol, exchange):
+            table = {"LT-EQ": 11483, "ABB-EQ": 5}
+            if symbol not in table:
+                raise KeyError(symbol)
+            return SimpleNamespace(conid=table[symbol])
+
+    monkeypatch.setattr("atr.brokers.iifl.contracts.InstrumentMaster", Master)
+    # the prefix search finds nothing for LT, and the right contract for ABB
+    monkeypatch.setattr(
+        "atr.scanner.resolve_conid",
+        lambda master, name, exchange: (_ for _ in ()).throw(KeyError(name)) if name == "LT" else 5,
+    )
+
+    assert router.broker_safe(["LT", "ABB", "NOTLISTED"]) == ["LT-EQ", "ABB", "NOTLISTED"]
