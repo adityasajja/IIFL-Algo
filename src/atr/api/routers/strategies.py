@@ -180,6 +180,32 @@ def get_strategy(strategy_id: str, principal: CurrentPrincipal) -> dict[str, Any
         raise _fail(exc) from exc
 
 
+@router.delete("/{strategy_id}")
+def archive_strategy(
+    strategy_id: str,
+    principal: Principal = Depends(require_permission(Permission.STRATEGY_WRITE)),
+) -> dict[str, Any]:
+    """Remove a strategy from the list. Archived, not erased: its versions and runs are kept.
+
+    Refused with 409 while a paper run is still using it.
+    """
+    try:
+        return _service().archive(principal.user_id, strategy_id)
+    except StrategyError as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/{strategy_id}/restore")
+def restore_strategy(
+    strategy_id: str,
+    principal: Principal = Depends(require_permission(Permission.STRATEGY_WRITE)),
+) -> dict[str, Any]:
+    try:
+        return _service().restore(principal.user_id, strategy_id)
+    except StrategyError as exc:
+        raise _fail(exc) from exc
+
+
 @router.get("/{strategy_id}/versions", dependencies=[_READ])
 def list_versions(strategy_id: str, principal: CurrentPrincipal) -> dict[str, Any]:
     """Every version, newest first, each with ``deployable`` and why not.

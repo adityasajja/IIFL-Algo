@@ -155,6 +155,54 @@ class StrategyService:
                 raise self._not_found(strategy_id)
             return self._decorate(session, row)
 
+    #: Deployment states in which a paper run is still using the strategy's version.
+    LIVE_DEPLOYMENT_STATES = ("RUNNING", "PENDING")
+
+    def archive(self, user_id: str, strategy_id: str) -> dict[str, Any]:
+        """Remove a strategy from the list without destroying its history.
+
+        It is archived, not deleted. A version is immutable and every paper run and
+        backtest that used it pins the exact number, so erasing the row would leave those
+        records pointing at nothing. Archiving hides it and keeps the record whole.
+
+        Refused while a paper run is still using it: the runner reads the pinned version
+        on every pass, and quietly removing it from under a live run would be a surprise.
+        """
+        from sqlalchemy import func, select
+
+        from atr.appdb.schema import deployments
+
+        with self.db.session() as session:
+            row = StrategyRepository.get(session, strategy_id, user_id)
+            if row is None:
+                raise self._not_found(strategy_id)
+            active = session.execute(
+                select(func.count())
+                .select_from(deployments)
+                .where(
+                    deployments.c.user_id == user_id,
+                    deployments.c.strategy_id == strategy_id,
+                    deployments.c.status.in_(self.LIVE_DEPLOYMENT_STATES),
+                )
+            ).scalar_one()
+            if active:
+                raise StrategyError(
+                    f"{row['name']} is still running on paper. Stop it on the Paper page first.",
+                    code="strategy_in_use",
+                    status=409,
+                    detail={"active_deployments": int(active)},
+                )
+            changed = StrategyRepository.archive(session, strategy_id, user_id)
+        return {"strategy_id": strategy_id, "archived": bool(changed)}
+
+    def restore(self, user_id: str, strategy_id: str) -> dict[str, Any]:
+        """Bring an archived strategy back."""
+        with self.db.session() as session:
+            if StrategyRepository.get(session, strategy_id, user_id) is None:
+                raise self._not_found(strategy_id)
+            changed = StrategyRepository.unarchive(session, strategy_id, user_id)
+        return {"strategy_id": strategy_id, "restored": bool(changed)}
+
     def versions(self, user_id: str, strategy_id: str) -> list[dict[str, Any]]:
         """Every version, newest first, each saying whether it can be deployed.
 
