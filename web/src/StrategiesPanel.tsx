@@ -18,7 +18,7 @@ import {
 import { Card, CardHeader, ErrorBox } from "./components/ui/card";
 import { PageLoader } from "./components/ui/loading";
 import { Badge, fmtNum, fmtPct } from "./components/ui/stat";
-import { TrackedPlans } from "./TrackedPlans";
+import { StrategyTiles } from "./StrategyTiles";
 import { humanizeSentence, strategyLabel } from "./lib/format";
 import { cn } from "./lib/utils";
 import { RelativeTime } from "./lib/time";
@@ -51,14 +51,12 @@ export default function StrategiesPanel({
   onOpenPaper: () => void;
 }) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
-  // The long lists start folded: most visits are to see what is running, not to read 18 test reports.
-  const [showBuiltIn, setShowBuiltIn] = useState(false);
+  const [pickedName, setPickedName] = useState<string | null>(null);
   const [showAuthoring, setShowAuthoring] = useState(false);
   const [running, setRunning] = useState(0);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [control, setControl] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<ValidationState | "all">("all");
   // Until the first response there is nothing to count; without this the panel
   // printed "0 of 0 … cleared validation" in a warning banner, which reads as a
   // measured result rather than "not loaded yet".
@@ -89,100 +87,88 @@ export default function StrategiesPanel({
     fail: strategies.filter((s) => s.validation.state === "fail").length,
     untested: strategies.filter((s) => s.validation.state === "untested").length,
   };
-  const shown = filter === "all" ? strategies : strategies.filter((s) => s.validation.state === filter);
 
   if (!loaded && !error) return <PageLoader label="Loading strategies" />;
 
   const total = strategies.length;
-  const verdict =
-    counts.pass > 0
-      ? `${counts.pass} of ${total} built-in strategies have proven themselves.`
-      : `None of the ${total} built-in strategies has proven itself yet.`;
+  const picked = strategies.find((s) => s.name === pickedName) ?? null;
+  const share = (n: number) => (total > 0 ? `${(100 * n) / total}%` : "0%");
 
   return (
     <div className="space-y-4">
       {error && <ErrorBox>{error}</ErrorBox>}
 
-      {/* What this page is, in plain words, and where things stand. */}
-      <div>
-        <p className="text-sm">
-          A strategy is a set of rules for picking trades. {verdict}
-        </p>
-        <p
-          className="mt-1 text-xs text-muted-foreground"
-          title={control !== null ? `Random picks over the same stocks score about ${fmtNum(control)} (Sharpe).` : undefined}
-        >
-          To count as proven, a strategy has to beat simply buying the index and beat random picks.
-        </p>
-      </div>
+      {/* What is doing something now, as tiles. */}
+      <StrategyTiles running={running} onOpenPaper={onOpenPaper} onOpenPlans={onOpenPlans} />
 
-      {running > 0 && (
-        <button
-          type="button"
-          onClick={onOpenPaper}
-          className="flex w-full items-center justify-between rounded-2xl border border-border bg-card px-5 py-3.5 text-left transition-colors hover:bg-muted/40"
-        >
-          <span className="text-sm">
-            <span className="font-medium">{running} {running === 1 ? "strategy is" : "strategies are"} running on paper</span>
-            <span className="text-muted-foreground"> · practice trades, no money at risk</span>
+      {/* The 18 built-ins as a scoreboard: one bar for the split, one tile each. */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-semibold tracking-tight">Built-in strategies</span>
+          <span
+            className="text-xs text-muted-foreground"
+            title={
+              "Proven means it beat simply buying the index and beat random picks." +
+              (control !== null ? ` Random picks over the same stocks score about ${fmtNum(control)} (Sharpe).` : "") +
+              (asOf ? " Last tested " + new Date(asOf).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) + "." : "")
+            }
+          >
+            {total} · what counts as proven?
           </span>
-          <span className="text-xs text-primary">Open Paper</span>
-        </button>
-      )}
+        </div>
 
-      <TrackedPlans onOpen={onOpenPlans} />
+        <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+          <i className="bg-emerald-500" style={{ width: share(counts.pass) }} />
+          <i className="bg-rose-500" style={{ width: share(counts.fail) }} />
+          <i className="bg-muted-foreground/30" style={{ width: share(counts.untested) }} />
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-emerald-500" />Proven {counts.pass}</span>
+          <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-rose-500" />Lost {counts.fail}</span>
+          <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-muted-foreground/40" />Not tested {counts.untested}</span>
+        </div>
 
-      <Fold
-        title="Built-in strategies"
-        summary={`${total} included · ${counts.pass} proven · ${counts.fail} tested and lost · ${counts.untested} not tested yet`}
-        open={showBuiltIn}
-        onToggle={() => setShowBuiltIn((o) => !o)}
-      >
-        <Card>
-          <div className="flex flex-wrap items-center gap-2 px-5 pt-4 text-xs">
-            {(
-              [
-                ["all", "All", total],
-                ["pass", "Proven", counts.pass],
-                ["fail", "Tested and lost", counts.fail],
-                ["untested", "Not tested", counts.untested],
-              ] as const
-            ).map(([key, label, n]) => (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {strategies.map((s) => {
+            const state = s.validation.state;
+            const ret = s.validation.oos_return_pct;
+            return (
               <button
-                key={key}
+                key={s.name}
                 type="button"
-                onClick={() => setFilter(key)}
+                onClick={() => setPickedName((cur) => (cur === s.name ? null : s.name))}
+                aria-pressed={pickedName === s.name}
+                title={pretty(s.name)}
                 className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  filter === key ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
+                  "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                  state === "pass" && "border-emerald-500/40 bg-emerald-500/5",
+                  state === "fail" && "border-rose-500/25 bg-rose-500/5",
+                  state === "untested" && "border-border bg-muted/30",
+                  pickedName === s.name && "ring-2 ring-primary",
                 )}
               >
-                {label} {n}
+                <span className="flex min-w-0 items-center gap-2">
+                  <StateIcon state={state} />
+                  <span className="truncate text-xs font-medium">{pretty(s.name)}</span>
+                </span>
+                {state !== "untested" && ret != null && (
+                  <span className={cn("shrink-0 text-xs font-semibold tabular-nums", ret >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                    {fmtPct(ret, 0)}
+                  </span>
+                )}
               </button>
-            ))}
-            <span className="ml-auto text-muted-foreground">
-              {asOf ? <>Last tested <RelativeTime value={asOf} absolute={false} /></> : "Not tested yet"}
-            </span>
-          </div>
-          <div className="mt-3 divide-y divide-border/60">
-            {shown.map((s) => (
-              <Row key={s.name} s={s} onOpenResearch={onOpenResearch} />
-            ))}
-            {shown.length === 0 && (
-              <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">
-                Nothing in this group.
-              </div>
-            )}
-          </div>
-        </Card>
-      </Fold>
+            );
+          })}
+        </div>
 
-      <Fold
-        title="Build your own"
-        summary="Write your own rules, save a version, test it, then run it on paper"
-        open={showAuthoring}
-        onToggle={() => setShowAuthoring((o) => !o)}
-      >
+        {picked && (
+          <div className="mt-4 rounded-xl border border-border">
+            <Row s={picked} onOpenResearch={onOpenResearch} />
+          </div>
+        )}
+      </Card>
+
+      <Fold title="Build your own" open={showAuthoring} onToggle={() => setShowAuthoring((o) => !o)}>
         <Authoring />
       </Fold>
     </div>
@@ -198,7 +184,7 @@ function Fold({
   children,
 }: {
   title: string;
-  summary: string;
+  summary?: string;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
@@ -213,7 +199,7 @@ function Fold({
       >
         <span className="min-w-0">
           <span className="block text-sm font-semibold tracking-tight">{title}</span>
-          <span className="block truncate text-xs text-muted-foreground">{summary}</span>
+          {summary && <span className="block truncate text-xs text-muted-foreground">{summary}</span>}
         </span>
         <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
