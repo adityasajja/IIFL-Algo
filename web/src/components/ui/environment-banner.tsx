@@ -31,7 +31,9 @@ export function EnvironmentBanner({
 
   // Kill switch outranks everything: if orders are blocked, that is the fact
   // that matters, regardless of which environment we are nominally in.
-  const state = killSwitch ? "halted" : live ? "live" : "safe";
+  // "unknown" stays loud: it means the backend cannot be reached. "safe" is the everyday
+  // paper state and is deliberately quiet, because a bar that always shouts is ignored.
+  const state = killSwitch ? "halted" : live ? "live" : !envKnown ? "unknown" : "safe";
 
   const label = !envKnown
     ? "ENVIRONMENT UNKNOWN"
@@ -39,9 +41,7 @@ export function EnvironmentBanner({
       ? `HALTED — KILL SWITCH ENGAGED (${env})`
       : live
         ? "LIVE — REAL CAPITAL"
-        : env === "dev"
-          ? "PAPER / DEV MODE"
-          : "PAPER — NO ORDERS TRANSMITTED";
+        : "Paper mode";
 
   const detail = !envKnown
     ? "Backend unreachable — do not assume orders are safe."
@@ -49,17 +49,18 @@ export function EnvironmentBanner({
       ? "No new orders will be placed until it is released."
       : live
         ? `Env ${env} · execution live · approved signals reach the broker and fill for real.`
-        : `Env ${env} · execution ${executionMode ?? "paper"} · signals generate and queue, nothing is transmitted.`;
+        : "Orders are simulated. Nothing is sent to your broker.";
 
   return (
     <div
       role="status"
       aria-live="polite"
       className={cn(
-        "flex w-full items-center justify-center gap-2.5 border-b px-4 py-1.5 text-center",
+        "flex w-full items-center justify-center gap-2.5 border-b text-center",
+        state === "safe" ? "gap-2 border-border/50 px-4 py-1 text-muted-foreground" : "px-4 py-1.5",
         state === "live" && "border-red-700 bg-red-600 text-white",
         state === "halted" && "border-amber-600 bg-amber-500 text-black",
-        state === "safe" && "border-slate-400/40 bg-slate-500/15 text-slate-700 dark:text-slate-200",
+        state === "unknown" && "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
         className,
       )}
     >
@@ -67,18 +68,27 @@ export function EnvironmentBanner({
         <AlertOctagon className="h-3.5 w-3.5 shrink-0" />
       ) : state === "halted" ? (
         <AlertOctagon className="h-3.5 w-3.5 shrink-0" />
+      ) : state === "unknown" ? (
+        <AlertOctagon className="h-3.5 w-3.5 shrink-0" />
       ) : (
-        <FlaskConical className="h-3.5 w-3.5 shrink-0 opacity-80" />
+        <FlaskConical className="h-3 w-3 shrink-0 opacity-60" />
       )}
 
-      <span className="text-[11.5px] font-bold uppercase tracking-[0.14em]">{label}</span>
+      <span
+        className={cn(
+          state === "safe" ? "text-[11px] font-medium" : "text-[11.5px] font-bold uppercase tracking-[0.14em]",
+        )}
+      >
+        {label}
+      </span>
 
       <span
         className={cn(
           "hidden text-[11px] sm:inline",
-          state === "live" ? "text-white/85" : state === "halted" ? "text-black/70" : "opacity-80",
+          state === "live" ? "text-white/85" : state === "halted" ? "text-black/70" : state === "safe" ? "opacity-70" : "opacity-80",
         )}
       >
+        {state === "safe" && <span className="mr-2 opacity-50">·</span>}
         {detail}
       </span>
 
