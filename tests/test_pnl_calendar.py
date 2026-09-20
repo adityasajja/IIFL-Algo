@@ -107,3 +107,70 @@ def test_only_the_day_recorded_on_its_own_date_is_exact_and_exact_days_are_never
     pc.refresh_real(tmp_path, [{"symbol": "A-EQ", "qty": 99, "avg_price": 1}], today=pd.Timestamp("2026-09-04").date())
     after = pc.real_days(tmp_path)
     assert after["2026-09-03"].pnl == first["2026-09-03"].pnl
+
+
+def test_a_paper_day_lists_each_trade_that_closed_and_they_add_up_to_the_calendar_figure(tmp_path):
+    (tmp_path / "paper_momentum").mkdir()
+    (tmp_path / "paper_momentum" / "settlements.jsonl").write_text(
+        json.dumps({"exit_window_end": "2026-06-12", "portfolio_return": 0.02, "returns": {"AAA": 0.05, "BBB": -0.01}}) + "\n"
+    )
+    (tmp_path / "research").mkdir()
+    (tmp_path / "research" / "gap_plan.json").write_text(json.dumps({"trades": [
+        {"source": "live", "market_ok": True, "status": "closed", "exit_date": "2026-06-12", "symbol": "CCC", "entry": 100.0,
+         "exit_price": 103.0, "net_pct": 2.8, "exit_reason": "target"},
+        {"source": "replay", "market_ok": True, "status": "closed", "exit_date": "2026-06-12", "symbol": "ZZZ", "entry": 1.0,
+         "exit_price": 1.0, "net_pct": 9.0, "exit_reason": "target"},
+    ]}))
+
+    rows = pc.paper_day_detail(tmp_path, "2026-06-12", db=_NoJournal())
+    calendar = pc.paper_days(tmp_path, db=_NoJournal())["2026-06-12"]
+
+    assert {r["symbol"] for r in rows} == {"AAA", "BBB", "CCC"}  # the replayed trade is not one the app took
+    assert next(r for r in rows if r["symbol"] == "CCC")["note"] == "hit target"
+    # Weekly picks split the virtual ticket equally: 50,000 each.
+    assert next(r for r in rows if r["symbol"] == "AAA")["pnl"] == pytest.approx(0.05 * pc.VIRTUAL_TICKET / 2)
+    assert rows[0]["pnl"] == max(rows, key=lambda r: abs(r["pnl"]))["pnl"]  # biggest mover first
+    assert sum(r["pnl"] for r in rows) == pytest.approx(calendar.pnl, abs=0.02)
+
+
+def test_a_real_day_names_the_holdings_that_moved_it_and_matches_the_day_total(tmp_path, monkeypatch):
+    holdings = [{"symbol": "A-EQ", "qty": 10, "avg_price": 1}, {"symbol": "B-EQ", "qty": 5, "avg_price": 1},
+                {"symbol": "GONE-EQ", "qty": 3, "avg_price": 1}]
+    series = {"A-EQ": _closes([100, 102, 101]), "B-EQ": _closes([50, 50, 54])}
+    monkeypatch.setattr(pc, "_closes", lambda root, sym: series.get(sym))
+
+    detail = pc.real_day_detail(tmp_path, holdings, "2026-09-03")
+
+    assert [r["symbol"] for r in detail["rows"]] == ["B-EQ", "A-EQ"]  # +20 outweighs -10
+    assert detail["total"] == pytest.approx(10 * -1 + 5 * 4)
+    assert (detail["gainers"], detail["losers"]) == (1, 1)
+    assert detail["unpriced"] == ["GONE-EQ"]  # said plainly, not folded into the total
+    assert detail["total"] == pytest.approx(pc.compute_real(holdings[:2], series)["2026-09-03"])
+
+
+def test_the_first_day_of_a_history_has_no_change_to_report(tmp_path, monkeypatch):
+    holdings = [{"symbol": "A-EQ", "qty": 10, "avg_price": 1}]
+    monkeypatch.setattr(pc, "_closes", lambda root, sym: _closes([100, 101]))
+
+    detail = pc.real_day_detail(tmp_path, holdings, "2026-09-01")
+
+    assert detail["rows"] == [] and detail["unpriced"] == ["A-EQ"]
+
+
+def test_a_holding_missing_a_bar_cannot_credit_a_multi_day_move_to_one_day(tmp_path, monkeypatch):
+    """The calendar and its day view once disagreed here: one compared a stock with an older close."""
+    holdings = [{"symbol": "A-EQ", "qty": 10, "avg_price": 1}, {"symbol": "B-EQ", "qty": 10, "avg_price": 1}]
+    a = _closes([100, 101, 102, 103])
+    b = _closes([50, 51, 52, 60]).drop(a.index[2])  # B has no bar on the third session
+    series = {"A-EQ": a, "B-EQ": b}
+    monkeypatch.setattr(pc, "_closes", lambda root, sym: series.get(sym))
+    monkeypatch.setattr(pc, "MIN_COVERAGE", 0.4)
+
+    for day in ("2026-09-02", "2026-09-03", "2026-09-04"):
+        detail = pc.real_day_detail(tmp_path, holdings, day)
+        assert detail["total"] == pytest.approx(pc.compute_real(holdings, series).get(day, detail["total"]))
+
+    third = pc.real_day_detail(tmp_path, holdings, "2026-09-03")
+    assert [r["symbol"] for r in third["rows"]] == ["A-EQ"]  # B had no bar, so it is unpriced that day
+    fourth = pc.real_day_detail(tmp_path, holdings, "2026-09-04")
+    assert "B-EQ" in fourth["unpriced"]  # and the next: its previous session's bar is missing too
