@@ -698,6 +698,10 @@ export const validateStrategy = (
     { method: "POST", body: JSON.stringify(body) },
   );
 
+/** Remove a strategy from the list. It is archived, not erased; refused while a paper run uses it. */
+export const removeSavedStrategy = (strategyId: string) =>
+  req<{ strategy_id: string; archived: boolean }>(`/api/v1/strategies/${strategyId}`, { method: "DELETE" });
+
 /** Create the worked example strategy and its version 1. Idempotent. */
 export const seedExampleStrategy = (name?: string) =>
   req<{

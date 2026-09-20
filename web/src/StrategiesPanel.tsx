@@ -5,6 +5,7 @@ import {
   createStrategyVersion,
   listDeployments,
   listSavedStrategies,
+  removeSavedStrategy,
   listStrategyVersions,
   seedExampleStrategy,
   validateStrategy,
@@ -13,6 +14,7 @@ import {
   type StrategyVersion,
 } from "./api";
 import { Card, CardHeader, ErrorBox } from "./components/ui/card";
+import { useDialog } from "./components/ui/dialog-context";
 import { Badge } from "./components/ui/stat";
 import { StrategyTiles } from "./StrategyTiles";
 import { strategyLabel } from "./lib/format";
@@ -56,6 +58,20 @@ export default function StrategiesPanel({
       <Authoring />
     </div>
   );
+}
+
+/** The server's own sentence, not the JSON it arrived in. */
+function readable(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const body = JSON.parse(raw) as { detail?: string | { detail?: string } };
+    const d = body.detail;
+    const text = typeof d === "string" ? d : d?.detail;
+    if (text) return text;
+  } catch {
+    // not JSON: use it as it is
+  }
+  return raw;
 }
 
 function Authoring() {
@@ -103,7 +119,7 @@ function Authoring() {
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(readable(e));
     } finally {
       setBusy(null);
     }
@@ -117,6 +133,25 @@ function Authoring() {
 
   const current = saved.find((s) => s.strategy_id === selected) ?? null;
   const [editing, setEditing] = useState(false);
+  const dialog = useDialog();
+
+  /** Remove a strategy from the list. The server refuses while a paper run still uses it, and says why. */
+  const remove = async (s: SavedStrategy) => {
+    const ok = await dialog.confirm({
+      title: `Remove ${s.name}?`,
+      description: "It leaves this list. Its past paper runs and backtests stay in your records.",
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await run("remove", async () => {
+      await removeSavedStrategy(s.strategy_id);
+      setEditing(false);
+      setReport(null);
+      await refresh(null);
+      setNotice(`Removed ${s.name}.`);
+    });
+  };
 
   const seed = () =>
     run("seed", async () => {
@@ -188,9 +223,19 @@ function Authoring() {
                       {current.engine_key ? strategyLabel(current.engine_key) : current.kind}
                     </span>
                   </div>
-                  <button type="button" onClick={() => setEditing((v) => !v)} className={ghost}>
-                    {editing ? "Close editor" : "Edit rules"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setEditing((v) => !v)} className={ghost}>
+                      {editing ? "Close editor" : "Edit rules"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => void remove(current)}
+                      className={cn(ghost, "text-muted-foreground hover:text-rose-500")}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
                 <div className="divide-y divide-border">
                   {versions.map((v) => (
