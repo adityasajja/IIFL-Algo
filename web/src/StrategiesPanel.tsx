@@ -52,10 +52,9 @@ export default function StrategiesPanel({
   // The 18 built-in strategies used to be listed here. None had proven itself, so the list
   // was noise; the engines still exist for backtests and the Evidence page.
   return (
-    <div className="space-y-4">
-      <StrategyTiles running={running} onOpenPaper={onOpenPaper} onOpenPlans={onOpenPlans} />
-      <Authoring />
-    </div>
+    <Authoring
+      tiles={<StrategyTiles running={running} onOpenPaper={onOpenPaper} onOpenPlans={onOpenPlans} />}
+    />
   );
 }
 
@@ -73,7 +72,7 @@ function readable(e: unknown): string {
   return raw;
 }
 
-function Authoring() {
+function Authoring({ tiles }: { tiles: React.ReactNode }) {
   const [saved, setSaved] = useState<SavedStrategy[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [versions, setVersions] = useState<StrategyVersion[]>([]);
@@ -157,16 +156,17 @@ function Authoring() {
 
   return (
     <Card>
-      <CardHeader title="Your strategies" />
+      <CardHeader title="Strategies" />
 
       <div className="space-y-4 px-5 py-4">
+        {tiles}
         {error && <ErrorBox>{error}</ErrorBox>}
         {notice && (
           <div className="rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-[13px]">{notice}</div>
         )}
 
         {saved.length === 0 ? (
-          <div className="py-4 text-center text-sm text-muted-foreground">You haven't made a strategy yet.</div>
+          <div className="py-4 text-center text-sm text-muted-foreground">No strategy of your own yet.</div>
         ) : (
           <>
             {/* A picker only earns its place when there is more than one to pick between. */}
