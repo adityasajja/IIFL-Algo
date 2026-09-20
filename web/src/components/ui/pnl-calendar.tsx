@@ -1,6 +1,13 @@
 import { ChevronLeft, ChevronRight, Flame, Trophy, TrendingDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { getPnlCalendar, getPnlDay, type PnlDayDetail, type PnlMonth } from "../../api";
+import {
+  getPnlCalendar,
+  getPnlDay,
+  removeTradingProfit,
+  saveTradingProfit,
+  type PnlDayDetail,
+  type PnlMonth,
+} from "../../api";
 import { cn } from "../../lib/utils";
 import { PageLoader } from "./loading";
 
@@ -28,6 +35,7 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
   const [data, setData] = useState<PnlMonth | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -42,7 +50,7 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
     return () => {
       live = false;
     };
-  }, [scope, month]);
+  }, [scope, month, version]);
 
   const byDate = useMemo(() => new Map((data?.days ?? []).map((d) => [d.date, d])), [data]);
   const cells = useMemo(() => {
@@ -130,11 +138,14 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
               const tip = d
                 ? `${dayLabel(iso)}: ${inr(d.pnl)}${d.trades ? ` · ${d.trades} ${what}` : ""}${d.estimated ? " · rebuilt from today's holdings" : ""}`
                 : `${dayLabel(iso)}: no result`;
+              // On the real calendar a past day with no result is clickable too, so a day's
+              // trading profit can be recorded when nothing else was captured for it.
+              const clickable = !!d || (scope === "real" && iso <= new Date().toISOString().slice(0, 10));
               const cellClass = cn(
                 "flex aspect-square flex-col items-center justify-center rounded-md text-[11px] tabular-nums",
                 d ? "text-foreground" : "bg-muted/40 text-muted-foreground",
                 d?.estimated && "ring-1 ring-inset ring-foreground/25",
-                d && "cursor-pointer transition-transform hover:scale-[1.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                clickable && "cursor-pointer transition-transform hover:scale-[1.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                 picked === iso && "ring-2 ring-primary",
               );
               const inner = (
@@ -143,15 +154,15 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
                   {d && <span className="text-[9px] leading-none opacity-80">{compact(d.pnl)}</span>}
                 </>
               );
-              return d ? (
+              return clickable ? (
                 <button
                   key={iso}
                   type="button"
-                  title={tip}
+                  title={d ? tip : `${dayLabel(iso)}: no result yet. Click to record profit from trading.`}
                   aria-pressed={picked === iso}
                   onClick={() => setPicked((cur) => (cur === iso ? null : iso))}
                   className={cellClass}
-                  style={{ backgroundColor: shade(d.pnl, biggest) }}
+                  style={d ? { backgroundColor: shade(d.pnl, biggest) } : undefined}
                 >
                   {inner}
                 </button>
@@ -163,7 +174,15 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
             })}
           </div>
 
-          {picked && <DayDetail scope={scope} date={picked} estimated={byDate.get(picked)?.estimated ?? false} onClose={() => setPicked(null)} />}
+          {picked && (
+            <DayDetail
+              scope={scope}
+              date={picked}
+              estimated={byDate.get(picked)?.estimated ?? false}
+              onClose={() => setPicked(null)}
+              onChanged={() => setVersion((v) => v + 1)}
+            />
+          )}
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
             <span>
@@ -221,9 +240,22 @@ function NavButton({ disabled, onClick, label, children }: { disabled: boolean; 
 }
 
 /** What is behind one day: the trades that closed, or the holdings that moved the book. */
-function DayDetail({ scope, date, estimated, onClose }: { scope: "paper" | "real"; date: string; estimated: boolean; onClose: () => void }) {
+function DayDetail({
+  scope,
+  date,
+  estimated,
+  onClose,
+  onChanged,
+}: {
+  scope: "paper" | "real";
+  date: string;
+  estimated: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
   const [detail, setDetail] = useState<PnlDayDetail | null>(null);
   const [failed, setFailed] = useState(false);
+  const [saved, setSaved] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -235,7 +267,7 @@ function DayDetail({ scope, date, estimated, onClose }: { scope: "paper" | "real
     return () => {
       live = false;
     };
-  }, [scope, date]);
+  }, [scope, date, saved]);
 
   const real = scope === "real";
   return (
@@ -288,6 +320,105 @@ function DayDetail({ scope, date, estimated, onClose }: { scope: "paper" | "real
         <div className="mt-2 text-[11px] text-muted-foreground">Not priced on this day, so left out: {detail.unpriced.map((s) => s.replace("-EQ", "")).join(", ")}.</div>
       )}
       {estimated && <div className="mt-2 text-[11px] text-muted-foreground">Rebuilt from today's holdings, so the mix on that day may have differed.</div>}
+      {real && detail && (
+        <TradingProfit
+          date={date}
+          current={detail.realised ?? null}
+          holdings={detail.holdings_total ?? 0}
+          onChanged={() => {
+            setSaved((n) => n + 1);
+            onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Record what buying and selling made on a day, since the broker keeps no history to read it back from. */
+function TradingProfit({
+  date,
+  current,
+  holdings,
+  onChanged,
+}: {
+  date: string;
+  current: { amount: number; source: string; note: string } | null;
+  holdings: number;
+  onChanged: () => void;
+}) {
+  const [amount, setAmount] = useState(current ? String(current.amount) : "");
+  const [note, setNote] = useState(current?.note ?? "");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAmount(current ? String(current.amount) : "");
+    setNote(current?.note ?? "");
+    setProblem(null);
+  }, [date, current]);
+
+  const parsed = Number(amount.replace(/[,₹\s]/g, ""));
+  const valid = amount.trim() !== "" && Number.isFinite(parsed);
+
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await action();
+      onChanged();
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "Couldn't save that.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="text-xs font-medium">Profit from trading</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">
+        {current
+          ? `Recorded ${inr(current.amount)} on top of the ${inr(holdings)} change in your holdings.`
+          : "Only for profit that is not already in the holdings figure above, such as shares bought and sold the same day. The broker keeps no past trades, so it can't be read back. Whatever you enter is added to the day's total."}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="e.g. 11000 or -2500"
+          aria-label="Profit from trading, in rupees"
+          className="h-8 w-40 rounded-lg border border-border bg-card px-2.5 text-sm outline-none focus:border-primary"
+        />
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Note (optional)"
+          aria-label="Note"
+          maxLength={200}
+          className="h-8 min-w-40 flex-1 rounded-lg border border-border bg-card px-2.5 text-sm outline-none focus:border-primary"
+        />
+        <button
+          type="button"
+          disabled={!valid || busy}
+          onClick={() => void run(() => saveTradingProfit(date, parsed, note))}
+          className="h-8 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-40"
+        >
+          {current ? "Update" : "Save"}
+        </button>
+        {current && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => removeTradingProfit(date))}
+            className="h-8 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      {problem && <div className="mt-1.5 text-[11px] text-rose-500">{problem}</div>}
     </div>
   );
 }

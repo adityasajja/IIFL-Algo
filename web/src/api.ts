@@ -1068,7 +1068,15 @@ export interface PnlDayDetail {
   gainers: number;
   losers: number;
   unpriced: string[];
+  holdings_total?: number;
+  realised?: { amount: number; source: string; note: string } | null;
 }
+
+export const saveTradingProfit = (date: string, amount: number, note: string) =>
+  req<{ date: string; amount: number }>("/pnl/realised", { method: "PUT", body: JSON.stringify({ date, amount, note }) });
+
+export const removeTradingProfit = (date: string) =>
+  req<{ removed: boolean }>(`/pnl/realised?date=${date}`, { method: "DELETE" });
 
 export const getPnlDay = (scope: "paper" | "real", date: string) =>
   req<PnlDayDetail>(`/pnl/day?scope=${scope}&date=${date}`);
