@@ -822,7 +822,12 @@ export default function App() {
             theme={theme}
           />
         )}
-        {tab === "strategies" && <StrategiesPanel onOpenResearch={() => setTab("evidence", "measured")} />}
+        {tab === "strategies" && (
+          <StrategiesPanel
+            onOpenResearch={() => setTab("evidence", "measured")}
+            onOpenPlans={() => setTab("signals", "today")}
+          />
+        )}
         {tab === "signals" && (
           <SignalsTabContainer
             sub={signalsSub}

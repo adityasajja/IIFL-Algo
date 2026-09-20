@@ -17,6 +17,7 @@ import {
 import { Card, CardHeader, ErrorBox } from "./components/ui/card";
 import { PageLoader } from "./components/ui/loading";
 import { Badge, fmtNum, fmtPct } from "./components/ui/stat";
+import { TrackedPlans } from "./TrackedPlans";
 import { humanizeSentence, strategyLabel } from "./lib/format";
 import { cn } from "./lib/utils";
 import { RelativeTime } from "./lib/time";
@@ -39,7 +40,13 @@ import { RelativeTime } from "./lib/time";
  * strategy works; validation answers "will this execute", and the panel says so
  * in as many words rather than letting a green tick imply the other question.
  */
-export default function StrategiesPanel({ onOpenResearch }: { onOpenResearch: () => void }) {
+export default function StrategiesPanel({
+  onOpenResearch,
+  onOpenPlans,
+}: {
+  onOpenResearch: () => void;
+  onOpenPlans: () => void;
+}) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [control, setControl] = useState<number | null>(null);
@@ -116,6 +123,8 @@ export default function StrategiesPanel({ onOpenResearch }: { onOpenResearch: ()
           onClick={() => setFilter(filter === "untested" ? "all" : "untested")}
         />
       </div>
+
+      <TrackedPlans onOpen={onOpenPlans} />
 
       <Card>
         <CardHeader
