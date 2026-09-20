@@ -1,3 +1,4 @@
+import { PnlCalendar } from "./components/ui/pnl-calendar";
 import { AlertTriangle, ChevronRight, RefreshCw, Shield } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -364,6 +365,11 @@ export default function OverviewPanel({ onNavigate }: Props) {
             <div className="mt-2 text-xs text-muted-foreground">Nothing waiting</div>
           )}
         </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <PnlCalendar scope="paper" title="Paper trades, all strategies" note="Some paper results are sized at ₹1,00,000 a trade." />
+        <PnlCalendar scope="real" title="My portfolio" note="Daily change in what you hold." />
       </div>
 
       {/* Proof: a progress bar rather than a paragraph. */}

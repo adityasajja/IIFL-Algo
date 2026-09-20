@@ -1014,6 +1014,38 @@ export interface GapPlan {
 
 export const getGapPlan = () => req<GapPlan>("/tracker/gap-plan");
 
+export interface PnlDay {
+  date: string;
+  pnl: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  estimated: boolean;
+}
+
+export interface PnlMonth {
+  scope: "paper" | "real";
+  month: string;
+  days: PnlDay[];
+  total: number;
+  traded_days: number;
+  green_days: number;
+  red_days: number;
+  best_day: { date: string; pnl: number } | null;
+  worst_day: { date: string; pnl: number } | null;
+  current_green: number;
+  best_green: number;
+  worst_red: number;
+  months_with_data: string[];
+  any_estimated: boolean;
+  ticket: number | null;
+  holdings_source?: string;
+  unpriced?: string[];
+}
+
+export const getPnlCalendar = (scope: "paper" | "real", month?: string) =>
+  req<PnlMonth>(`/pnl/calendar?scope=${scope}${month ? `&month=${month}` : ""}`);
+
 // ---------------------------------------------------------------------------
 // Portfolio, quotes, caches
 // ---------------------------------------------------------------------------
