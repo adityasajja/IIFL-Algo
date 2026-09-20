@@ -1,4 +1,4 @@
-import { AlertTriangle, Plus, ShieldCheck, Sparkles, XCircle } from "lucide-react";
+import { AlertTriangle, Plus, ShieldCheck, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   createSavedStrategy,
@@ -7,7 +7,6 @@ import {
   listSavedStrategies,
   removeSavedStrategy,
   listStrategyVersions,
-  seedExampleStrategy,
   validateStrategy,
   type SavedStrategy,
   type StrategyValidation,
@@ -153,29 +152,12 @@ function Authoring() {
     });
   };
 
-  const seed = () =>
-    run("seed", async () => {
-      const r = await seedExampleStrategy();
-      setNotice(r.created ? `Created “${r.strategy.name}”.` : "The example already exists.");
-      await refresh(r.strategy.strategy_id);
-    });
-
   const ghost =
     "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs transition-colors hover:bg-muted disabled:opacity-50";
 
   return (
     <Card>
-      <CardHeader
-        title="Your strategies"
-        action={
-          saved.length > 0 ? (
-            <button type="button" disabled={busy !== null} onClick={seed} className={ghost}>
-              <Sparkles className="h-3 w-3" />
-              {busy === "seed" ? "Adding…" : "Add example"}
-            </button>
-          ) : undefined
-        }
-      />
+      <CardHeader title="Your strategies" />
 
       <div className="space-y-4 px-5 py-4">
         {error && <ErrorBox>{error}</ErrorBox>}
@@ -184,13 +166,7 @@ function Authoring() {
         )}
 
         {saved.length === 0 ? (
-          <div className="grid justify-items-center gap-3 py-6 text-center">
-            <div className="text-sm text-muted-foreground">You haven't made a strategy yet.</div>
-            <button type="button" disabled={busy !== null} onClick={seed} className={ghost}>
-              <Sparkles className="h-3 w-3" />
-              {busy === "seed" ? "Adding…" : "Start from an example"}
-            </button>
-          </div>
+          <div className="py-4 text-center text-sm text-muted-foreground">You haven't made a strategy yet.</div>
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
