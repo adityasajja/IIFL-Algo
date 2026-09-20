@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from atr.api.deps import get_principal
 from atr.config.settings import Settings, get_settings
 
 logger = logging.getLogger("atr.api")
@@ -69,6 +70,22 @@ def login_submit(body: LoginIn) -> dict[str, Any]:
         "client_id": session.client_id,
         "expires_at": session.expires_at.isoformat(),
     }
+
+
+@router.post("/logout", dependencies=[Depends(get_principal)])
+def logout_broker() -> dict[str, bool]:
+    """Forget the saved broker session, so the app stops trading as you until the next login.
+
+    This clears the app's own copy of the token. The broker's token itself is left to
+    expire at midnight. The System page's "log out" button called this route, but it did
+    not exist, so the request fell through to the web app and came back "Method Not Allowed".
+    """
+    from atr.brokers.iifl.auth import SessionStore
+
+    store = SessionStore(get_settings().iifl_session_cache)
+    had_session = store.path.exists()
+    store.clear()
+    return {"logged_out": had_session}
 
 
 _LOGIN_CALLBACK_HTML = """<!doctype html>
