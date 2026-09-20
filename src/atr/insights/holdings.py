@@ -37,7 +37,26 @@ def normalize(rows: Any) -> list[dict[str, Any]]:
         )
         if qty > 0:
             out.append({"symbol": symbol, "qty": qty, "avg_price": avg})
-    return out
+    return _one_row_per_stock(out)
+
+
+def _one_row_per_stock(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge a stock the broker lists in more than one lot into a single holding.
+
+    The same share can appear twice (delivery and collateral, or two settlement lots).
+    Anything that keys a holding by symbol would otherwise keep only one of them and
+    silently drop the other's shares.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        cur = merged.get(r["symbol"])
+        if cur is None:
+            merged[r["symbol"]] = dict(r)
+            continue
+        total = cur["qty"] + r["qty"]
+        cur["avg_price"] = round((cur["avg_price"] * cur["qty"] + r["avg_price"] * r["qty"]) / total, 4)
+        cur["qty"] = total
+    return list(merged.values())
 
 
 def load_holdings(data_root: Path, client: Any | None = None) -> dict[str, Any]:

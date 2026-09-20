@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+import pytest
+
 from atr.insights import evidence
 from atr.insights.holdings import load_holdings, normalize
 from atr.insights.ideas import buy_ideas, classify
@@ -284,3 +286,17 @@ def test_an_empty_snapshot_falls_back_to_the_saved_holdings_export(tmp_path):
 
     assert got["source"] == "export"
     assert got["holdings"] == [{"symbol": "TCS-EQ", "qty": 4, "avg_price": 3100.5}]
+
+
+def test_a_stock_listed_in_two_lots_becomes_one_holding_with_all_its_shares():
+    rows = [
+        {"nseTradingSymbol": "CUB-EQ", "totalQuantity": 74, "averageTradedPrice": 130.0},
+        {"nseTradingSymbol": "CUB-EQ", "totalQuantity": 9, "averageTradedPrice": 140.0},
+        {"nseTradingSymbol": "TCS-EQ", "totalQuantity": 1, "averageTradedPrice": 3000.0},
+    ]
+
+    out = {h["symbol"]: h for h in normalize(rows)}
+
+    assert len(out) == 2
+    assert out["CUB-EQ"]["qty"] == 83
+    assert out["CUB-EQ"]["avg_price"] == pytest.approx((74 * 130 + 9 * 140) / 83, abs=1e-3)
