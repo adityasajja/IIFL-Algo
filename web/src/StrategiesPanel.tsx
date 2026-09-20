@@ -7,6 +7,7 @@ import {
   listSavedStrategies,
   removeSavedStrategy,
   createDeployment,
+  getResearchedStocks,
   startDeployment,
   listStrategyVersions,
   type SavedStrategy,
@@ -73,7 +74,9 @@ function readable(e: unknown): string {
 }
 
 type Rules = {
-  kind: "breakout" | "triple";
+  kind: "breakout" | "triple" | "gap";
+  gap: string;
+  market: string;
   lookback: string;
   volume: string;
   stop: string;
@@ -82,12 +85,25 @@ type Rules = {
   sellAt: string;
 };
 
-const START_RULES: Rules = { kind: "breakout", lookback: "20", volume: "1.5", stop: "5", target: "10", below: "30", sellAt: "50" };
+const START_RULES: Rules = { kind: "breakout", lookback: "20", volume: "1.5", stop: "5", target: "10", below: "30", sellAt: "50", gap: "1", market: "1" };
 
 /** The rules a person fills in, turned into the stored definition (same shape the engine reads). */
 function buildDefinition(r: Rules) {
   const stop = Number(r.stop);
   const off = { trailing_stop_pct: null, trend_sma: 0, trend_confirm_bars: 3, min_history_bars: 60 };
+  if (r.kind === "gap") {
+    // Monday only, after a week the market rose, buy what opens lower, sell at target, stop or Friday's close.
+    const entry = {
+      setup: "gap_down",
+      gap_down_pct: Number(r.gap),
+      gap_market_min_pct: Number(r.market),
+      gap_weekday: 0,
+      gap_entry_minutes: 15,
+      min_history_bars: 60,
+    };
+    const exit = { stop_loss_pct: stop, take_profit_pct: Number(r.target), rsi_overbought: null, exit_at_week_end: true, ...off };
+    return { rules: { entry, exit } };
+  }
   if (r.kind === "triple") {
     // Buy after 3 falling days with the 5-day RSI low, in a stock above its 200-day average.
     const entry = {
@@ -289,6 +305,18 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
 
                 {runFor !== null && (
                   <div className="space-y-2 border-t border-border p-4">
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          run("stocks", async () => setStocks((await getResearchedStocks()).symbols.join(", ")))
+                        }
+                        className={cn(ghost, "text-muted-foreground")}
+                      >
+                        {busy === "stocks" ? "Loading…" : "Use the researched stocks"}
+                      </button>
+                    </div>
                     <input
                       autoFocus
                       value={stocks}
@@ -317,7 +345,7 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
                               strategy_version: runFor,
                               capital: Number(capital),
                               mode: "PAPER",
-                              config: { symbols, exchange: "NSEEQ", timeframe: "1d", max_open_positions: 10 },
+                              config: { symbols, exchange: "NSEEQ", timeframe: "1d", max_open_positions: 20 },
                             });
                             await startDeployment(made.deployment_id);
                             setRunFor(null);
@@ -337,17 +365,20 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
 
                 {editing ? (
                   <div className="space-y-3 border-t border-border p-4">
-                    <div className="grid grid-cols-2 gap-2 sm:w-72">
+                    <div className="grid grid-cols-3 gap-2 sm:w-96">
                       {(
                         [
                           ["breakout", "Breakout"],
                           ["triple", "Triple RSI"],
+                          ["gap", "Monday gap"],
                         ] as const
                       ).map(([kind, label]) => (
                         <button
                           key={kind}
                           type="button"
-                          onClick={() => setRules({ ...rules, kind, stop: kind === "triple" ? "8" : "5" })}
+                          onClick={() =>
+                            setRules({ ...rules, kind, stop: kind === "triple" ? "8" : "5", target: kind === "gap" ? "3" : "10" })
+                          }
                           className={cn(
                             "rounded-xl border px-3 py-2 text-sm transition-colors",
                             rules.kind === kind ? "border-primary/40 bg-primary/10" : "border-border text-muted-foreground hover:text-foreground",
@@ -362,12 +393,24 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
                         Buys after three falling days, in a stock above its 200-day average. Sells when the 5-day RSI recovers.
                       </p>
                     )}
+                    {rules.kind === "gap" && (
+                      <p className="text-xs text-muted-foreground">
+                        Mondays only, within 15 minutes of the open. Sells at the target or stop, else at Friday's close. Needs the broker login for live prices.
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {(
                         (rules.kind === "triple"
                           ? [
                               ["below", "Buy when 5-day RSI is under"],
                               ["sellAt", "Sell when RSI passes"],
+                              ["stop", "Stop loss %"],
+                            ]
+                          : rules.kind === "gap"
+                          ? [
+                              ["gap", "Buy if it opens this % below Friday"],
+                              ["market", "Only after a week the market rose over %"],
+                              ["target", "Take profit %"],
                               ["stop", "Stop loss %"],
                             ]
                           : [
@@ -390,7 +433,7 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
                     </div>
                     <button
                       type="button"
-                      disabled={busy !== null || !selected || (rules.kind === "triple" ? [rules.below, rules.sellAt, rules.stop] : [rules.lookback, rules.volume, rules.stop, rules.target]).some((x) => !Number(x))}
+                      disabled={busy !== null || !selected || (rules.kind === "triple" ? [rules.below, rules.sellAt, rules.stop] : rules.kind === "gap" ? [rules.gap, rules.market, rules.target, rules.stop] : [rules.lookback, rules.volume, rules.stop, rules.target]).some((x) => !Number(x))}
                       title="Saves these rules as a new version. A saved version can't be edited later."
                       onClick={() =>
                         run("version", async () => {

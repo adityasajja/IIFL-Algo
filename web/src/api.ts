@@ -655,6 +655,10 @@ export const listSavedStrategies = () =>
     "/api/v1/strategies",
   );
 
+/** The long-history stocks the strategy research was run on. */
+export const getResearchedStocks = () =>
+  req<{ symbols: string[]; total: number }>("/api/v1/strategies/universe/researched");
+
 export const createSavedStrategy = (body: {
   name: string;
   kind?: string;
