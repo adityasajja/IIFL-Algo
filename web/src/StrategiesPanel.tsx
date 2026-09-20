@@ -35,10 +35,8 @@ import { RelativeTime } from "./lib/time";
  * in as many words rather than letting a green tick imply the other question.
  */
 export default function StrategiesPanel({
-  onOpenPlans,
   onOpenPaper,
 }: {
-  onOpenPlans: () => void;
   onOpenPaper: () => void;
 }) {
   const [running, setRunning] = useState(0);
@@ -53,7 +51,7 @@ export default function StrategiesPanel({
   // was noise; the engines still exist for backtests and the Evidence page.
   return (
     <Authoring
-      tiles={<StrategyTiles running={running} onOpenPaper={onOpenPaper} onOpenPlans={onOpenPlans} />}
+      tiles={<StrategyTiles running={running} onOpenPaper={onOpenPaper} />}
     />
   );
 }
@@ -198,6 +196,9 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
                     <span className="font-medium">{current.name}</span>
                     {current.engine_key && (
                       <span className="ml-2 text-xs text-muted-foreground">{strategyLabel(current.engine_key)}</span>
+                    )}
+                    {current.description && (
+                      <div className="mt-0.5 text-xs text-muted-foreground">{current.description}</div>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
