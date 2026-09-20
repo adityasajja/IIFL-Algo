@@ -169,7 +169,8 @@ function Authoring() {
           <div className="py-4 text-center text-sm text-muted-foreground">You haven't made a strategy yet.</div>
         ) : (
           <>
-            <div className="flex flex-wrap gap-2">
+            {/* A picker only earns its place when there is more than one to pick between. */}
+            <div className={cn("flex flex-wrap gap-2", saved.length < 2 && "hidden")}>
               {saved.map((s) => (
                 <button
                   key={s.strategy_id}
@@ -183,9 +184,9 @@ function Authoring() {
                   )}
                 >
                   {s.name}
-                  <span className="ml-1.5 text-[11px] text-muted-foreground">
-                    {s.latest_version === null ? "no versions" : `v${s.latest_version}`}
-                  </span>
+                  {s.latest_version !== null && (
+                    <span className="ml-1.5 text-[11px] text-muted-foreground">v{s.latest_version}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -195,9 +196,9 @@ function Authoring() {
                 <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
                   <div className="text-sm" title={current.strategy_id}>
                     <span className="font-medium">{current.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {current.engine_key ? strategyLabel(current.engine_key) : current.kind}
-                    </span>
+                    {current.engine_key && (
+                      <span className="ml-2 text-xs text-muted-foreground">{strategyLabel(current.engine_key)}</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={() => setEditing((v) => !v)} className={ghost}>

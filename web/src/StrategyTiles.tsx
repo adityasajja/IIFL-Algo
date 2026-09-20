@@ -79,7 +79,6 @@ export function StrategyTiles({
           On paper
         </div>
         <div className="text-5xl font-semibold tabular-nums tracking-tight">{running}</div>
-        <div className="text-xs text-muted-foreground">{running === 1 ? "running" : "running"}</div>
       </Tile>
 
       {gap && (
@@ -126,9 +125,9 @@ export function StrategyTiles({
                 <span className="text-muted-foreground">/{test.needed}</span>
               </span>
             </Ring>
-            <div className="text-xs text-muted-foreground">
-              {test.hit_rate_pct == null ? "graded" : <span className="text-base font-semibold text-foreground">{test.hit_rate_pct}%</span>}
-            </div>
+            {test.hit_rate_pct != null && (
+              <span className="text-base font-semibold">{test.hit_rate_pct}%</span>
+            )}
           </div>
           <div className="flex flex-wrap gap-1.5">
             {test.open.length === 0 ? (
