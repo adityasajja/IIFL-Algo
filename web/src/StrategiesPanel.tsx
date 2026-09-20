@@ -72,19 +72,39 @@ function readable(e: unknown): string {
   return raw;
 }
 
+type Rules = {
+  kind: "breakout" | "triple";
+  lookback: string;
+  volume: string;
+  stop: string;
+  target: string;
+  below: string;
+  sellAt: string;
+};
+
+const START_RULES: Rules = { kind: "breakout", lookback: "20", volume: "1.5", stop: "5", target: "10", below: "30", sellAt: "50" };
+
 /** The rules a person fills in, turned into the stored definition (same shape the engine reads). */
-function buildDefinition(r: { lookback: string; volume: string; stop: string; target: string }) {
-  const lookback = Number(r.lookback);
-  const volume = Number(r.volume);
+function buildDefinition(r: Rules) {
   const stop = Number(r.stop);
-  const target = Number(r.target);
-  const entry = { breakout_lookback: lookback, breakout_proximity_pct: 2.0, volume_multiple: volume, volume_lookback: lookback, min_history_bars: 60 };
-  const exit = { stop_loss_pct: stop, take_profit_pct: target, trailing_stop_pct: null, trend_sma: 0, trend_confirm_bars: 3, rsi_overbought: null, min_history_bars: 60 };
-  return {
-    rules: { entry, exit },
-    engine_key: "signals_entry",
-    params: { ...entry, ...exit, lookback: 120, allocation: 0.1, max_positions: 5 },
-  };
+  const off = { trailing_stop_pct: null, trend_sma: 0, trend_confirm_bars: 3, min_history_bars: 60 };
+  if (r.kind === "triple") {
+    // Buy after 3 falling days with the 5-day RSI low, in a stock above its 200-day average.
+    const entry = {
+      setup: "triple_rsi",
+      triple_rsi_period: 5,
+      triple_rsi_below: Number(r.below),
+      triple_rsi_prior_below: 60,
+      triple_rsi_trend_sma: 200,
+      min_history_bars: 210,
+    };
+    const exit = { stop_loss_pct: stop, take_profit_pct: null, rsi_overbought: Number(r.sellAt), rsi_period: 5, ...off };
+    return { rules: { entry, exit }, engine_key: "signals_entry", params: { ...entry, ...exit, lookback: 260, allocation: 0.1, max_positions: 5 } };
+  }
+  const lookback = Number(r.lookback);
+  const entry = { breakout_lookback: lookback, breakout_proximity_pct: 2.0, volume_multiple: Number(r.volume), volume_lookback: lookback, setup: "breakout", min_history_bars: 60 };
+  const exit = { stop_loss_pct: stop, take_profit_pct: Number(r.target), rsi_overbought: null, ...off };
+  return { rules: { entry, exit }, engine_key: "signals_entry", params: { ...entry, ...exit, lookback: 120, allocation: 0.1, max_positions: 5 } };
 }
 
 function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper: () => void }) {
@@ -94,7 +114,7 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
   const [creating, setCreating] = useState(false);
-  const [rules, setRules] = useState({ lookback: "20", volume: "1.5", stop: "5", target: "10" });
+  const [rules, setRules] = useState<Rules>(START_RULES);
   const [runFor, setRunFor] = useState<number | null>(null);
   const [stocks, setStocks] = useState("");
   const [capital, setCapital] = useState("500000");
@@ -317,14 +337,45 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
 
                 {editing ? (
                   <div className="space-y-3 border-t border-border p-4">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-2 sm:w-72">
                       {(
                         [
-                          ["lookback", "Buy a breakout over (days)"],
-                          ["volume", "Volume times normal"],
-                          ["stop", "Stop loss %"],
-                          ["target", "Take profit %"],
+                          ["breakout", "Breakout"],
+                          ["triple", "Triple RSI"],
                         ] as const
+                      ).map(([kind, label]) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          onClick={() => setRules({ ...rules, kind, stop: kind === "triple" ? "8" : "5" })}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-sm transition-colors",
+                            rules.kind === kind ? "border-primary/40 bg-primary/10" : "border-border text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {rules.kind === "triple" && (
+                      <p className="text-xs text-muted-foreground">
+                        Buys after three falling days, in a stock above its 200-day average. Sells when the 5-day RSI recovers.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {(
+                        (rules.kind === "triple"
+                          ? [
+                              ["below", "Buy when 5-day RSI is under"],
+                              ["sellAt", "Sell when RSI passes"],
+                              ["stop", "Stop loss %"],
+                            ]
+                          : [
+                              ["lookback", "Buy a breakout over (days)"],
+                              ["volume", "Volume times normal"],
+                              ["stop", "Stop loss %"],
+                              ["target", "Take profit %"],
+                            ]) as [keyof Rules, string][]
                       ).map(([key, label]) => (
                         <label key={key} className="space-y-1 text-xs text-muted-foreground">
                           {label}
@@ -339,7 +390,7 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
                     </div>
                     <button
                       type="button"
-                      disabled={busy !== null || !selected || Object.values(rules).some((x) => !Number(x))}
+                      disabled={busy !== null || !selected || (rules.kind === "triple" ? [rules.below, rules.sellAt, rules.stop] : [rules.lookback, rules.volume, rules.stop, rules.target]).some((x) => !Number(x))}
                       title="Saves these rules as a new version. A saved version can't be edited later."
                       onClick={() =>
                         run("version", async () => {
