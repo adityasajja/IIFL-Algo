@@ -155,7 +155,7 @@ export default function SystemPanel() {
               label="Database"
               value={health?.database ? "up" : "off"}
               tone={health?.database ? "good" : "warn"}
-              sub="not used"
+              sub="strategies and paper runs"
             />
             <Stat
               label="Session expires"

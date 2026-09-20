@@ -58,7 +58,7 @@ _DB_CHECK: dict[str, Any] = {"at": 0.0, "ok": False, "probing": False}
 
 
 def _db_health(ttl: float = 60.0) -> bool:
-    """Optional-Postgres check that never blocks the request thread.
+    """App-database check that never blocks the request thread.
 
     The probe itself is slow when no database is running: ``localhost``
     resolves to both ::1 and 127.0.0.1, so a dead Postgres burns the full
@@ -76,9 +76,9 @@ def _db_health(ttl: float = 60.0) -> bool:
         def probe() -> None:
             ok = False
             try:
-                from atr.data.store import Database
+                from atr.appdb.engine import get_app_db
 
-                ok = Database().health()
+                ok = get_app_db().health()
             except Exception:  # noqa: BLE001 - DB is optional
                 ok = False
             _DB_CHECK["ok"] = ok
