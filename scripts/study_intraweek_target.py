@@ -63,10 +63,10 @@ def weeks_for(symbol: str) -> pd.DataFrame | None:
     )
 
 
-def simulate(w: pd.DataFrame, stop: float | None) -> pd.DataFrame:
+def simulate(w: pd.DataFrame, stop: float | None, target: float = TARGET) -> pd.DataFrame:
     """Exit price and reason for every week, day by day."""
     entry = w["entry"].to_numpy()
-    tgt = entry * (1 + TARGET)
+    tgt = entry * (1 + target)
     stp = entry * (1 - stop) if stop else np.full(len(w), -np.inf)
     exit_px = np.full(len(w), np.nan)
     reason = np.array([""] * len(w), dtype=object)
