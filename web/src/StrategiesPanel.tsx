@@ -75,6 +75,7 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [versions, setVersions] = useState<StrategyVersion[]>([]);
   const [name, setName] = useState("");
+  const [about, setAbout] = useState("");
   const [draft, setDraft] = useState("");
   const [report, setReport] = useState<StrategyValidation | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -297,30 +298,43 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
           </>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Name a new strategy"
+              className="min-w-[14rem] flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
+            />
+            <button
+              type="button"
+              disabled={busy !== null || !name.trim()}
+              onClick={() =>
+                run("create", async () => {
+                  const row = await createSavedStrategy({
+                    name: name.trim(),
+                    kind: "rules",
+                    description: about.trim() || null,
+                  });
+                  setName("");
+                  setAbout("");
+                  setNotice(`Created “${row.name}”. Add its rules to make it deployable.`);
+                  await refresh(row.strategy_id);
+                  setEditing(true);
+                })
+              }
+              className={ghost}
+            >
+              <Plus className="h-3 w-3" />
+              {busy === "create" ? "Creating…" : "Create"}
+            </button>
+          </div>
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name a new strategy"
-            className="min-w-[14rem] flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
+            value={about}
+            onChange={(e) => setAbout(e.target.value)}
+            placeholder="What it does (optional)"
+            className="w-full rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
           />
-          <button
-            type="button"
-            disabled={busy !== null || !name.trim()}
-            onClick={() =>
-              run("create", async () => {
-                const row = await createSavedStrategy({ name: name.trim(), kind: "rules" });
-                setName("");
-                setNotice(`Created “${row.name}”. Add its rules to make it deployable.`);
-                await refresh(row.strategy_id);
-                setEditing(true);
-              })
-            }
-            className={ghost}
-          >
-            <Plus className="h-3 w-3" />
-            {busy === "create" ? "Creating…" : "Create"}
-          </button>
         </div>
 
         {report && <ValidationReport report={report} />}
