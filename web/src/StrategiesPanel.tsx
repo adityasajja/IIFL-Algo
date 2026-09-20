@@ -135,7 +135,7 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
   const remove = async (s: SavedStrategy) => {
     const ok = await dialog.confirm({
       title: `Remove ${s.name}?`,
-      description: "It leaves this list. Its past paper runs and backtests stay in your records.",
+      description: "This erases it, with its versions, backtests and paper history. It cannot be undone.",
       confirmLabel: "Remove",
       tone: "danger",
     });
