@@ -1,38 +1,30 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, FlaskConical, HelpCircle, Plus, ShieldCheck, Sparkles, XCircle } from "lucide-react";
+import { AlertTriangle, Plus, ShieldCheck, Sparkles, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   createSavedStrategy,
   createStrategyVersion,
-  getStrategies,
   listDeployments,
   listSavedStrategies,
   listStrategyVersions,
   seedExampleStrategy,
   validateStrategy,
   type SavedStrategy,
-  type StrategyInfo,
   type StrategyValidation,
   type StrategyVersion,
-  type ValidationState,
 } from "./api";
 import { Card, CardHeader, ErrorBox } from "./components/ui/card";
-import { PageLoader } from "./components/ui/loading";
-import { Badge, fmtNum, fmtPct } from "./components/ui/stat";
+import { Badge } from "./components/ui/stat";
 import { StrategyTiles } from "./StrategyTiles";
-import { humanizeSentence, strategyLabel } from "./lib/format";
+import { strategyLabel } from "./lib/format";
 import { cn } from "./lib/utils";
 import { RelativeTime } from "./lib/time";
 
 /**
- * Strategies — decide.
+ * Strategies — what is running, and the rules you have built.
  *
- * Two halves, and the split is the point.
- *
- * **The registry** (below) lists what the *engine* can run: strategies compiled
- * into the codebase. They have no version history, cannot be deployed, and each
- * one shows its walk-forward verdict — because a list that renders a validated
- * strategy and an untested one identically invites the exact mistake this project
- * exists to avoid.
+ * The status tiles at the top show what is doing something now. The 18 built-in
+ * strategies that used to be listed here were removed: none had passed validation, so
+ * the list was noise. Their engines still exist for backtests and the Evidence page.
  *
  * **Your strategies** is the authoring half: create a strategy, append an
  * immutable version, validate it, and then deploy that exact version on the Paper
@@ -42,189 +34,30 @@ import { RelativeTime } from "./lib/time";
  * in as many words rather than letting a green tick imply the other question.
  */
 export default function StrategiesPanel({
-  onOpenResearch,
   onOpenPlans,
   onOpenPaper,
 }: {
-  onOpenResearch: () => void;
   onOpenPlans: () => void;
   onOpenPaper: () => void;
 }) {
-  const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
-  const [pickedName, setPickedName] = useState<string | null>(null);
-  const [showAuthoring, setShowAuthoring] = useState(false);
   const [running, setRunning] = useState(0);
-  const [asOf, setAsOf] = useState<string | null>(null);
-  const [control, setControl] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Until the first response there is nothing to count; without this the panel
-  // printed "0 of 0 … cleared validation" in a warning banner, which reads as a
-  // measured result rather than "not loaded yet".
-  const [loaded, setLoaded] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const r = await getStrategies();
-      setLoaded(true);
-      setStrategies(r.strategies);
-      setAsOf(r.validation_as_of ?? null);
-      setControl(r.control_sharpe ?? null);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
 
   useEffect(() => {
-    void load();
     listDeployments()
       .then((r) => setRunning((r?.deployments ?? []).filter((d) => d.status === "RUNNING").length))
       .catch(() => setRunning(0));
-  }, [load]);
+  }, []);
 
-  const counts = {
-    pass: strategies.filter((s) => s.validation.state === "pass").length,
-    fail: strategies.filter((s) => s.validation.state === "fail").length,
-    untested: strategies.filter((s) => s.validation.state === "untested").length,
-  };
-
-  if (!loaded && !error) return <PageLoader label="Loading strategies" />;
-
-  const total = strategies.length;
-  const picked = strategies.find((s) => s.name === pickedName) ?? null;
-  const share = (n: number) => (total > 0 ? `${(100 * n) / total}%` : "0%");
-
+  // The 18 built-in strategies used to be listed here. None had proven itself, so the list
+  // was noise; the engines still exist for backtests and the Evidence page.
   return (
     <div className="space-y-4">
-      {error && <ErrorBox>{error}</ErrorBox>}
-
-      {/* What is doing something now, as tiles. */}
       <StrategyTiles running={running} onOpenPaper={onOpenPaper} onOpenPlans={onOpenPlans} />
-
-      {/* The 18 built-ins as a scoreboard: one bar for the split, one tile each. */}
-      <Card className="p-5">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-semibold tracking-tight">Built-in strategies</span>
-          <span
-            className="text-xs text-muted-foreground"
-            title={
-              "Proven means it beat simply buying the index and beat random picks." +
-              (control !== null ? ` Random picks over the same stocks score about ${fmtNum(control)} (Sharpe).` : "") +
-              (asOf ? " Last tested " + new Date(asOf).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) + "." : "")
-            }
-          >
-            {total} · what counts as proven?
-          </span>
-        </div>
-
-        <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-          <i className="bg-emerald-500" style={{ width: share(counts.pass) }} />
-          <i className="bg-rose-500" style={{ width: share(counts.fail) }} />
-          <i className="bg-muted-foreground/30" style={{ width: share(counts.untested) }} />
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-emerald-500" />Proven {counts.pass}</span>
-          <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-rose-500" />Lost {counts.fail}</span>
-          <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-muted-foreground/40" />Not tested {counts.untested}</span>
-        </div>
-
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {strategies.map((s) => {
-            const state = s.validation.state;
-            const ret = s.validation.oos_return_pct;
-            return (
-              <button
-                key={s.name}
-                type="button"
-                onClick={() => setPickedName((cur) => (cur === s.name ? null : s.name))}
-                aria-pressed={pickedName === s.name}
-                title={pretty(s.name)}
-                className={cn(
-                  "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors",
-                  state === "pass" && "border-emerald-500/40 bg-emerald-500/5",
-                  state === "fail" && "border-rose-500/25 bg-rose-500/5",
-                  state === "untested" && "border-border bg-muted/30",
-                  pickedName === s.name && "ring-2 ring-primary",
-                )}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <StateIcon state={state} />
-                  <span className="truncate text-xs font-medium">{pretty(s.name)}</span>
-                </span>
-                {state !== "untested" && ret != null && (
-                  <span className={cn("shrink-0 text-xs font-semibold tabular-nums", ret >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                    {fmtPct(ret, 0)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {picked && (
-          <div className="mt-4 rounded-xl border border-border">
-            <Row s={picked} onOpenResearch={onOpenResearch} />
-          </div>
-        )}
-      </Card>
-
-      <Fold title="Build your own" open={showAuthoring} onToggle={() => setShowAuthoring((o) => !o)}>
-        <Authoring />
-      </Fold>
+      <Authoring />
     </div>
   );
 }
 
-/** A section that opens and closes, showing a one-line summary while shut. */
-function Fold({
-  title,
-  summary,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  summary?: string;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 text-left transition-colors hover:bg-muted/40"
-      >
-        <span className="min-w-0">
-          <span className="block text-sm font-semibold tracking-tight">{title}</span>
-          {summary && <span className="block truncate text-xs text-muted-foreground">{summary}</span>}
-        </span>
-        <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
-      </button>
-      {open && children}
-    </section>
-  );
-}
-
-/**
- * Create a strategy, append an immutable version, validate it.
- *
- * Three deliberate choices:
- *
- * * **Validate before saving is offered first**, because a version cannot be
- *   edited afterwards. The server refuses a definition with structural errors at
- *   creation too, so this is the same check twice — once where it is cheap, once
- *   where it is unmissable.
- * * **The definition is a JSON textarea, not a form.** A rule block has ~20
- *   fields across two dataclasses and they change with the rule layer; a
- *   hand-built form would be a second definition of the schema, and the two would
- *   drift. The server is the schema, and it answers with the field names.
- * * **`deployable` is shown per version and never inferred.** A version that
- *   cannot resolve to entry/exit rules is one a deployment would run while
- *   placing no orders, which on the monitor looks exactly like a quiet market.
- */
 function Authoring() {
   const [saved, setSaved] = useState<SavedStrategy[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -541,154 +374,3 @@ function ValidationReport({ report }: { report: StrategyValidation }) {
   );
 }
 
-function Row({ s, onOpenResearch }: { s: StrategyInfo; onOpenResearch: () => void }) {
-  const v = s.validation;
-  const [open, setOpen] = useState(false);
-  const beatBench =
-    v.oos_sharpe !== null && v.oos_sharpe !== undefined &&
-    v.benchmark_sharpe !== null && v.benchmark_sharpe !== undefined
-      ? v.oos_sharpe > v.benchmark_sharpe
-      : null;
-
-  // The random-picks comparison in one phrase instead of a sigma value.
-  const z = v.z_vs_control;
-  const vsRandom =
-    z === null || z === undefined
-      ? null
-      : z >= 2
-        ? { word: "Beats random picks", cls: "bg-emerald-500/10 text-emerald-500" }
-        : z <= -2
-          ? { word: "Worse than random picks", cls: "bg-rose-500/10 text-rose-500" }
-          : { word: "No better than random", cls: "bg-muted text-muted-foreground" };
-
-  const tested = v.state === "fail" || v.state === "pass";
-  const hasDetails = tested || s.warmup_bars !== null || s.tunable.length > 0;
-
-  return (
-    <div className="px-5 py-3.5">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <StateIcon state={v.state} />
-          <div className="truncate text-sm font-medium">{pretty(s.name)}</div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <StateBadge state={v.state} />
-          {v.state === "untested" && (
-            <button
-              type="button"
-              onClick={onOpenResearch}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <FlaskConical className="h-3 w-3" />
-              Test it
-            </button>
-          )}
-          {hasDetails && (
-            <button
-              type="button"
-              onClick={() => setOpen((o) => !o)}
-              aria-label={open ? "Hide details" : "Show details"}
-              aria-expanded={open}
-              className="grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {tested && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 pl-7 text-sm">
-          {v.oos_return_pct !== null && v.oos_return_pct !== undefined && (
-            <span className="text-muted-foreground">
-              Return{" "}
-              <span className={cn("font-medium tabular-nums", v.oos_return_pct >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                {fmtPct(v.oos_return_pct, 1)}
-              </span>
-            </span>
-          )}
-          {v.measured_win_rate !== null && v.measured_win_rate !== undefined && (
-            <span className="text-muted-foreground">
-              Wins <span className="font-medium tabular-nums text-foreground">{(v.measured_win_rate * 100).toFixed(0)}%</span>
-              {v.measured_trades ? <span className="text-xs"> of {v.measured_trades.toLocaleString()} trades</span> : null}
-            </span>
-          )}
-          {beatBench === false && (
-            <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-500">
-              Behind buy &amp; hold
-            </span>
-          )}
-          {vsRandom && (
-            <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", vsRandom.cls)}>{vsRandom.word}</span>
-          )}
-        </div>
-      )}
-
-      {open && (
-        <div className="mt-3 space-y-2 pl-7 text-[12.5px]">
-          {v.note && <div className="text-muted-foreground">{v.note}</div>}
-          <div className="grid gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-            {v.oos_sharpe !== null && v.oos_sharpe !== undefined && (
-              <Metric label="Sharpe (out of sample)" value={fmtNum(v.oos_sharpe)} bad={beatBench === false} />
-            )}
-            {v.expectancy_r !== null && v.expectancy_r !== undefined && (
-              <Metric
-                label="Average result per trade"
-                value={`${v.expectancy_r >= 0 ? "+" : ""}${fmtNum(v.expectancy_r, 2)}R`}
-                bad={v.expectancy_r < 0}
-              />
-            )}
-            {s.warmup_bars !== null && <Metric label="History needed" value={`${s.warmup_bars} days`} />}
-          </div>
-          {s.tunable.length > 0 && (
-            <div className="text-muted-foreground">
-              Adjustable: {s.tunable.map((t) => humanizeSentence(t).toLowerCase()).join(", ")}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  bad,
-  note,
-}: {
-  label: string;
-  value: string;
-  bad?: boolean;
-  note?: string;
-}) {
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          "font-medium tabular-nums",
-          bad ? "text-destructive" : undefined,
-        )}
-      >
-        {value}
-      </span>
-      {note ? <span className="text-[11px] text-muted-foreground">({note})</span> : null}
-    </div>
-  );
-}
-
-function StateIcon({ state }: { state: ValidationState }) {
-  if (state === "pass") return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />;
-  if (state === "fail") return <XCircle className="h-4 w-4 shrink-0 text-destructive" />;
-  return <HelpCircle className="h-4 w-4 shrink-0 text-muted-foreground" />;
-}
-
-function StateBadge({ state }: { state: ValidationState }) {
-  if (state === "pass") return <Badge tone="good">validated</Badge>;
-  if (state === "fail") return <Badge tone="bad">tested, lost</Badge>;
-  return <Badge tone="flat">not tested</Badge>;
-}
-
-const pretty = strategyLabel;

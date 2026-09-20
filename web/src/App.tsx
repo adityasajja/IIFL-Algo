@@ -162,7 +162,7 @@ const TITLES: Record<Tab, { title: string; sub: string }> = {
   dashboard: { title: "Dashboard", sub: "Where you stand right now" },
   watchlist: { title: "Watchlist", sub: "Your own symbols, your own columns" },
   markets: { title: "Markets", sub: "How the market is doing, plus scans and charts" },
-  strategies: { title: "Strategies", sub: "What the system would do, and whether it has earned trust" },
+  strategies: { title: "Strategies", sub: "What is running, and the rules you have built" },
   signals: { title: "Signals", sub: "What the market is doing and what is worth your attention" },
   trading: { title: "Trading", sub: "Positions, holdings, margin, order book — and what mode you are in" },
   paper: { title: "Paper", sub: "Deploy a strategy version, watch it trade, and stop it" },
@@ -824,7 +824,6 @@ export default function App() {
         )}
         {tab === "strategies" && (
           <StrategiesPanel
-            onOpenResearch={() => setTab("evidence", "measured")}
             onOpenPlans={() => setTab("signals", "today")}
             onOpenPaper={() => setTab("paper")}
           />
