@@ -978,6 +978,42 @@ export interface ForwardTracker {
 
 export const getForwardTracker = () => req<ForwardTracker>("/tracker/oversold-volatile");
 
+export interface GapPlanStats {
+  graded: number;
+  open: number;
+  win_rate_pct: number | null;
+  avg_net_pct: number | null;
+  median_net_pct: number | null;
+  weeks: number;
+}
+
+export interface GapPlanTrade {
+  symbol: string;
+  entry_date: string;
+  entry: number;
+  gap_pct: number;
+  status: "open" | "closed";
+  exit_reason?: "target" | "stop" | "friday";
+  exit_price?: number;
+  net_pct?: number;
+  source: "live" | "replay";
+}
+
+export interface GapPlan {
+  plan: { target_pct: number; stop_pct: number; gap_pct: number; market_min_pct: number };
+  this_week: { as_of: string | null; median_pct: number | null; needed_pct: number; status: "trade" | "skip" | "unknown" };
+  verdict: string;
+  live_from: string | null;
+  live: GapPlanStats;
+  replay: GapPlanStats;
+  when_market_did_not_qualify: GapPlanStats;
+  open: GapPlanTrade[];
+  recent: GapPlanTrade[];
+  needed: number;
+}
+
+export const getGapPlan = () => req<GapPlan>("/tracker/gap-plan");
+
 // ---------------------------------------------------------------------------
 // Portfolio, quotes, caches
 // ---------------------------------------------------------------------------

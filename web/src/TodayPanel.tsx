@@ -2,11 +2,14 @@ import { Star } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   getForwardTracker,
+  getGapPlan,
   getInsightSettings,
   getInsights,
   saveInsightSettings,
   sendInsights,
   type ForwardTracker,
+  type GapPlan,
+  type GapPlanStats,
   type HoldingFlag,
   type InsightIdea,
   type InsightsDigest,
@@ -51,6 +54,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
   const [digest, setDigest] = useState<InsightsDigest | null>(null);
   const [settings, setSettings] = useState<InsightsSettings | null>(null);
   const [tracker, setTracker] = useState<ForwardTracker | null>(null);
+  const [plan, setPlan] = useState<GapPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
@@ -68,6 +72,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
   useEffect(() => {
     void load();
     getForwardTracker().then(setTracker).catch(() => setTracker(null));
+    getGapPlan().then(setPlan).catch(() => setPlan(null));
   }, [load]);
 
   async function update(patch: Partial<InsightsSettings>) {
@@ -223,6 +228,8 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
         </div>
       </div>
 
+      {plan && <GapPlanCard plan={plan} onOpenChart={onOpenChart} />}
+
       {tracker && <TrackerCard tracker={tracker} onOpenChart={onOpenChart} />}
 
       {/* What to be told, and when. */}
@@ -348,6 +355,106 @@ function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onO
               {s.symbol}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CALL_TONE = { trade: TONE.good, skip: TONE.warn, unknown: TONE.flat };
+const EXIT_LABEL = { target: "Hit target", stop: "Stopped out", friday: "Sold Friday" } as const;
+
+function PlanStat({ label, stats }: { label: string; stats: GapPlanStats }) {
+  const good = (stats.avg_net_pct ?? 0) > 0;
+  return (
+    <div className="rounded-xl bg-muted/40 p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      {stats.graded === 0 ? (
+        <div className="mt-1 text-sm text-muted-foreground">No graded trades yet</div>
+      ) : (
+        <>
+          <div className={cn("mt-1 text-xl font-semibold tabular-nums", good ? "text-emerald-500" : "text-rose-500")}>
+            {signed(stats.avg_net_pct ?? 0, 2)}
+            <span className="ml-1 text-xs font-normal text-muted-foreground">per trade</span>
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {stats.win_rate_pct}% hit target · {stats.graded} trades · {stats.weeks} {stats.weeks === 1 ? "week" : "weeks"}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The Monday gap plan: this week's call, the results so far, and what is open. */
+function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (symbol: string) => void }) {
+  const w = p.this_week;
+  const pct = Math.min(100, (p.live.graded / p.needed) * 100);
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-semibold">Monday gap plan</span>
+        <span className="text-[11px] text-muted-foreground">paper trades, no money at risk</span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        After a rising week, buy stocks that open more than {Math.abs(p.plan.gap_pct)}% below Friday's close. Sell at +{p.plan.target_pct}%, stop at −{p.plan.stop_pct}%, otherwise sell Friday.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <span className={cn("rounded-full px-3 py-1 text-sm font-semibold", CALL_TONE[w.status])}>
+          {w.status === "trade" ? "This week: trade" : w.status === "skip" ? "This week: skip" : "This week: no reading"}
+        </span>
+        {w.median_pct != null && (
+          <span className="text-xs text-muted-foreground">
+            Last week the typical stock moved {signed(w.median_pct, 2)}; the plan needs more than +{w.needed_pct}%.
+          </span>
+        )}
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <PlanStat label={`Live since ${p.live_from ?? "—"}`} stats={p.live} />
+        <PlanStat label="Replay of recent weeks" stats={p.replay} />
+      </div>
+      <div className="mt-3">
+        <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+          <span>{p.live.graded} of {p.needed} live trades graded</span>
+          <span>{p.verdict}</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {p.open.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 text-xs text-muted-foreground">Open this week</div>
+          <div className="divide-y divide-border rounded-xl border border-border">
+            {p.open.map((t) => (
+              <div key={`${t.entry_date}-${t.symbol}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <button type="button" onClick={() => onOpenChart?.(t.symbol)} className="font-semibold hover:underline">{t.symbol}</button>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  in at {inr(t.entry)} · target {inr(t.entry * (1 + p.plan.target_pct / 100))} · stop {inr(t.entry * (1 - p.plan.stop_pct / 100))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {p.recent.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 text-xs text-muted-foreground">Latest results</div>
+          <div className="divide-y divide-border rounded-xl border border-border">
+            {p.recent.slice(0, 6).map((t) => (
+              <div key={`${t.entry_date}-${t.symbol}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <span>
+                  <span className="font-semibold">{t.symbol}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{dateLabel(t.entry_date)} · {t.exit_reason ? EXIT_LABEL[t.exit_reason] : ""}{t.source === "replay" ? " · replay" : ""}</span>
+                </span>
+                <span className={cn("tabular-nums", (t.net_pct ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>{signed(t.net_pct ?? 0, 2)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
