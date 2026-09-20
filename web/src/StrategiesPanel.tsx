@@ -76,6 +76,7 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
   const [versions, setVersions] = useState<StrategyVersion[]>([]);
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
+  const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
   const [report, setReport] = useState<StrategyValidation | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -298,44 +299,65 @@ function Authoring({ tiles }: { tiles: React.ReactNode }) {
           </>
         )}
 
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Name a new strategy"
-              className="min-w-[14rem] flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
-            />
-            <button
-              type="button"
-              disabled={busy !== null || !name.trim()}
-              onClick={() =>
-                run("create", async () => {
-                  const row = await createSavedStrategy({
-                    name: name.trim(),
-                    kind: "rules",
-                    description: about.trim() || null,
-                  });
-                  setName("");
-                  setAbout("");
-                  setNotice(`Created “${row.name}”. Add its rules to make it deployable.`);
-                  await refresh(row.strategy_id);
-                  setEditing(true);
-                })
-              }
-              className={ghost}
-            >
+        {!creating ? (
+          <div>
+            <button type="button" onClick={() => setCreating(true)} className={ghost}>
               <Plus className="h-3 w-3" />
-              {busy === "create" ? "Creating…" : "Create"}
+              New strategy
             </button>
           </div>
-          <input
-            value={about}
-            onChange={(e) => setAbout(e.target.value)}
-            placeholder="What it does (optional)"
-            className="w-full rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
-          />
-        </div>
+        ) : (
+          <div className="space-y-2">
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Name"
+              className="w-full rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
+            />
+            <input
+              value={about}
+              onChange={(e) => setAbout(e.target.value)}
+              placeholder="What it does (optional)"
+              className="w-full rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={busy !== null || !name.trim()}
+                onClick={() =>
+                  run("create", async () => {
+                    const row = await createSavedStrategy({
+                      name: name.trim(),
+                      kind: "rules",
+                      description: about.trim() || null,
+                    });
+                    setName("");
+                    setAbout("");
+                    setCreating(false);
+                    setNotice(`Created “${row.name}”. Add its rules to make it deployable.`);
+                    await refresh(row.strategy_id);
+                    setEditing(true);
+                  })
+                }
+                className={ghost}
+              >
+                {busy === "create" ? "Creating…" : "Create"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreating(false);
+                  setName("");
+                  setAbout("");
+                }}
+                className={cn(ghost, "text-muted-foreground")}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {report && <ValidationReport report={report} />}
       </div>
