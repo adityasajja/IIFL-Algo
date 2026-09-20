@@ -86,6 +86,16 @@ class RunnerDeploymentState:
     ERROR = "ERROR"
 
 
+def _now_ist() -> datetime:
+    """The clock the market calendar is asked about.
+
+    Naive datetimes mean Indian time to the calendar. The runner used to default to
+    naive UTC, which put the "open" window at 14:45 to 21:00 Indian time and left a run
+    waiting for a market that was already trading.
+    """
+    return datetime.now(IST)
+
+
 def in_market_hours(now: datetime | None = None) -> bool:
     """Whether the NSE/BSE regular session is open.
 
@@ -413,7 +423,7 @@ class DeploymentLoop:
         from atr.market_calendar import get_market_calendar
         from atr.signals.rules import eval_entry, eval_exit, primary_exit
 
-        eval_time = now or utcnow()
+        eval_time = now or _now_ist()
         cal = get_market_calendar()
 
         resolved = self._rules()
@@ -1373,7 +1383,7 @@ class PaperRunner:
         Public and synchronous so a test can drive the loop deterministically
         instead of sleeping on a background task.
         """
-        now = now or utcnow()
+        now = now or _now_ist()
         self.sync_loops()
 
         signals = 0
