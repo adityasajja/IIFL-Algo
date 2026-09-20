@@ -83,6 +83,14 @@ def _rsi_series(frame: pd.DataFrame) -> pd.Series:
     return frame[_PRE_RSI] if _PRE_RSI in frame.columns else rsi(frame["close"])
 
 
+def _rsi_n(frame: pd.DataFrame, window: int) -> pd.Series:
+    """RSI over ``window`` bars; the precomputed column when it exists."""
+    key = f"_rsi{window}"
+    if key in frame.columns:
+        return frame[key]
+    return _rsi_series(frame) if window == 14 else rsi(frame["close"], window)
+
+
 def _prior_high(frame: pd.DataFrame, lookback: int) -> pd.Series:
     """Highest high over the ``lookback`` bars *before* the current one."""
     key = _PRE_PRIOR_HIGH.format(lookback)
@@ -116,6 +124,12 @@ def precompute_indicators(frame: pd.DataFrame, entries: EntryRules, exits: ExitR
         if window and window > 0:
             frame[_PRE_SMA.format(window)] = sma(frame["close"], window)
     frame[_PRE_RSI] = rsi(frame["close"])
+    for window in {entries.triple_rsi_period, exits.rsi_period} - {14}:
+        frame[f"_rsi{window}"] = rsi(frame["close"], window)
+    if entries.triple_rsi_trend_sma:
+        frame[_PRE_SMA.format(entries.triple_rsi_trend_sma)] = sma(
+            frame["close"], entries.triple_rsi_trend_sma
+        )
     frame[_PRE_PRIOR_HIGH.format(entries.breakout_lookback)] = _prior_high(
         frame, entries.breakout_lookback
     )
@@ -207,7 +221,7 @@ def eval_exit(
 
     # --- overbought ----------------------------------------------------
     if rules.rsi_overbought is not None and len(frame) >= 30:
-        value = _last(_rsi_series(frame))
+        value = _last(_rsi_n(frame, rules.rsi_period))
         if _finite(value) and float(value) >= rules.rsi_overbought:
             add(
                 "rsi_overbought",
@@ -295,6 +309,29 @@ def eval_entry(symbol: str, frame: pd.DataFrame, rules: EntryRules) -> list[Sign
                 sma_long=round(float(long_ma), 2),
             )
 
+    # --- 4. Triple RSI: oversold, falling three days, still in an uptrend ----
+    trend_n = rules.triple_rsi_trend_sma
+    if len(frame) >= max(trend_n, 10) + 1:
+        line = _last(_sma_series(frame, trend_n)) if trend_n else None
+        r = _rsi_n(frame, rules.triple_rsi_period)
+        now, d1, d2, d3 = (float(r.iloc[-1 - i]) for i in range(4))
+        falling = now < d1 < d2 < d3
+        in_trend = trend_n == 0 or (_finite(line) and price > float(line))
+        if (
+            falling
+            and now < rules.triple_rsi_below
+            and d3 < rules.triple_rsi_prior_below
+            and in_trend
+        ):
+            add(
+                "triple_rsi",
+                f"RSI{rules.triple_rsi_period} {now:.0f}, down 3 days in a row, "
+                f"above SMA{trend_n}",
+                rsi=round(now, 1),
+            )
+
+    if rules.setup:
+        out = [s for s in out if s.rule == rules.setup]
     return out
 
 

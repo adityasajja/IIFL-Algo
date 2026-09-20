@@ -68,6 +68,11 @@ NUMERIC_RULE_FIELDS = frozenset(
         "volume_lookback",
         "oversold_rsi",
         "long_sma",
+        "rsi_period",
+        "triple_rsi_period",
+        "triple_rsi_below",
+        "triple_rsi_prior_below",
+        "triple_rsi_trend_sma",
     }
 )
 

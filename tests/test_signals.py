@@ -281,3 +281,43 @@ def test_entry_strategy_runs_in_the_backtest_engine():
     ).run()
     assert len(result.equity) > 100
     assert not result.equity.isna().any()
+
+
+# --------------------------------------------------------------------------
+# triple RSI
+# --------------------------------------------------------------------------
+def _uptrend_then(tail):
+    up = np.linspace(100, 200, 260) + np.sin(np.arange(260)) * 1.5
+    return frame(np.concatenate([up, tail]))
+
+
+def _names(signals):
+    return [s.rule for s in signals]
+
+
+def test_triple_rsi_fires_on_a_third_falling_day_below_30_in_an_uptrend():
+    rules = _entry_rules(triple_rsi_trend_sma=200)
+    assert "triple_rsi" in _names(eval_entry("X", _uptrend_then([198, 195, 191, 186, 180]), rules))
+
+
+def test_triple_rsi_needs_only_two_falling_days_to_be_too_early():
+    rules = _entry_rules(triple_rsi_trend_sma=200)
+    assert "triple_rsi" not in _names(eval_entry("X", _uptrend_then([198, 195]), rules))
+
+
+def test_triple_rsi_stays_out_of_a_downtrend():
+    down = frame(np.concatenate([np.linspace(200, 100, 260), [98, 95, 91, 86, 80]]))
+    assert "triple_rsi" not in _names(eval_entry("X", down, _entry_rules(triple_rsi_trend_sma=200)))
+
+
+def test_setup_limits_a_strategy_to_its_own_rule():
+    rules = _entry_rules(triple_rsi_trend_sma=200, setup="triple_rsi")
+    assert _names(eval_entry("X", _uptrend_then([198, 195, 191, 186, 180]), rules)) == ["triple_rsi"]
+
+
+def test_the_rsi_exit_reads_the_period_it_is_given():
+    exits = ExitRules(stop_loss_pct=50.0, take_profit_pct=None, trailing_stop_pct=None,
+                      trend_sma=0, rsi_overbought=50.0, rsi_period=5)
+    bounce = frame(np.concatenate([np.linspace(100, 60, 60), [70, 80]]))
+    fired = eval_exit("X", bounce, avg_price=60.0, rules=exits, quantity=1)
+    assert "rsi_overbought" in _names(fired)

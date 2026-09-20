@@ -43,6 +43,8 @@ class ExitRules:
     trend_confirm_bars: int = 3
     #: Exit when daily RSI is at or above this. None disables.
     rsi_overbought: float | None = 80.0
+    #: RSI window the overbought exit reads.
+    rsi_period: int = 14
     #: Bars of daily history required before trend/RSI rules are trusted.
     min_history_bars: int = 60
 
@@ -74,6 +76,18 @@ class EntryRules:
     #: window of a few hundred bars, and a strategy needing 200 bars of warmup
     #: simply cannot trade inside one — it produced exactly zero trades.
     long_sma: int = 100
+
+    #: Rule 4 — Triple RSI: a short RSI that has fallen several days running,
+    #: below a low level, in a stock still above its long average.
+    triple_rsi_period: int = 5
+    triple_rsi_below: float = 30.0
+    #: The RSI reading three bars back must have been under this.
+    triple_rsi_prior_below: float = 60.0
+    triple_rsi_trend_sma: int = 200
+
+    #: Fire only this rule ("triple_rsi", "breakout", ...). None = any of them.
+    #: Without it every strategy also trades the other three rules' setups.
+    setup: str | None = None
 
     #: Bars of history a rule needs before it will fire. Must be comfortably
     #: smaller than the walk-forward test window or the strategy never trades
