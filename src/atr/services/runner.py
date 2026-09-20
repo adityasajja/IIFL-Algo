@@ -208,6 +208,9 @@ class DeploymentLoop:
     acted: set[tuple[str, str, str]] = field(default_factory=set)
     #: The first fresh price seen per symbol each day: (day, price, minutes after the open).
     _first_price: dict[str, tuple[Any, float, float]] = field(default_factory=dict)
+    #: The account as folded during the current pass; see ``_portfolio``.
+    _in_pass: bool = False
+    _fold: Any = None
     #: Set when rules emitted but nothing was traded, for the status surface.
     last_pass: dict[str, Any] = field(default_factory=dict)
     started_at: datetime = field(default_factory=utcnow)
@@ -417,6 +420,14 @@ class DeploymentLoop:
         return None
 
     def evaluate(self, now: datetime | None = None) -> list[dict[str, Any]]:
+        """Run one evaluation pass. The account is folded once for the pass, not per stock."""
+        self._in_pass, self._fold = True, None
+        try:
+            return self._evaluate(now)
+        finally:
+            self._in_pass, self._fold = False, None
+
+    def _evaluate(self, now: datetime | None = None) -> list[dict[str, Any]]:
         """Run the rules over every symbol with a live price.
 
         Observability and freshness rules:
@@ -722,7 +733,19 @@ class DeploymentLoop:
     # the fold
     # ------------------------------------------------------------------
     def _portfolio(self) -> Any:
-        """The deployment's account, folded from order_events. Never cached."""
+        """The deployment's account, folded from order_events.
+
+        Rebuilt on every call, except inside one evaluation pass: there it is built once
+        and rebuilt only after a trade, because a pass asks for it twice per stock and a
+        thousand stocks made that the slowest part of the loop.
+        """
+        if self._in_pass:
+            if self._fold is None:
+                self._fold = self._fold_now()
+            return self._fold
+        return self._fold_now()
+
+    def _fold_now(self) -> Any:
         return self.ledger.portfolio(
             self.user_id,
             deployment_id=self.deployment_id,
@@ -822,7 +845,9 @@ class DeploymentLoop:
         now_iso = utcnow().isoformat()
         try:
             result = self.execution.place(draft, idempotency_key=key)
+            self._fold = None  # the account changed: the next look must not use the old fold
         except Exception as exc:  # noqa: BLE001 - one bad order must not stop the loop
+            self._fold = None
             logger.exception(
                 "runner %s: placing %s %s failed",
                 self.deployment_id[:8],

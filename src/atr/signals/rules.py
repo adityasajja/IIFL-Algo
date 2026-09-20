@@ -265,9 +265,13 @@ def eval_entry(
             )
         )
 
+    def _wants(rule: str) -> bool:
+        """A strategy that names its setup computes only that rule, not all and then filters."""
+        return not rules.setup or rules.setup == rule
+
     # --- 1. uptrend, bought on a pullback ------------------------------
     fast_n, slow_n = rules.trend_fast_sma, rules.trend_slow_sma
-    if len(frame) >= max(slow_n, 30):
+    if _wants("trend_pullback") and len(frame) >= max(slow_n, 30):
         fast, slow = _last(_sma_series(frame, fast_n)), _last(_sma_series(frame, slow_n))
         value = _last(_rsi_series(frame))
         if _finite(fast) and _finite(slow) and _finite(value):
@@ -285,7 +289,7 @@ def eval_entry(
 
     # --- 2. breakout to new highs on volume ----------------------------
     lookback = rules.breakout_lookback
-    if len(frame) >= max(lookback, rules.volume_lookback) + 1:
+    if _wants("breakout") and len(frame) >= max(lookback, rules.volume_lookback) + 1:
         prior_high = float(_prior_high(frame, lookback).iloc[-1])
         avg_volume = float(_prior_volume(frame, rules.volume_lookback).iloc[-1])
         volume = float(frame["volume"].iloc[-1])
@@ -302,7 +306,7 @@ def eval_entry(
                 )
 
     # --- 3. oversold within a longer-term uptrend ----------------------
-    if len(frame) >= rules.long_sma:
+    if _wants("oversold_uptrend") and len(frame) >= rules.long_sma:
         long_ma = _last(_sma_series(frame, rules.long_sma))
         value = _last(_rsi_series(frame))
         if (
@@ -321,7 +325,7 @@ def eval_entry(
 
     # --- 4. Triple RSI: oversold, falling three days, still in an uptrend ----
     trend_n = rules.triple_rsi_trend_sma
-    if len(frame) >= max(trend_n, 10) + 1:
+    if _wants("triple_rsi") and len(frame) >= max(trend_n, 10) + 1:
         line = _last(_sma_series(frame, trend_n)) if trend_n else None
         r = _rsi_n(frame, rules.triple_rsi_period)
         now, d1, d2, d3 = (float(r.iloc[-1 - i]) for i in range(4))
