@@ -53,7 +53,26 @@ async def _jobs_loop() -> None:
     from atr.research import gap_plan
 
     gap = DailyJob("gap_plan", lambda: gap_plan.run_daily(DATA_ROOT), at=(17, 45), weekdays_only=True)
-    await run_forever([backup, tracker, gap], JobStore(DATA_ROOT))
+    from atr.insights.holdings import load_holdings
+    from atr.services.pnl_calendar import refresh_real
+
+    def record_real_pnl() -> None:
+        try:
+            from atr.services.broker_access import authed_client
+
+            client = authed_client()
+        except Exception:  # noqa: BLE001 - no session: the saved holdings are used
+            client = None
+        holdings = load_holdings(DATA_ROOT, client)["holdings"]
+        # The broker cache stops updating when the login lapses, so top up the held names
+        # from public bars first, or the latest days would be missing from the calendar.
+        from atr.data.eod_refresh import refresh
+
+        refresh(DATA_ROOT, [h["symbol"] for h in holdings])
+        refresh_real(DATA_ROOT, holdings)
+
+    real_pnl = DailyJob("real_pnl", record_real_pnl, at=(17, 50), weekdays_only=True)
+    await run_forever([backup, tracker, gap, real_pnl], JobStore(DATA_ROOT))
 
 
 async def _eod_refresh_loop() -> None:
