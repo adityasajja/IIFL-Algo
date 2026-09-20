@@ -47,7 +47,7 @@ import logging
 import math
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -67,9 +67,13 @@ from atr.services.paper import (
     default_price_source,
 )
 
+from atr.signals.session import MarketWeek, build_context
 from atr.strategy.definition import parse_definition, resolve_rules
 
 logger = logging.getLogger("atr.services.runner")
+
+#: One reading of the market's prior week, shared by every deployment that asks for it.
+_MARKET_WEEK = MarketWeek()
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -202,6 +206,8 @@ class DeploymentLoop:
     #: Signals already acted on, keyed by (symbol, rule, bar) so a rule that
     #: stays true for an hour does not open an hour of orders.
     acted: set[tuple[str, str, str]] = field(default_factory=set)
+    #: The first fresh price seen per symbol each day: (day, price, minutes after the open).
+    _first_price: dict[str, tuple[Any, float, float]] = field(default_factory=dict)
     #: Set when rules emitted but nothing was traded, for the status surface.
     last_pass: dict[str, Any] = field(default_factory=dict)
     started_at: datetime = field(default_factory=utcnow)
@@ -504,6 +510,7 @@ class DeploymentLoop:
         self.state = RunnerDeploymentState.RUNNING
         self.skipped_reason = None
         self.last_strategy_evaluation = eval_time
+        base_context = self._session_context(eval_time, cal, entry_rules)
 
         for symbol in self.config.symbols:
             price, ts, age = self._price_with_meta(symbol, now=eval_time)
@@ -518,6 +525,8 @@ class DeploymentLoop:
             if frame is None or len(frame) < 2:
                 continue
 
+            opened_at, minutes = self._session_open(symbol, price, eval_time, cal)
+            context = replace(base_context, open_price=opened_at, minutes_since_open=minutes)
             position = self._position_quantity(symbol)
 
             # --- exits first -------------------------------------------------
@@ -529,6 +538,7 @@ class DeploymentLoop:
                     entry_price,
                     exit_rules,
                     quantity=abs(position),
+                    context=context,
                 )
                 chosen = primary_exit(exit_signals)
                 if chosen is not None:
@@ -559,7 +569,7 @@ class DeploymentLoop:
             if self._open_position_count() >= self.config.max_open_positions:
                 continue
 
-            signals = eval_entry(symbol, frame, entry_rules)
+            signals = eval_entry(symbol, frame, entry_rules, context)
             if not signals:
                 continue
             chosen = signals[0]
@@ -595,6 +605,32 @@ class DeploymentLoop:
             self.skipped_reason = "Strategy produced no signal"
 
         return opened
+
+    def _session_context(self, when: datetime, cal: Any, entry_rules: Any) -> Any:
+        """What today's session adds to the rules. The market reading is read only when asked for."""
+        wants_market = getattr(entry_rules, "gap_market_min_pct", None) is not None
+        return build_context(
+            when, cal, _MARKET_WEEK if wants_market else None, open_price=None, minutes_since_open=None
+        )
+
+    def _session_open(
+        self, symbol: str, price: float, when: datetime, cal: Any
+    ) -> tuple[float | None, float | None]:
+        """The session's first fresh price for a symbol, and how long after 09:15 it was seen.
+
+        The tick feed carries the last traded price and nothing else, so the open is taken
+        as the first price this loop sees each day. A loop that starts late sees a later
+        price and a large delay; the gap rule then declines rather than call it the open.
+        """
+        local = when.astimezone(IST) if when.tzinfo else when.replace(tzinfo=IST)
+        today = local.date()
+        seen = self._first_price.get(symbol)
+        if seen is None or seen[0] != today:
+            start, _ = cal.session_bounds(today)
+            minutes = max(0.0, (local - start).total_seconds() / 60.0)
+            seen = (today, price, minutes)
+            self._first_price[symbol] = seen
+        return seen[1], seen[2]
 
     def _bar_key(self, symbol: str) -> str:
         """A key that changes once per session, so a rule fires once a day.

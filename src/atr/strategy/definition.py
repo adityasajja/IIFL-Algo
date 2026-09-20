@@ -73,6 +73,10 @@ NUMERIC_RULE_FIELDS = frozenset(
         "triple_rsi_below",
         "triple_rsi_prior_below",
         "triple_rsi_trend_sma",
+        "gap_down_pct",
+        "gap_market_min_pct",
+        "gap_weekday",
+        "gap_entry_minutes",
     }
 )
 

@@ -14,11 +14,11 @@ import math
 
 import pandas as pd
 
-from atr.signals.models import EntryRules, ExitRules, Signal
+from atr.signals.models import EntryRules, ExitRules, SessionContext, Signal
 from atr.strategy.indicators import rsi, sma
 
 #: Order exits are reported in. A stop-loss outranks a take-profit.
-_EXIT_PRIORITY = ["stop_loss", "trailing_stop", "trend_break", "take_profit", "rsi_overbought"]
+_EXIT_PRIORITY = ["stop_loss", "trailing_stop", "trend_break", "take_profit", "rsi_overbought", "week_end"]
 
 REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 
@@ -145,6 +145,7 @@ def eval_exit(
     rules: ExitRules,
     *,
     quantity: float = 0.0,
+    context: SessionContext | None = None,
 ) -> list[Signal]:
     """Apply the risk rules to one holding. Returns every rule that fired."""
     if frame is None or frame.empty or not _finite(avg_price) or avg_price <= 0:
@@ -219,6 +220,10 @@ def eval_exit(
                 confirm_bars=confirm,
             )
 
+    # --- end of the week -----------------------------------------------
+    if rules.exit_at_week_end and context is not None and context.week_end_close:
+        add("week_end", f"last session of the week: selling at {price:,.2f}")
+
     # --- overbought ----------------------------------------------------
     if rules.rsi_overbought is not None and len(frame) >= 30:
         value = _last(_rsi_n(frame, rules.rsi_period))
@@ -232,7 +237,12 @@ def eval_exit(
     return out
 
 
-def eval_entry(symbol: str, frame: pd.DataFrame, rules: EntryRules) -> list[Signal]:
+def eval_entry(
+    symbol: str,
+    frame: pd.DataFrame,
+    rules: EntryRules,
+    context: SessionContext | None = None,
+) -> list[Signal]:
     """Apply the candidate entry setups to one symbol."""
     if frame is None or frame.empty:
         return []
@@ -330,9 +340,69 @@ def eval_entry(symbol: str, frame: pd.DataFrame, rules: EntryRules) -> list[Sign
                 rsi=round(now, 1),
             )
 
+    # --- 5. gap down at the open -------------------------------------------
+    if rules.setup == "gap_down":
+        gap = _gap_down(frame, rules, context)
+        if gap is not None:
+            add(
+                "gap_down",
+                f"opened {abs(gap['gap_pct']):.1f}% below the last close "
+                f"{gap['prior_close']:,.2f}",
+                **gap,
+            )
+
     if rules.setup:
         out = [s for s in out if s.rule == rules.setup]
     return out
+
+
+def _gap_down(
+    frame: pd.DataFrame, rules: EntryRules, context: SessionContext | None
+) -> dict[str, float] | None:
+    """The gap's numbers when this bar qualifies, else None.
+
+    With no context (a backtest) the bar's own open is used and the filters that need
+    the live session (weekday, market) cannot be met, so a strategy that sets them does
+    not fire there. Silent firing without the market filter would test a different plan.
+    """
+    if len(frame) < 3:
+        return None
+    prior_close = float(frame["close"].iloc[-2])
+    if not _finite(prior_close) or prior_close <= 0:
+        return None
+
+    if context is None:
+        if rules.gap_weekday is not None or rules.gap_market_min_pct is not None:
+            return None
+        open_price = float(frame["open"].iloc[-1])
+        market = None
+    else:
+        if rules.gap_weekday is not None and context.today.weekday() != rules.gap_weekday:
+            return None
+        if context.open_price is None or context.minutes_since_open is None:
+            return None  # the open was not seen: guessing it would be trading a different gap
+        if context.minutes_since_open > rules.gap_entry_minutes:
+            return None
+        if rules.gap_market_min_pct is not None and (
+            context.market_week_pct is None or context.market_week_pct <= rules.gap_market_min_pct
+        ):
+            return None
+        if "ts" in frame.columns and context.prior_session is not None:
+            last = frame["ts"].iloc[-2]
+            if pd.isna(last) or pd.Timestamp(last).date() != context.prior_session:
+                return None  # the history is stale: its last close is not the last session's
+        open_price = float(context.open_price)
+        market = context.market_week_pct
+
+    if not _finite(open_price) or open_price <= 0:
+        return None
+    gap_pct = 100.0 * (open_price / prior_close - 1.0)
+    if gap_pct > -rules.gap_down_pct:
+        return None
+    detail = {"gap_pct": round(gap_pct, 2), "open": round(open_price, 2), "prior_close": round(prior_close, 2)}
+    if market is not None:
+        detail["market_week_pct"] = round(float(market), 2)
+    return detail
 
 
 def primary_exit(signals: list[Signal]) -> Signal | None:

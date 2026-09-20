@@ -131,7 +131,7 @@ def wired(monkeypatch, app_db):
         from atr.signals import rules
         from atr.signals.models import EntryRules, ExitRules, Signal
 
-        def stub_entry(symbol, frame, rls):
+        def stub_entry(symbol, frame, rls, context=None):
             if not entry:
                 return []
             return [
@@ -144,7 +144,7 @@ def wired(monkeypatch, app_db):
                 )
             ]
 
-        def stub_exit(symbol, frame, avg_price, rls, *, quantity=0.0):
+        def stub_exit(symbol, frame, avg_price, rls, *, quantity=0.0, context=None):
             price = float(frame["close"].iloc[-1])
             pnl = (price / avg_price - 1.0) * 100.0
             if rls.stop_loss_pct and pnl <= -abs(rls.stop_loss_pct):

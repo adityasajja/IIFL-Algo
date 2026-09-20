@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -45,6 +45,8 @@ class ExitRules:
     rsi_overbought: float | None = 80.0
     #: RSI window the overbought exit reads.
     rsi_period: int = 14
+    #: Sell at the close of the week's last session, if nothing else has sold it.
+    exit_at_week_end: bool = False
     #: Bars of daily history required before trend/RSI rules are trusted.
     min_history_bars: int = 60
 
@@ -85,6 +87,17 @@ class EntryRules:
     triple_rsi_prior_below: float = 60.0
     triple_rsi_trend_sma: int = 200
 
+    #: Rule 5 — gap down: a stock that opens well below the last close.
+    #: Fires only when ``setup == "gap_down"``, because it needs the session's
+    #: open, which a daily frame does not carry while the day is still forming.
+    gap_down_pct: float = 1.0
+    #: Only trade when the median stock's prior-week gain exceeds this. None = no filter.
+    gap_market_min_pct: float | None = None
+    #: 0 = Monday. Only fire on this weekday. None = any day.
+    gap_weekday: int | None = None
+    #: Buy only within this many minutes of the open. The plan is to buy the open, not the afternoon.
+    gap_entry_minutes: float = 15.0
+
     #: Fire only this rule ("triple_rsi", "breakout", ...). None = any of them.
     #: Without it every strategy also trades the other three rules' setups.
     setup: str | None = None
@@ -93,6 +106,26 @@ class EntryRules:
     #: smaller than the walk-forward test window or the strategy never trades
     #: in validation, and "no trades" looks identical to "no edge".
     min_history_bars: int = 110
+
+
+@dataclass(frozen=True)
+class SessionContext:
+    """What a live session knows that a daily frame does not.
+
+    The runner builds one per evaluation. Backtests pass none, and the rules that
+    need it then either read what the historical bar holds or decline to fire.
+    """
+
+    today: date
+    #: The trading day before ``today``. The history's last bar must be this day.
+    prior_session: date | None = None
+    #: The session's first price and how long after the open it was seen.
+    open_price: float | None = None
+    minutes_since_open: float | None = None
+    #: Median stock's gain over the five sessions before today, in percent.
+    market_week_pct: float | None = None
+    #: True from shortly before the close on the week's last session.
+    week_end_close: bool = False
 
 
 @dataclass
