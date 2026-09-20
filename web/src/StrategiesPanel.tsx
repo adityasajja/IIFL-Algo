@@ -4,6 +4,7 @@ import {
   createSavedStrategy,
   createStrategyVersion,
   getStrategies,
+  listDeployments,
   listSavedStrategies,
   listStrategyVersions,
   seedExampleStrategy,
@@ -43,11 +44,17 @@ import { RelativeTime } from "./lib/time";
 export default function StrategiesPanel({
   onOpenResearch,
   onOpenPlans,
+  onOpenPaper,
 }: {
   onOpenResearch: () => void;
   onOpenPlans: () => void;
+  onOpenPaper: () => void;
 }) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  // The long lists start folded: most visits are to see what is running, not to read 18 test reports.
+  const [showBuiltIn, setShowBuiltIn] = useState(false);
+  const [showAuthoring, setShowAuthoring] = useState(false);
+  const [running, setRunning] = useState(0);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [control, setControl] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +79,9 @@ export default function StrategiesPanel({
 
   useEffect(() => {
     void load();
+    listDeployments()
+      .then((r) => setRunning((r?.deployments ?? []).filter((d) => d.status === "RUNNING").length))
+      .catch(() => setRunning(0));
   }, [load]);
 
   const counts = {
@@ -93,58 +103,122 @@ export default function StrategiesPanel({
     <div className="space-y-4">
       {error && <ErrorBox>{error}</ErrorBox>}
 
-      <div
-        className="text-lg font-semibold tracking-tight"
-        title={control !== null ? `Random picks over the same stocks score about ${fmtNum(control)} (Sharpe).` : undefined}
-      >
-        {verdict}
+      {/* What this page is, in plain words, and where things stand. */}
+      <div>
+        <p className="text-sm">
+          A strategy is a set of rules for picking trades. {verdict}
+        </p>
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          title={control !== null ? `Random picks over the same stocks score about ${fmtNum(control)} (Sharpe).` : undefined}
+        >
+          To count as proven, a strategy has to beat simply buying the index and beat random picks.
+        </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Tally
-          label="Validated"
-          value={counts.pass}
-          tone="pass"
-          active={filter === "pass"}
-          onClick={() => setFilter(filter === "pass" ? "all" : "pass")}
-        />
-        <Tally
-          label="Tested, lost"
-          value={counts.fail}
-          tone="fail"
-          active={filter === "fail"}
-          onClick={() => setFilter(filter === "fail" ? "all" : "fail")}
-        />
-        <Tally
-          label="Never tested"
-          value={counts.untested}
-          tone="untested"
-          active={filter === "untested"}
-          onClick={() => setFilter(filter === "untested" ? "all" : "untested")}
-        />
-      </div>
+      {running > 0 && (
+        <button
+          type="button"
+          onClick={onOpenPaper}
+          className="flex w-full items-center justify-between rounded-2xl border border-border bg-card px-5 py-3.5 text-left transition-colors hover:bg-muted/40"
+        >
+          <span className="text-sm">
+            <span className="font-medium">{running} {running === 1 ? "strategy is" : "strategies are"} running on paper</span>
+            <span className="text-muted-foreground"> · practice trades, no money at risk</span>
+          </span>
+          <span className="text-xs text-primary">Open Paper</span>
+        </button>
+      )}
 
       <TrackedPlans onOpen={onOpenPlans} />
 
-      <Card>
-        <CardHeader
-          title="Built-in strategies"
-          sub={asOf ? <>Last tested <RelativeTime value={asOf} absolute={false} /></> : "Not tested yet"}
-        />
-        <div className="mt-3 divide-y divide-border/60">
-          {shown.map((s) => (
-            <Row key={s.name} s={s} onOpenResearch={onOpenResearch} />
-          ))}
-          {shown.length === 0 && (
-            <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">
-              Nothing in this group.
-            </div>
-          )}
-        </div>
-      </Card>
+      <Fold
+        title="Built-in strategies"
+        summary={`${total} included · ${counts.pass} proven · ${counts.fail} tested and lost · ${counts.untested} not tested yet`}
+        open={showBuiltIn}
+        onToggle={() => setShowBuiltIn((o) => !o)}
+      >
+        <Card>
+          <div className="flex flex-wrap items-center gap-2 px-5 pt-4 text-xs">
+            {(
+              [
+                ["all", "All", total],
+                ["pass", "Proven", counts.pass],
+                ["fail", "Tested and lost", counts.fail],
+                ["untested", "Not tested", counts.untested],
+              ] as const
+            ).map(([key, label, n]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                className={cn(
+                  "rounded-full px-3 py-1 transition-colors",
+                  filter === key ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label} {n}
+              </button>
+            ))}
+            <span className="ml-auto text-muted-foreground">
+              {asOf ? <>Last tested <RelativeTime value={asOf} absolute={false} /></> : "Not tested yet"}
+            </span>
+          </div>
+          <div className="mt-3 divide-y divide-border/60">
+            {shown.map((s) => (
+              <Row key={s.name} s={s} onOpenResearch={onOpenResearch} />
+            ))}
+            {shown.length === 0 && (
+              <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">
+                Nothing in this group.
+              </div>
+            )}
+          </div>
+        </Card>
+      </Fold>
 
-      <Authoring />
+      <Fold
+        title="Build your own"
+        summary="Write your own rules, save a version, test it, then run it on paper"
+        open={showAuthoring}
+        onToggle={() => setShowAuthoring((o) => !o)}
+      >
+        <Authoring />
+      </Fold>
     </div>
+  );
+}
+
+/** A section that opens and closes, showing a one-line summary while shut. */
+function Fold({
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  summary: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 text-left transition-colors hover:bg-muted/40"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold tracking-tight">{title}</span>
+          <span className="block truncate text-xs text-muted-foreground">{summary}</span>
+        </span>
+        <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open && children}
+    </section>
   );
 }
 
@@ -629,48 +703,6 @@ function StateBadge({ state }: { state: ValidationState }) {
   if (state === "pass") return <Badge tone="good">validated</Badge>;
   if (state === "fail") return <Badge tone="bad">tested, lost</Badge>;
   return <Badge tone="flat">not tested</Badge>;
-}
-
-function Tally({
-  label,
-  value,
-  tone,
-  active,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  tone: ValidationState;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const palette = {
-    pass: "text-emerald-600 dark:text-emerald-400",
-    fail: "text-destructive",
-    untested: "text-muted-foreground",
-  }[tone];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-2xl border bg-card p-5 text-left transition-colors",
-        active ? "border-primary/50 bg-primary/[0.06]" : "border-border hover:border-foreground/20",
-      )}
-    >
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {tone === "pass" ? (
-          <CheckCircle2 className="h-3.5 w-3.5" />
-        ) : tone === "fail" ? (
-          <XCircle className="h-3.5 w-3.5" />
-        ) : (
-          <AlertTriangle className="h-3.5 w-3.5" />
-        )}
-        {label}
-      </div>
-      <div className={cn("mt-2 text-4xl font-semibold tracking-tight tabular-nums", palette)}>{value}</div>
-    </button>
-  );
 }
 
 const pretty = strategyLabel;

@@ -826,6 +826,7 @@ export default function App() {
           <StrategiesPanel
             onOpenResearch={() => setTab("evidence", "measured")}
             onOpenPlans={() => setTab("signals", "today")}
+            onOpenPaper={() => setTab("paper")}
           />
         )}
         {tab === "signals" && (
