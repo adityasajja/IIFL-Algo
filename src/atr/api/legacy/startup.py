@@ -67,11 +67,12 @@ async def _jobs_loop() -> None:
         # The broker cache stops updating when the login lapses, so top up the held names
         # from public bars first, or the latest days would be missing from the calendar.
         from atr.data.eod_refresh import refresh
-        from atr.data.gap_repair import repair
+        from atr.data.gap_repair import repair, seed_missing
 
         symbols = [h["symbol"] for h in holdings]
         refresh(DATA_ROOT, symbols)
         if client is not None:
+            seed_missing(client, DATA_ROOT, symbols)  # holdings with no price file at all
             # Then fill any single missing session from the broker's own history, since a
             # missing day blanks that stock's change on the next day.
             repair(client, DATA_ROOT, symbols)

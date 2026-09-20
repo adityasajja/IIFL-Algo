@@ -183,13 +183,16 @@ def real_days(data_root: Path) -> dict[str, Day]:
 
 def _closes(data_root: Path, symbol: str) -> pd.Series | None:
     """Daily closes for a holding, trying both spellings the price folder uses."""
-    folder = Path(data_root) / "iifl_daily" / "NSEEQ"
-    for name in (symbol, symbol[:-3] if symbol.endswith("-EQ") else symbol):
-        path = folder / f"{name}.parquet"
-        if path.exists():
-            df = pd.read_parquet(path, columns=["ts", "close"]).dropna()
-            df = df[df["close"] > 0].drop_duplicates("ts")
-            return pd.Series(df["close"].to_numpy(float), index=pd.DatetimeIndex(df["ts"]).normalize())
+    from atr.data.gap_repair import HELD_FOLDER
+
+    root = Path(data_root) / "iifl_daily"
+    for folder in (root / "NSEEQ", root / HELD_FOLDER):
+        for name in (symbol, symbol[:-3] if symbol.endswith("-EQ") else symbol):
+            path = folder / f"{name}.parquet"
+            if path.exists():
+                df = pd.read_parquet(path, columns=["ts", "close"]).dropna()
+                df = df[df["close"] > 0].drop_duplicates("ts")
+                return pd.Series(df["close"].to_numpy(float), index=pd.DatetimeIndex(df["ts"]).normalize())
     return None
 
 

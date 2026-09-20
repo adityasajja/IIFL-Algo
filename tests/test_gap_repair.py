@@ -88,3 +88,28 @@ def test_a_broker_error_is_counted_not_raised(tmp_path, monkeypatch):
     out = gr.repair(_Refusing([]), tmp_path, ["AAA-EQ", "BBB-EQ", "CCC-EQ"])
 
     assert out["failed"] == 1 and out["inserted"] == 0
+
+
+def test_a_holding_with_no_price_file_is_seeded_into_its_own_folder_not_the_scanners(tmp_path, monkeypatch):
+    (tmp_path / "iifl_daily" / "NSEEQ").mkdir(parents=True)
+    days = pd.bdate_range("2026-08-03", periods=30)
+    candles = [[f"{d.date()}T09:15:00", 10.0 + i, 11.0 + i, 9.0 + i, 10.5 + i, 100] for i, d in enumerate(days)]
+    import atr.brokers.iifl.contracts as contracts
+    import atr.scanner as scanner
+
+    class _Master:
+        def __init__(self, client):
+            pass
+
+        def load_cached(self, exchanges):
+            pass
+
+    monkeypatch.setattr(contracts, "InstrumentMaster", _Master)
+    monkeypatch.setattr(scanner, "resolve_conid", lambda master, symbol, exchange: 1)
+
+    out = gr.seed_missing(_Client(candles), tmp_path, ["VCL-BE-EQ"])
+
+    assert out == {"seeded": 1, "failed": 0}
+    assert (tmp_path / "iifl_daily" / gr.HELD_FOLDER / "VCL-BE-EQ.parquet").exists()
+    assert not list((tmp_path / "iifl_daily" / "NSEEQ").glob("*.parquet"))  # the scanners' folder stays untouched
+    assert gr.seed_missing(_Client(candles), tmp_path, ["VCL-BE-EQ"]) == {"seeded": 0, "failed": 0}  # and it is not redone

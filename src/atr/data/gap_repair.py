@@ -25,11 +25,18 @@ COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
 SESSION_SHARE = 0.5
 
 
+#: Prices for holdings the main price folder does not carry (trade-to-trade "BE" shares, for
+#: instance). Kept in their own folder so the scanners, which read every file under NSEEQ as
+#: a ranked stock, never pick them up.
+HELD_FOLDER = "HOLDINGS"
+
+
 def _path(folder: Path, symbol: str) -> Path | None:
-    for name in (symbol, symbol[:-3] if symbol.endswith("-EQ") else symbol):
-        candidate = folder / f"{name}.parquet"
-        if candidate.exists():
-            return candidate
+    for base in (folder, folder.parent / HELD_FOLDER):
+        for name in (symbol, symbol[:-3] if symbol.endswith("-EQ") else symbol):
+            candidate = base / f"{name}.parquet"
+            if candidate.exists():
+                return candidate
     return None
 
 
@@ -61,6 +68,49 @@ def _candles(payload: Any) -> list[list[Any]]:
     return []
 
 
+def seed_missing(client: Any, data_root: Path, symbols: list[str], *, sessions: int = 130) -> dict[str, int]:
+    """Download recent daily history for holdings that have no price file at all."""
+    from atr.brokers.iifl.contracts import InstrumentMaster
+    from atr.scanner import resolve_conid
+
+    folder = Path(data_root) / "iifl_daily" / "NSEEQ"
+    todo = [s for s in symbols if _path(folder, s) is None]
+    out = {"seeded": 0, "failed": 0}
+    if not todo:
+        return out
+    master = InstrumentMaster(client)
+    master.load_cached(["NSEEQ"])
+    end = pd.Timestamp.today().normalize()  # the broker refuses a "to" date later than today
+    start = end - pd.Timedelta(days=int(sessions * 1.5))
+    for symbol in todo:
+        try:
+            conid = resolve_conid(master, symbol, "NSEEQ")
+            payload = client.historical_data("NSEEQ", str(conid), "1d", start.strftime("%d-%b-%Y"), end.strftime("%d-%b-%Y"))
+            by_day: dict[date, list[Any]] = {}
+            for c in _candles(payload):
+                by_day.setdefault(pd.Timestamp(c[0]).date(), []).append(c)
+            rows = []
+            for day, candles in sorted(by_day.items()):
+                if any(c[1:6] != candles[0][1:6] for c in candles):
+                    continue  # two different candles for one day: leave that day out rather than guess
+                _, o, h, l, close, vol = candles[0][:6]
+                rows.append({"ts": pd.Timestamp(day) + pd.Timedelta(hours=9, minutes=15), "open": float(o), "high": float(h), "low": float(l), "close": float(close), "volume": int(vol)})
+            if len(rows) < 20:
+                out["failed"] += 1
+                continue
+            target = Path(data_root) / "iifl_daily" / HELD_FOLDER
+            target.mkdir(parents=True, exist_ok=True)
+            frame = pd.DataFrame(rows)[COLUMNS]
+            tmp = target / f"{symbol}.parquet.tmp"
+            frame.to_parquet(tmp, index=False)
+            os.replace(tmp, target / f"{symbol}.parquet")
+            out["seeded"] += 1
+        except Exception as exc:  # noqa: BLE001 - one stock failing must not stop the rest
+            logger.debug("seeding {} failed: {}", symbol, str(exc)[:120])
+            out["failed"] += 1
+    return out
+
+
 def repair(client: Any, data_root: Path, symbols: list[str], *, window: int = 15) -> dict[str, int]:
     """Insert missing recent sessions for ``symbols``. Returns counts of what was done."""
     from atr.brokers.iifl.contracts import InstrumentMaster
@@ -81,7 +131,7 @@ def repair(client: Any, data_root: Path, symbols: list[str], *, window: int = 15
         try:
             conid = resolve_conid(master, symbol if symbol.endswith("-EQ") else f"{symbol}-EQ", "NSEEQ")
             start, end = min(missing), max(missing)
-            payload = client.historical_data("NSEEQ", str(conid), "1d", start.strftime("%d-%b-%Y"), (end + pd.Timedelta(days=1)).strftime("%d-%b-%Y"))
+            payload = client.historical_data("NSEEQ", str(conid), "1d", start.strftime("%d-%b-%Y"), min(pd.Timestamp(end) + pd.Timedelta(days=1), pd.Timestamp.today().normalize()).strftime("%d-%b-%Y"))
             by_day: dict[date, list[list[Any]]] = {}
             for c in _candles(payload):
                 by_day.setdefault(pd.Timestamp(c[0]).date(), []).append(c)
