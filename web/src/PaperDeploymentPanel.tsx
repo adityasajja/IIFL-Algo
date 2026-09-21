@@ -30,6 +30,7 @@
  * "not measured yet", not "flat". The two must never print the same.
  */
 
+import { PaperRuns } from "./PaperRuns";
 import {
   Activity,
   ArrowRight,
@@ -1164,6 +1165,7 @@ function MonitorView({
   onStart: (id: string) => void;
   onConfirm: (kind: "pause" | "stop" | "reset", id: string, why: string) => void;
 }) {
+  const [details, setDetails] = useState(false);
   if (deployments.length === 0) {
     return (
       <Card>
@@ -1184,6 +1186,21 @@ function MonitorView({
 
   return (
     <div className="space-y-4">
+      <PaperRuns
+        deployments={deployments}
+        onManage={(id) => {
+          onSelect(id);
+          setDetails(true);
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => setDetails((v) => !v)}
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {details ? "Hide details and controls" : "Details and controls"}
+      </button>
+      {details && (<>
       {/* 1. The prominent Forward Evidence Counter */}
       <ForwardEvidenceCounterCard
         counts={evidenceCounts}
@@ -1650,6 +1667,7 @@ function MonitorView({
           )}
         </div>
       </div>
+      </>)}
     </div>
   );
 }
