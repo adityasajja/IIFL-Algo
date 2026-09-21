@@ -22,6 +22,7 @@ from tenacity import (
 )
 
 from atr.brokers.iifl.auth import Session, SessionStore, build_checksum
+from atr.brokers.iifl.ratelimit import RateLimits
 
 BASE_URL = "https://api.iiflcapital.com/v1"
 
@@ -119,6 +120,7 @@ class IiflClient:
         self.base_url = base_url.rstrip("/")
         self.session: Session | None = None
         self._store = session_store or SessionStore()
+        self._limits = RateLimits()  # IIFL's documented per-endpoint limits: see ratelimit.py
         limits = httpx.Limits(
             max_keepalive_connections=20,
             max_connections=50,
@@ -191,6 +193,7 @@ class IiflClient:
         if auth and self.session is None:
             raise IiflApiError("no active session — call create_session() or restore_session()")
 
+        self._limits.wait(method, path)
         response = self._http.request(method, path, json=json, params=params)
         if response.status_code >= 500:
             raise IiflApiError(
