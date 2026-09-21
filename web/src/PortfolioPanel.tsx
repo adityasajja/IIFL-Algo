@@ -174,6 +174,14 @@ function KpiStrip({
       return s + (ltp - prev) * num(p.quantity);
     }, 0);
 
+    // What the holdings moved today: the price now against yesterday's close. A holding with
+    // no live price is valued at that close, so it adds nothing rather than a made-up move.
+    const holdingsDailyPnl = holdings.reduce((s, h) => {
+      const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
+      const prev = num(h.previousDayClose);
+      return prev > 0 ? s + num(h.totalQuantity) * (priceOf(h, getTick(sym)) - prev) : s;
+    }, 0);
+
     return {
       tradingLimit,
       utilized: utilized + spanMargin + exposureMargin,
@@ -183,7 +191,10 @@ function KpiStrip({
       holdingsAtClose,
       holdingsCount: holdings.length,
       positionsCount: positions.length,
-      positionsPnl: pnlMode === "total" ? positionsTotalPnl : positionsDailyPnl,
+      pnl:
+        pnlMode === "total"
+          ? positionsTotalPnl + (holdingsAtClose - holdingsInvested)
+          : positionsDailyPnl + holdingsDailyPnl,
     };
   }, [data, getTick, pnlMode]);
 
@@ -233,18 +244,18 @@ function KpiStrip({
             <div className="flex items-center gap-0.5 rounded border border-border/60 p-0.5 text-[10px]">
               <button type="button" onClick={() => setPnlMode("total")}
                 className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "total" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
-                title="Total P&L (since entry)">Total</button>
+                title="Holdings and positions, since you bought">Total</button>
               <button type="button" onClick={() => setPnlMode("daily")}
                 className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "daily" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
-                title="Day P&L (since previous close)">Daily</button>
+                title="Holdings and positions, since yesterday's close">Daily</button>
             </div>
           </div>
           <div className={cn("mt-1 text-xl font-semibold tracking-tight tabular-nums",
-            kpis.positionsPnl > 0 ? "text-emerald-500" : kpis.positionsPnl < 0 ? "text-destructive" : "text-foreground")}>
-            {kpis.positionsPnl === 0 ? "\u20b90" : INR(kpis.positionsPnl)}
+            kpis.pnl > 0 ? "text-emerald-500" : kpis.pnl < 0 ? "text-destructive" : "text-foreground")}>
+            {kpis.pnl === 0 ? "\u20b90" : INR(kpis.pnl)}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {kpis.positionsCount} open {kpis.positionsCount === 1 ? "position" : "positions"}
+            {kpis.holdingsCount} {kpis.holdingsCount === 1 ? "holding" : "holdings"} · {kpis.positionsCount} open {kpis.positionsCount === 1 ? "position" : "positions"}
           </div>
         </div>
       </div>
