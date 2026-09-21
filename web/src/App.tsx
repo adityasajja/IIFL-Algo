@@ -525,7 +525,6 @@ export default function App() {
   }, [refreshHealth, refreshAuth]);
 
   const meta = TITLES[tab];
-  const dbUp = health?.database === true;
   const accountInitials = (principal?.display_name || principal?.username || "?").slice(0, 2);
   const [showLogin, setShowLogin] = useState(false);
   const [moreOpen, setMoreOpen] = useState(() => {
@@ -707,22 +706,15 @@ export default function App() {
           </div>
 
           <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1">
-            <span
-              className={cn(
-                "grid size-9 shrink-0 place-items-center rounded-full text-[10px] font-bold group-data-[state=collapsed]/sidebar:hidden",
-                health?.session_active
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {health?.session_active ? "ON" : "OFF"}
-            </span>
-            <span className="min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
-              <span className="block truncate text-sm font-medium text-foreground">
-                {health?.session_active ? "Session live" : "No session"}
-              </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {health ? health.env : "offline"}
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 px-1 group-data-[state=collapsed]/sidebar:hidden">
+              <i
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  health?.session_active ? "bg-emerald-500" : "bg-muted-foreground/40",
+                )}
+              />
+              <span className="truncate text-sm text-muted-foreground">
+                {health?.session_active ? "Broker connected" : "Broker not connected"}
               </span>
             </span>
             <AnimatedSidebarTrigger
@@ -744,7 +736,7 @@ export default function App() {
           executionMode={health?.execution_mode}
           killSwitch={health?.kill_switch}
         />
-        <GlobalTickerBar onSelectSymbol={openChart} />
+        {health?.session_active && <GlobalTickerBar onSelectSymbol={openChart} />}
         <main
           className={cn(
             "min-w-0 pb-16",
@@ -761,26 +753,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {/* Unified Stripe-style status badge */}
-            <div
-              title={`Environment: ${health?.env || "offline"} | DB: ${dbUp ? "Online" : "Offline"} | Session: ${health?.session_active ? "Active" : "None"}`}
-              className="flex items-center gap-2 rounded-full border border-border/80 bg-card/60 px-3 py-1 text-xs font-medium text-foreground/90 transition-colors"
-            >
-              <span
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  health?.session_active
-                    ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                    : health
-                      ? "bg-amber-500"
-                      : "bg-red-500"
-                )}
-              />
-              <span className="hidden sm:inline text-muted-foreground text-[11.5px]">
-                {health?.session_active ? "Live Session" : health ? `${health.env}` : "Offline"}
-              </span>
-            </div>
-
             {!health?.session_active && (
               <Button size="sm" variant="outline" onClick={() => setShowLogin(true)} className="h-7 text-xs px-2.5">
                 Log in
