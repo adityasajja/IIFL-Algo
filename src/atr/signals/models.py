@@ -47,6 +47,9 @@ class ExitRules:
     rsi_period: int = 14
     #: Sell at the close of the week's last session, if nothing else has sold it.
     exit_at_week_end: bool = False
+    #: Act on the RSI exit only in the last minutes of the session, when the day's price is
+    #: its close. The research sells at the close; a morning price is not that.
+    close_only: bool = False
     #: Bars of daily history required before trend/RSI rules are trusted.
     min_history_bars: int = 60
 
@@ -98,6 +101,11 @@ class EntryRules:
     #: Buy only within this many minutes of the open. The plan is to buy the open, not the afternoon.
     gap_entry_minutes: float = 15.0
 
+    #: Act on the daily-close rules (Triple RSI) only in the last minutes of the session.
+    #: The research buys at the close, so a signal read off the morning's price is a
+    #: different signal: a stock that opens down can look oversold and recover by three.
+    close_only: bool = False
+
     #: Fire only this rule ("triple_rsi", "breakout", ...). None = any of them.
     #: Without it every strategy also trades the other three rules' setups.
     setup: str | None = None
@@ -126,6 +134,8 @@ class SessionContext:
     market_week_pct: float | None = None
     #: True from shortly before the close on the week's last session.
     week_end_close: bool = False
+    #: True in the last minutes of any session: the day's price is close enough to its close.
+    near_close: bool = False
 
 
 @dataclass

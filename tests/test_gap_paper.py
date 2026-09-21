@@ -294,3 +294,93 @@ def test_a_full_book_is_filled_by_the_deepest_gaps_not_the_first_names(app_db, m
     held = {p.instrument.symbol for p in loop._portfolio().positions.values() if not p.is_flat}
     assert held == {"DDD", "CCC"}
     paper_service.install_live_source(None)
+
+
+# ---- Triple RSI decides at the close -------------------------------------
+from atr.signals.rules import eval_exit as _eval_exit  # noqa: E402
+
+
+def _falling_uptrend() -> pd.DataFrame:
+    up = np.linspace(100, 200, 260) + np.sin(np.arange(260)) * 1.5
+    closes = np.concatenate([up, [198, 195, 191, 186, 180]])
+    return pd.DataFrame({"open": closes, "high": closes, "low": closes, "close": closes,
+                         "volume": np.full(len(closes), 1000.0)})
+
+
+def _triple(close_only: bool) -> EntryRules:
+    return EntryRules(setup="triple_rsi", triple_rsi_trend_sma=200, min_history_bars=210, close_only=close_only)
+
+
+def test_triple_rsi_ignores_the_mornings_price_but_acts_near_the_close():
+    frame = _falling_uptrend()
+    morning = SessionContext(today=MONDAY, near_close=False)
+    late = SessionContext(today=MONDAY, near_close=True)
+    assert eval_entry("X", frame, _triple(True), morning) == []
+    assert [s.rule for s in eval_entry("X", frame, _triple(True), late)] == ["triple_rsi"]
+
+
+def test_without_the_flag_or_without_a_context_the_rule_reads_the_bar_as_given():
+    frame = _falling_uptrend()
+    assert [s.rule for s in eval_entry("X", frame, _triple(False), SessionContext(today=MONDAY))] == ["triple_rsi"]
+    assert [s.rule for s in eval_entry("X", frame, _triple(True), None)] == ["triple_rsi"]  # a backtest
+
+
+def test_the_rsi_exit_also_waits_for_the_close():
+    bounce = pd.DataFrame({"close": np.concatenate([np.linspace(100, 60, 60), [70, 80]])})
+    for col in ("open", "high", "low"):
+        bounce[col] = bounce["close"]
+    bounce["volume"] = 1000.0
+    exits = ExitRules(stop_loss_pct=50.0, take_profit_pct=None, trailing_stop_pct=None, trend_sma=0,
+                      rsi_overbought=50.0, rsi_period=5, close_only=True)
+    morning = _eval_exit("X", bounce, avg_price=60.0, rules=exits, quantity=1, context=SessionContext(today=MONDAY))
+    late = _eval_exit("X", bounce, avg_price=60.0, rules=exits, quantity=1,
+                      context=SessionContext(today=MONDAY, near_close=True))
+    assert "rsi_overbought" not in [s.rule for s in morning]
+    assert "rsi_overbought" in [s.rule for s in late]
+
+
+TRIPLE_DEFINITION = {
+    "rules": {
+        "entry": {"setup": "triple_rsi", "triple_rsi_trend_sma": 200, "min_history_bars": 210, "close_only": True},
+        "exit": {"stop_loss_pct": 8.0, "take_profit_pct": None, "trailing_stop_pct": None, "trend_sma": 0,
+                 "rsi_overbought": 50.0, "rsi_period": 5, "close_only": True, "min_history_bars": 60},
+    },
+}
+
+
+def test_a_triple_rsi_run_buys_at_the_close_not_on_the_mornings_price(app_db, monkeypatch):
+    from atr.appdb.repositories import DeploymentRepository, StrategyRepository
+    from atr.appdb.schema import users
+    from atr.services import paper as paper_service
+    from atr.services.runner import PaperRunner
+
+    paper_service.install_live_source(None)
+    up = np.linspace(100, 200, 260) + np.sin(np.arange(260)) * 1.5
+    closes = np.concatenate([up, [198, 195, 191, 186]])
+    days = pd.bdate_range(end=pd.Timestamp(FRIDAY), periods=len(closes))
+    history = pd.DataFrame({"ts": days, "open": closes, "high": closes, "low": closes, "close": closes,
+                            "volume": 1000.0})
+    monkeypatch.setattr("atr.signals.engine.load_daily", lambda symbol, exchange="NSEEQ", **kw: history)
+
+    with app_db.session() as session:
+        session.execute(users.insert().values(
+            user_id="u_t", email="t@example.com", username="t", display_name="T", password_hash="x",
+            role="owner", is_active=True, mfa_enabled=False, failed_logins=0,
+            created_at=datetime(2026, 1, 1), updated_at=datetime(2026, 1, 1)))
+        strategy = StrategyRepository.create(session, user_id="u_t", name="Triple RSI", kind="rules")
+        version = StrategyRepository.create_version(
+            session, strategy_id=strategy["strategy_id"], author_user_id="u_t", definition=TRIPLE_DEFINITION)
+        DeploymentRepository.create(
+            session, user_id="u_t", strategy_id=strategy["strategy_id"], strategy_version=int(version["version"]),
+            mode="PAPER", capital=500_000.0, status="RUNNING",
+            config={"symbols": ["TESTCO"], "exchange": "NSEEQ", "order_value": 25_000.0, "lookback_days": 400,
+                    "max_open_positions": 20})
+    runner = PaperRunner(db=app_db)
+    runner.sync_loops()
+    loop = next(iter(runner._loops.values()))
+    loop.venue.prices = lambda sym, exch: 180.0  # a price that makes today the third falling day
+
+    assert runner.pass_once(now=_at(MONDAY, 9, 16)).orders == 0  # the morning's price is not a close
+    assert runner.pass_once(now=_at(MONDAY, 12, 0)).orders == 0
+    assert runner.pass_once(now=_at(MONDAY, 15, 20)).orders == 1
+    paper_service.install_live_source(None)

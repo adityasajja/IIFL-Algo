@@ -115,8 +115,9 @@ function buildDefinition(r: Rules) {
       triple_rsi_prior_below: 60,
       triple_rsi_trend_sma: 200,
       min_history_bars: 210,
+      close_only: true, // the research buys at the close, so decide in the last minutes of the day
     };
-    const exit = { stop_loss_pct: stop, take_profit_pct: null, rsi_overbought: Number(r.sellAt), rsi_period: 5, ...off };
+    const exit = { stop_loss_pct: stop, take_profit_pct: null, rsi_overbought: Number(r.sellAt), rsi_period: 5, close_only: true, ...off };
     return { rules: { entry, exit }, engine_key: "signals_entry", params: { ...entry, ...exit, lookback: 260, allocation: 0.1, max_positions: 5 } };
   }
   const lookback = Number(r.lookback);
@@ -447,7 +448,7 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
                     </div>
                     {rules.kind === "triple" && (
                       <p className="text-xs text-muted-foreground">
-                        Buys after three falling days, in a stock above its 200-day average. Sells when the 5-day RSI recovers.
+                        Buys after three falling days, in a stock above its 200-day average. Decides in the last 15 minutes of the day. Sells when the 5-day RSI recovers.
                       </p>
                     )}
                     {rules.kind === "gap" && (

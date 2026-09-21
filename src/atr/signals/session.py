@@ -87,6 +87,12 @@ def week_end_close(now: datetime, calendar: MarketCalendar) -> bool:
     return is_last_session_of_week(local.date(), calendar) and local.time() >= WEEK_END_EXIT_FROM
 
 
+def near_close(now: datetime) -> bool:
+    """True from 15:15 IST: the day's price is close enough to the close to act on."""
+    local = now.astimezone(IST) if now.tzinfo else now.replace(tzinfo=IST)
+    return local.time() >= WEEK_END_EXIT_FROM
+
+
 def build_context(
     now: datetime,
     calendar: MarketCalendar,
@@ -105,4 +111,5 @@ def build_context(
         minutes_since_open=minutes_since_open,
         market_week_pct=market.pct(today, prior) if market is not None else None,
         week_end_close=week_end_close(now, calendar),
+        near_close=near_close(now),
     )

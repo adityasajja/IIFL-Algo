@@ -225,7 +225,11 @@ def eval_exit(
         add("week_end", f"last session of the week: selling at {price:,.2f}")
 
     # --- overbought ----------------------------------------------------
-    if rules.rsi_overbought is not None and len(frame) >= 30:
+    if (
+        rules.rsi_overbought is not None
+        and (not rules.close_only or context is None or context.near_close)
+        and len(frame) >= 30
+    ):
         value = _last(_rsi_n(frame, rules.rsi_period))
         if _finite(value) and float(value) >= rules.rsi_overbought:
             add(
@@ -325,7 +329,11 @@ def eval_entry(
 
     # --- 4. Triple RSI: oversold, falling three days, still in an uptrend ----
     trend_n = rules.triple_rsi_trend_sma
-    if _wants("triple_rsi") and len(frame) >= max(trend_n, 10) + 1:
+    if (
+        _wants("triple_rsi")
+        and (not rules.close_only or context is None or context.near_close)
+        and len(frame) >= max(trend_n, 10) + 1
+    ):
         line = _last(_sma_series(frame, trend_n)) if trend_n else None
         r = _rsi_n(frame, rules.triple_rsi_period)
         now, d1, d2, d3 = (float(r.iloc[-1 - i]) for i in range(4))
