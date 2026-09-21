@@ -467,6 +467,34 @@ _BREADTH_TTL = 900.0      # 15 min — breadth moves once a session
 _BREADTH_SAMPLE = 600     # ~2pp standard error on a 50% proportion
 
 
+def _attach_last_price(client: Any, rows: list[dict[str, Any]]) -> None:
+    """Put each holding's last traded price on its row, from one batch quote.
+
+    The holdings call carries the average price and the previous close but no current
+    price. Without it the page valued a stock from the live tick stream, priced a stock
+    with no tick at nothing, and disagreed with the broker's own app. A failed quote
+    leaves the rows as they were: no price is better than a wrong one.
+    """
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:  # a stock held in two lots is two rows with one instrument
+        if r.get("nseInstrumentId"):
+            by_id.setdefault(str(r["nseInstrumentId"]), []).append(r)
+    if not by_id:
+        return
+    try:
+        quotes = _broker_rows(client.market_quotes([("NSEEQ", i) for i in by_id]))
+    except Exception:  # noqa: BLE001 - a quote failure must not blank the holdings
+        return
+    for quote in quotes:
+        try:
+            price = float(quote.get("ltp") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            for row in by_id.get(str(quote.get("instrumentId")), []):
+                row["ltp"] = price
+
+
 @router.get("/portfolio")
 def portfolio(sections: str | None = None) -> dict[str, Any]:
     """Every broker section in one call: limits, positions, holdings, orders, trades.
@@ -502,6 +530,8 @@ def portfolio(sections: str | None = None) -> dict[str, Any]:
                     out[name] = {"rows": [], "count": 0, "error": _with_ip_hint(broker_error)}
                     continue
                 rows = [r for r in _broker_rows(payload) if not _empty_state(r)]
+                if name == "holdings":
+                    _attach_last_price(client, rows)
                 out[name] = {"rows": _clean(rows), "count": len(rows)}
             except Exception as exc:  # noqa: BLE001
                 out[name] = {"rows": [], "count": 0, "error": str(exc)[:300]}

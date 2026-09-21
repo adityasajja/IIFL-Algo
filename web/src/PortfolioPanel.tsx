@@ -195,6 +195,8 @@ function KpiStrip({
         pnlMode === "total"
           ? positionsTotalPnl + (holdingsAtClose - holdingsInvested)
           : positionsDailyPnl + holdingsDailyPnl,
+      // the base the percentage is read against: what you paid, or yesterday's value
+      pnlBase: pnlMode === "total" ? holdingsInvested : holdingsAtClose - holdingsDailyPnl,
     };
   }, [data, getTick, pnlMode]);
 
@@ -230,7 +232,7 @@ function KpiStrip({
           <div className="mt-1 text-xs text-muted-foreground">
             {noData ? "Loading\u2026" : (
               <span>
-                {kpis.holdingsCount} {kpis.holdingsCount === 1 ? "stock" : "stocks"} ·{" "}
+                {INR(kpis.holdingsInvested)} invested ·{" "}
                 <span className={kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "text-emerald-500" : "text-destructive"}>
                   {kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "+" : ""}{INR(kpis.holdingsAtClose - kpis.holdingsInvested)} unrealized
                 </span>
@@ -470,11 +472,13 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
 }
 
 /**
- * The price a holding is valued at: the live tick when the feed has one, otherwise the last
- * close the broker reported. A holding with neither is not worth zero, and counting it that
+ * The price a holding is valued at: the broker's last traded price, else the live tick, else the
+ * last close the broker reported. A holding with neither is not worth zero, and counting it that
  * way while still counting what it cost shows a loss that is not there.
  */
 function priceOf(row: Row, tick?: LiveTick): number {
+  const quoted = num(row.ltp); // the broker's last traded price, refreshed with each poll
+  if (quoted > 0) return quoted;
   const live = tick?.ltp ?? 0;
   return live > 0 ? live : num(row.previousDayClose);
 }
