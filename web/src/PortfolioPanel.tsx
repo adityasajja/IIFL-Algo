@@ -152,7 +152,7 @@ function KpiStrip({
     const holdingsInvested = holdings.reduce((s, h) => s + num(h.totalQuantity) * num(h.averageTradedPrice), 0);
     const holdingsAtClose = holdings.reduce((s, h) => {
       const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
-      const px = getTick(sym)?.ltp ?? 0;
+      const px = priceOf(h, getTick(sym));
       return s + num(h.totalQuantity) * px;
     }, 0);
 
@@ -458,6 +458,16 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
   );
 }
 
+/**
+ * The price a holding is valued at: the live tick when the feed has one, otherwise the last
+ * close the broker reported. A holding with neither is not worth zero, and counting it that
+ * way while still counting what it cost shows a loss that is not there.
+ */
+function priceOf(row: Row, tick?: LiveTick): number {
+  const live = tick?.ltp ?? 0;
+  return live > 0 ? live : num(row.previousDayClose);
+}
+
 // ---------------------------------------------------------------------------
 // Tab: Holdings
 // ---------------------------------------------------------------------------
@@ -467,7 +477,7 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
   const name = String(row.formattedInstrumentName ?? "").trim();
   const qty = num(row.totalQuantity);
   const avg = num(row.averageTradedPrice);
-  const lastPrice = tick?.ltp ?? 0;
+  const lastPrice = priceOf(row, tick);
   const invested = qty * avg;
   const currentVal = qty * lastPrice;
   const delta = currentVal - invested;
@@ -499,9 +509,9 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
         </div>
         <div>
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Current</div>
-          {tick ? (
+          {lastPrice > 0 ? (
             <>
-              <div className={cn("mt-0.5 text-[13px] font-semibold tabular-nums transition-colors duration-300", tick.flash === "up" && "text-emerald-500", tick.flash === "down" && "text-destructive")}>{INR(currentVal)}</div>
+              <div className={cn("mt-0.5 text-[13px] font-semibold tabular-nums transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive")}>{INR(currentVal)}</div>
               <div className="text-[10.5px] text-muted-foreground/70">@ {INR(lastPrice, 2)}</div>
             </>
           ) : (
@@ -510,7 +520,7 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
         </div>
         <div>
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Δ vs avg</div>
-          <div className="mt-0.5">{tick ? <PnLCell value={delta} pct={pct} /> : <span className="text-muted-foreground/50 text-[13px]">—</span>}</div>
+          <div className="mt-0.5">{lastPrice > 0 ? <PnLCell value={delta} pct={pct} /> : <span className="text-muted-foreground/50 text-[13px]">—</span>}</div>
         </div>
       </div>
     </motion.div>
@@ -527,7 +537,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
   const totalPortfolioValue = useMemo(() =>
     rows.reduce((s, h) => {
       const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
-      return s + num(h.totalQuantity) * (getTick(sym)?.ltp ?? 0);
+      return s + num(h.totalQuantity) * priceOf(h, getTick(sym));
     }, 0), [rows, getTick]);
 
   const columns = useMemo<TableColumn<Row>[]>(() => [
@@ -561,20 +571,20 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
     },
     {
       key: "ltp", header: "LTP", sortable: true, align: "right", width: "110px",
-      sortValue: (r) => { const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""); return getTick(sym)?.ltp ?? 0; },
+      sortValue: (r) => { const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""); return priceOf(r, getTick(sym)); },
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
         const tick = getTick(sym);
-        const ltp = tick?.ltp ?? 0;
+        const ltp = priceOf(r, tick);
         return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
     },
     {
       key: "value", header: "Value", sortable: true, align: "right", width: "120px",
-      sortValue: (r) => { const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""); return num(r.totalQuantity) * (getTick(sym)?.ltp ?? 0); },
+      sortValue: (r) => { const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? ""); return num(r.totalQuantity) * priceOf(r, getTick(sym)); },
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const ltp = getTick(sym)?.ltp ?? 0;
+        const ltp = priceOf(r, getTick(sym));
         return <span className="tabular-nums font-semibold text-foreground">{ltp > 0 ? INR(num(r.totalQuantity) * ltp) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
     },
@@ -582,12 +592,12 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
       key: "alloc_pct", header: "Alloc %", sortable: true, align: "right", width: "90px",
       sortValue: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const val = num(r.totalQuantity) * (getTick(sym)?.ltp ?? 0);
+        const val = num(r.totalQuantity) * priceOf(r, getTick(sym));
         return totalPortfolioValue > 0 ? (val / totalPortfolioValue) * 100 : 0;
       },
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const ltp = getTick(sym)?.ltp ?? 0;
+        const ltp = priceOf(r, getTick(sym));
         if (ltp === 0) return <div className="flex flex-col items-end gap-0.5"><span className="text-muted-foreground/50 text-[12px]">—</span></div>;
         const val = num(r.totalQuantity) * ltp;
         const pct = totalPortfolioValue > 0 ? (val / totalPortfolioValue) * 100 : 0;
@@ -605,12 +615,12 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
       key: "pnl", header: "Unrealized P&L", sortable: true, align: "right", width: "130px",
       sortValue: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const ltp = getTick(sym)?.ltp ?? 0;
+        const ltp = priceOf(r, getTick(sym));
         return num(r.totalQuantity) * ltp - num(r.totalQuantity) * num(r.averageTradedPrice);
       },
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const ltp = getTick(sym)?.ltp ?? 0;
+        const ltp = priceOf(r, getTick(sym));
         if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[13px]">—</span>;
         return <PnLCell value={num(r.totalQuantity) * ltp - num(r.totalQuantity) * num(r.averageTradedPrice)} size="sm" />;
       },
@@ -619,12 +629,12 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
       key: "pnl_pct", header: "P&L %", sortable: true, align: "right", width: "95px",
       sortValue: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const avg = num(r.averageTradedPrice); const ltp = getTick(sym)?.ltp ?? 0;
+        const avg = num(r.averageTradedPrice); const ltp = priceOf(r, getTick(sym));
         return avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
       },
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
-        const avg = num(r.averageTradedPrice); const ltp = getTick(sym)?.ltp ?? 0;
+        const avg = num(r.averageTradedPrice); const ltp = priceOf(r, getTick(sym));
         if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[12.5px]">—</span>;
         const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
         return <span className={cn("inline-flex tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
