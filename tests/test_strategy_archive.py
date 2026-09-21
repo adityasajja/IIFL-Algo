@@ -112,3 +112,64 @@ def test_a_name_the_feed_would_misread_is_given_its_exact_spelling(monkeypatch):
     )
 
     assert router.broker_safe(["LT", "ABB", "NOTLISTED"]) == ["LT-EQ", "ABB", "NOTLISTED"]
+
+
+# ---- deleting one version ------------------------------------------------
+def _second_version(client, strategy_id):
+    definition = client.get(f"/api/v1/strategies/{strategy_id}/versions/1").json()["definition"]
+    definition["rules"]["exit"]["stop_loss_pct"] += 1  # an identical definition is refused
+    definition["params"]["stop_loss_pct"] += 1
+    made = client.post(f"/api/v1/strategies/{strategy_id}/versions", json={"definition": definition, "change_note": "changed"})
+    assert made.status_code == 201, made.text
+    return made.json()["version"]
+
+
+def test_a_version_can_be_deleted_and_the_strategy_stays(auth_client):
+    strategy_id = _seed(auth_client)
+    second = _second_version(auth_client, strategy_id)
+
+    gone = auth_client.delete(f"/api/v1/strategies/{strategy_id}/versions/{second}")
+
+    assert gone.status_code == 200 and gone.json()["deleted"] is True
+    versions = auth_client.get(f"/api/v1/strategies/{strategy_id}/versions").json()["versions"]
+    assert [v["version"] for v in versions] == [1]
+    assert strategy_id in _ids(auth_client)
+
+
+def test_a_version_a_live_run_uses_cannot_be_deleted(auth_client):
+    strategy_id = _seed(auth_client)
+    second = _second_version(auth_client, strategy_id)
+    run = auth_client.post(
+        "/api/v1/paper/deployments",
+        json={"strategy_id": strategy_id, "strategy_version": second, "capital": 500_000.0, "config": CONFIG},
+    )
+    assert run.status_code == 201, run.text
+
+    refused = auth_client.delete(f"/api/v1/strategies/{strategy_id}/versions/{second}")
+
+    assert refused.status_code == 409
+    # another version of the same strategy is not held by that run
+    assert auth_client.delete(f"/api/v1/strategies/{strategy_id}/versions/1").status_code == 200
+
+
+def test_deleting_a_version_erases_its_stopped_run_but_not_the_others(auth_client):
+    strategy_id = _seed(auth_client)
+    second = _second_version(auth_client, strategy_id)
+    ids = {}
+    for version in (1, second):
+        made = auth_client.post(
+            "/api/v1/paper/deployments",
+            json={"strategy_id": strategy_id, "strategy_version": version, "capital": 500_000.0, "config": CONFIG},
+        ).json()
+        ids[version] = made.get("deployment_id") or made["deployment"]["deployment_id"]
+        assert auth_client.post(f"/api/v1/paper/deployments/{ids[version]}/stop", json={"reason": "test"}).status_code == 200
+
+    assert auth_client.delete(f"/api/v1/strategies/{strategy_id}/versions/{second}").status_code == 200
+
+    left = {d["deployment_id"] for d in auth_client.get("/api/v1/paper/deployments").json()["deployments"]}
+    assert ids[1] in left and ids[second] not in left
+
+
+def test_deleting_a_version_that_does_not_exist_is_a_404(auth_client):
+    strategy_id = _seed(auth_client)
+    assert auth_client.delete(f"/api/v1/strategies/{strategy_id}/versions/99").status_code == 404

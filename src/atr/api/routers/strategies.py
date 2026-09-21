@@ -207,6 +207,19 @@ def delete_strategy(
         raise _fail(exc) from exc
 
 
+@router.delete("/{strategy_id}/versions/{version}")
+def delete_version(
+    strategy_id: str,
+    version: int,
+    principal: Principal = Depends(require_permission(Permission.STRATEGY_WRITE)),
+) -> dict[str, Any]:
+    """Erase one version with the runs and backtests that used it. 409 while a paper run uses it."""
+    try:
+        return _service().delete_version(principal.user_id, strategy_id, version)
+    except StrategyError as exc:
+        raise _fail(exc) from exc
+
+
 @router.get("/{strategy_id}/versions", dependencies=[_READ])
 def list_versions(strategy_id: str, principal: CurrentPrincipal) -> dict[str, Any]:
     """Every version, newest first, each with ``deployable`` and why not.

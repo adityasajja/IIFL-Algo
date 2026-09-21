@@ -50,10 +50,13 @@ from atr.appdb.schema import (
     backtest_runs,
     deployments,
     learning_observations,
+    optimization_recommendations,
     order_intents,
     orders,
     signal_contexts,
     strategies,
+    strategy_experiments,
+    strategy_versions,
     trade_attributions,
     trade_journal,
 )
@@ -202,28 +205,71 @@ class StrategyService:
             row = StrategyRepository.get(session, strategy_id, user_id)
             if row is None:
                 raise self._not_found(strategy_id)
-            active = session.execute(
-                select(func.count())
-                .select_from(deployments)
-                .where(
-                    deployments.c.user_id == user_id,
-                    deployments.c.strategy_id == strategy_id,
-                    deployments.c.status.in_(self.LIVE_DEPLOYMENT_STATES),
-                )
-            ).scalar_one()
-            if active:
-                raise StrategyError(
-                    f"{row['name']} is still running on paper. Stop it on the Paper page first.",
-                    code="strategy_in_use",
-                    status=409,
-                    detail={"active_deployments": int(active)},
-                )
-            run_ids = select(deployments.c.deployment_id).where(deployments.c.strategy_id == strategy_id)
-            session.execute(delete(trade_attributions).where(trade_attributions.c.deployment_id.in_(run_ids)))
-            for table in self.OWNED_TABLES:
-                session.execute(delete(table).where(table.c.strategy_id == strategy_id))
+            self._refuse_if_running(session, user_id, strategy_id, None, row["name"])
+            self._erase_history(session, strategy_id, None)
             session.execute(delete(strategies).where(strategies.c.strategy_id == strategy_id))
         return {"strategy_id": strategy_id, "deleted": True}
+
+    def delete_version(self, user_id: str, strategy_id: str, version: int) -> dict[str, Any]:
+        """Erase one version and the runs and backtests that used it. The strategy stays."""
+        with self.db.session() as session:
+            row = StrategyRepository.get(session, strategy_id, user_id)
+            if row is None:
+                raise self._not_found(strategy_id)
+            if StrategyRepository.version(session, strategy_id, version) is None:
+                raise StrategyError(
+                    f"{row['name']} has no version {version}", code="version_not_found", status=404
+                )
+            self._refuse_if_running(session, user_id, strategy_id, version, f"{row['name']} v{version}")
+            self._erase_history(session, strategy_id, version)
+            session.execute(
+                delete(strategy_versions).where(
+                    strategy_versions.c.strategy_id == strategy_id,
+                    strategy_versions.c.version == version,
+                )
+            )
+        return {"strategy_id": strategy_id, "version": version, "deleted": True}
+
+    def _refuse_if_running(
+        self, session: Any, user_id: str, strategy_id: str, version: int | None, label: str
+    ) -> None:
+        query = (
+            select(func.count())
+            .select_from(deployments)
+            .where(
+                deployments.c.user_id == user_id,
+                deployments.c.strategy_id == strategy_id,
+                deployments.c.status.in_(self.LIVE_DEPLOYMENT_STATES),
+            )
+        )
+        if version is not None:
+            query = query.where(deployments.c.strategy_version == version)
+        active = session.execute(query).scalar_one()
+        if active:
+            raise StrategyError(
+                f"{label} is still running on paper. Stop it on the Paper page first.",
+                code="strategy_in_use",
+                status=409,
+                detail={"active_deployments": int(active)},
+            )
+
+    def _erase_history(self, session: Any, strategy_id: str, version: int | None) -> None:
+        """Delete the runs, orders and backtests that came from a strategy, or from one version of it."""
+
+        def of(table: Any, version_column: Any = None) -> Any:
+            condition = table.c.strategy_id == strategy_id
+            if version is not None:
+                condition = condition & ((version_column if version_column is not None else table.c.strategy_version) == version)
+            return condition
+
+        run_ids = select(deployments.c.deployment_id).where(of(deployments))
+        session.execute(delete(trade_attributions).where(trade_attributions.c.deployment_id.in_(run_ids)))
+        for table in self.OWNED_TABLES:
+            session.execute(delete(table).where(of(table)))
+        session.execute(delete(optimization_recommendations).where(
+            of(optimization_recommendations, optimization_recommendations.c.source_strategy_version)))
+        session.execute(delete(strategy_experiments).where(
+            of(strategy_experiments, strategy_experiments.c.source_version)))
 
     def versions(self, user_id: str, strategy_id: str) -> list[dict[str, Any]]:
         """Every version, newest first, each saying whether it can be deployed.
