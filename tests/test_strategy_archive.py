@@ -92,7 +92,7 @@ def test_the_researched_stock_list_is_offered_for_a_paper_run(auth_client):
 def test_a_name_the_feed_would_misread_is_given_its_exact_spelling(monkeypatch):
     from types import SimpleNamespace
 
-    from atr.api.routers import strategies as router
+    from atr.services import strategies as router
 
     class Master:
         def load_cached(self, exchanges):

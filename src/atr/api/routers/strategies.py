@@ -60,38 +60,6 @@ router = APIRouter(prefix="/api/v1/strategies", tags=["strategies"])
 
 _READ = Depends(require_permission(Permission.STRATEGY_READ))
 
-
-def broker_safe(symbols: list[str]) -> list[str]:
-    """Spell each name the way the broker's list does when the plain name would resolve wrongly.
-
-    The price feed matches a plain name by prefix when it has no exact entry, which lands
-    on the wrong contract for a few (BAJAJ-AUTO, NAM-INDIA) and on none for others (LT).
-    Their "-EQ" twin is exact, and the daily cache holds it too. Without the master (no
-    instrument list cached) the names are returned as they are.
-    """
-    try:
-        from atr.brokers.iifl.contracts import InstrumentMaster
-        from atr.scanner import resolve_conid
-
-        master = InstrumentMaster()
-        master.load_cached(["NSEEQ"])
-    except Exception:  # noqa: BLE001 - no master, no correction
-        return list(symbols)
-
-    out = []
-    for name in symbols:
-        twin = name if name.endswith("-EQ") else f"{name}-EQ"
-        try:
-            exact = str(master.find(twin, "NSEEQ").conid)
-        except Exception:  # noqa: BLE001 - no twin: keep the name
-            out.append(name)
-            continue
-        try:
-            resolved = str(resolve_conid(master, name, "NSEEQ"))
-        except Exception:  # noqa: BLE001
-            resolved = None
-        out.append(name if resolved == exact else twin)
-    return out
 _WRITE = Depends(require_permission(Permission.STRATEGY_WRITE))
 
 
@@ -177,9 +145,7 @@ def researched_universe() -> dict[str, Any]:
     A paper run over this list trades the same names the research measured, so its
     result can be set beside the research's.
     """
-    from atr.research.hunt import stock_universe
-
-    symbols = broker_safe(stock_universe(min_bars=1500))
+    symbols = _service().researched_universe()
     return {"symbols": symbols, "total": len(symbols)}
 
 

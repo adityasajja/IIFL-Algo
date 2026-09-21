@@ -153,6 +153,12 @@ class StrategyService:
         logger.info("strategy %s created (%s)", row["strategy_id"][:8], clean_kind)
         return {**row, "latest_version": None, "version_count": 0}
 
+    def researched_universe(self) -> list[str]:
+        """The stocks the strategy research was run on, spelled the way the price feed resolves them."""
+        from atr.research.hunt import stock_universe
+
+        return broker_safe(stock_universe(min_bars=1500))
+
     # -------------------------------------------------------------------- read
     def list(self, user_id: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
         with self.db.session() as session:
@@ -529,3 +535,36 @@ __all__ = [
     "StrategyService",
     "get_strategy_service",
 ]
+
+
+def broker_safe(symbols: list[str]) -> list[str]:
+    """Spell each name the way the broker's list does when the plain name would resolve wrongly.
+
+    The price feed matches a plain name by prefix when it has no exact entry, which lands
+    on the wrong contract for a few (BAJAJ-AUTO, NAM-INDIA) and on none for others (LT).
+    Their "-EQ" twin is exact, and the daily cache holds it too. Without the master (no
+    instrument list cached) the names are returned as they are.
+    """
+    try:
+        from atr.brokers.iifl.contracts import InstrumentMaster
+        from atr.scanner import resolve_conid
+
+        master = InstrumentMaster()
+        master.load_cached(["NSEEQ"])
+    except Exception:  # noqa: BLE001 - no master, no correction
+        return list(symbols)
+
+    out = []
+    for name in symbols:
+        twin = name if name.endswith("-EQ") else f"{name}-EQ"
+        try:
+            exact = str(master.find(twin, "NSEEQ").conid)
+        except Exception:  # noqa: BLE001 - no twin: keep the name
+            out.append(name)
+            continue
+        try:
+            resolved = str(resolve_conid(master, name, "NSEEQ"))
+        except Exception:  # noqa: BLE001
+            resolved = None
+        out.append(name if resolved == exact else twin)
+    return out
