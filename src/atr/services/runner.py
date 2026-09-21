@@ -522,6 +522,7 @@ class DeploymentLoop:
         self.skipped_reason = None
         self.last_strategy_evaluation = eval_time
         base_context = self._session_context(eval_time, cal, entry_rules)
+        candidates: list[tuple[str, float, pd.DataFrame, Any, tuple[str, str, str]]] = []
 
         for symbol in self.config.symbols:
             price, ts, age = self._price_with_meta(symbol, now=eval_time)
@@ -594,8 +595,16 @@ class DeploymentLoop:
             key = (symbol, str(chosen.rule), self._bar_key(symbol))
             if key in self.acted:
                 continue
-            self.acted.add(key)
+            candidates.append((symbol, price, frame, chosen, key))
 
+        # Entries are placed after the whole universe has been looked at, best first, so
+        # a full book is filled by the strongest candidates rather than the first ones
+        # the loop happened to reach. Exits above have already freed their slots.
+        candidates.sort(key=lambda c: c[3].detail.get("gap_pct", 0.0))
+        for symbol, price, frame, chosen, key in candidates:
+            if self._open_position_count() >= self.config.max_open_positions:
+                break
+            self.acted.add(key)
             quantity = self._size(
                 price, symbol=symbol, frame=frame, entry_rules=entry_rules
             )

@@ -255,3 +255,42 @@ def test_a_trade_still_open_on_friday_is_sold_at_the_close(gap_run):
     assert runner.pass_once(now=_at(FRIDAY_AFTER, 15, 16)).orders == 1
     last = runner.status()["deployments"][0]["last_signal"]
     assert last["side"] == "SELL" and last["rule"] == "week_end"
+
+
+def test_a_full_book_is_filled_by_the_deepest_gaps_not_the_first_names(app_db, monkeypatch):
+    from atr.appdb.repositories import DeploymentRepository, StrategyRepository
+    from atr.appdb.schema import users
+    from atr.services import paper as paper_service
+    from atr.services import runner as runner_module
+    from atr.services.runner import PaperRunner
+
+    paper_service.install_live_source(None)
+    monkeypatch.setattr("atr.signals.engine.load_daily", lambda symbol, exchange="NSEEQ", **kw: _history())
+    monkeypatch.setattr(runner_module._MARKET_WEEK, "pct", lambda today, prior: 1.5)
+    names = ["AAA", "BBB", "CCC", "DDD"]  # list order is the reverse of gap depth
+    opens = {"AAA": 98.9, "BBB": 98.0, "CCC": 96.0, "DDD": 90.0}
+
+    with app_db.session() as session:
+        session.execute(users.insert().values(
+            user_id="u_rank", email="r@example.com", username="rank", display_name="Rank",
+            password_hash="x", role="owner", is_active=True, mfa_enabled=False, failed_logins=0,
+            created_at=datetime(2026, 1, 1), updated_at=datetime(2026, 1, 1)))
+        strategy = StrategyRepository.create(session, user_id="u_rank", name="Monday gap", kind="rules")
+        version = StrategyRepository.create_version(
+            session, strategy_id=strategy["strategy_id"], author_user_id="u_rank", definition=DEFINITION)
+        DeploymentRepository.create(
+            session, user_id="u_rank", strategy_id=strategy["strategy_id"], strategy_version=int(version["version"]),
+            mode="PAPER", capital=500_000.0, status="RUNNING",
+            config={"symbols": names, "exchange": "NSEEQ", "order_value": 25_000.0, "lookback_days": 400,
+                    "max_open_positions": 2})
+
+    runner = PaperRunner(db=app_db)
+    runner.sync_loops()
+    loop = next(iter(runner._loops.values()))
+    loop.venue.prices = lambda sym, exch: opens.get(sym.upper())
+
+    runner.pass_once(now=_at(MONDAY, 9, 16))
+
+    held = {p.instrument.symbol for p in loop._portfolio().positions.values() if not p.is_flat}
+    assert held == {"DDD", "CCC"}
+    paper_service.install_live_source(None)
