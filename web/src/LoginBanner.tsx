@@ -1,3 +1,4 @@
+import { BrandMark } from "./components/ui/brand-mark";
 import { useState } from "react";
 import { getLoginStatus, loginSubmit, type LoginStatus } from "./api";
 import { Button } from "./components/ui/button";
@@ -68,9 +69,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
     <MorphingModal viewId={view} onClose={() => onClose?.()}>
       {view === "main" ? (
         <div className="text-center">
-          <div className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-lg font-extrabold text-white">
-            A
-          </div>
+          <BrandMark className="mx-auto mb-4 size-11" />
           <h2 className="text-lg font-semibold tracking-tight">Log in to IIFL</h2>
           <p className="mt-1.5 text-[13px] text-muted-foreground">Your session has expired.</p>
           <div className="mt-5 grid gap-2.5">

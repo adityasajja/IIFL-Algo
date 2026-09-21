@@ -1,3 +1,4 @@
+import { BrandMark } from "./components/ui/brand-mark";
 import { AlertTriangle, KeyRound, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -153,7 +154,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
           </div>
           <h2 className="text-lg font-semibold tracking-tight">Backend unreachable</h2>
           <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
-            The dashboard could not reach the ATR API, so it cannot tell whether you are
+            The dashboard could not reach the Forward API, so it cannot tell whether you are
             signed in. This is a connectivity problem, not a rejected login.
           </p>
           <div className="mt-4 text-left">
@@ -195,7 +196,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
   const busy = buttonState === "loading";
 
   const heading = isSetup
-    ? "Set up ATR"
+    ? "Set up Forward"
     : isMfa
       ? "Two-factor code"
       : isRegister
@@ -221,9 +222,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
   return (
     <Shell>
       <div className="text-center">
-        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-lg font-extrabold text-white">
-          A
-        </div>
+        <BrandMark className="mx-auto mb-4 size-11" />
         <h2 className="text-lg font-semibold tracking-tight">{heading}</h2>
         <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
           {blurb}

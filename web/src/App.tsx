@@ -1,3 +1,4 @@
+import { BrandMark } from "./components/ui/brand-mark";
 import {
   AnimatedSidebar,
   AnimatedSidebarContent,
@@ -583,7 +584,7 @@ export default function App() {
       { id: "go-system", label: "Go to System", group: "Navigate", icon: Server, hint: "0", keywords: ["cache", "contracts", "session", "health", "history"], onSelect: () => setTab("system") },
       { id: "toggle-theme", label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", group: "View", icon: Palette, keywords: ["appearance"], onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
       { id: "login", label: "Log in with IIFL", group: "Session", icon: LogIn, keywords: ["auth", "session", "broker"], onSelect: () => setShowLogin(true) },
-      { id: "sign-out", label: "Sign out of ATR", group: "Session", icon: LogOut, keywords: ["logout", "account", "leave", "end session"], onSelect: () => void signOut() },
+      { id: "sign-out", label: "Sign out", group: "Session", icon: LogOut, keywords: ["logout", "account", "leave", "end session"], onSelect: () => void signOut() },
     ],
     [theme, setTab, signOut],
   );
@@ -600,9 +601,7 @@ export default function App() {
     return (
       <div className="grid min-h-screen place-items-center bg-background text-muted-foreground">
         <div className="grid gap-2 text-center">
-          <div className="mx-auto grid size-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-lg font-extrabold text-white">
-            A
-          </div>
+          <BrandMark className="mx-auto size-11" />
           <span className="text-xs">Checking your session…</span>
         </div>
       </div>
@@ -622,14 +621,12 @@ export default function App() {
 
   return (
     <AnimatedSidebarProvider>
-      <AnimatedSidebar ariaLabel="ATR navigation" collapsible="icon">
+      <AnimatedSidebar ariaLabel="Forward navigation" collapsible="icon">
         <AnimatedSidebarHeader className="p-3 pb-2">
           <div className="flex min-h-11 items-center gap-3 overflow-hidden px-2">
-            <div className="grid size-7 shrink-0 place-items-center rounded-[9px] bg-gradient-to-br from-primary to-violet-500 text-sm font-extrabold text-white shadow-sm">
-              A
-            </div>
+            <BrandMark className="size-7" />
             <span className="truncate text-[15px] font-semibold tracking-tight text-foreground group-data-[state=collapsed]/sidebar:hidden">
-              ATR
+              Forward
             </span>
           </div>
         </AnimatedSidebarHeader>
@@ -701,8 +698,8 @@ export default function App() {
             <button
               type="button"
               onClick={() => void signOut()}
-              title="Sign out of ATR"
-              aria-label="Sign out of ATR"
+              title="Sign out"
+              aria-label="Sign out"
               className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-data-[state=collapsed]/sidebar:hidden"
             >
               <LogOut aria-hidden="true" className="size-4" />
