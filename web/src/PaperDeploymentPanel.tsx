@@ -154,16 +154,14 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
 
   const loadList = useCallback(async () => {
     try {
-      const [list, opts, run, evCounts] = await Promise.all([
+      const [list, opts, run] = await Promise.all([
         listDeployments(),
         backtestOptions().catch(() => null),
         getRunnerStatus().catch(() => null),
-        getForwardEvidenceCounts().catch(() => null),
       ]);
       setDeployments(list.deployments);
       if (opts) setOptions(opts);
       setRunner(run);
-      if (evCounts) setEvidenceCounts(evCounts);
       setError(null);
       setSelectedId((prev) => prev ?? list.deployments[0]?.deployment_id ?? null);
     } catch (e) {
@@ -174,6 +172,26 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  // The evidence counter rebuilds the learning dataset on the server, about half a minute of
+  // work. It is fetched once a minute, one request at a time, and never waited for, so it
+  // cannot hold the page back or pile up work behind the paper runner.
+  useEffect(() => {
+    let inFlight = false;
+    const load = () => {
+      if (inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      getForwardEvidenceCounts()
+        .then(setEvidenceCounts)
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   // The deployment whose overview is wanted right now. A response for any other
   // id is stale (the user switched while it was in flight) and must be dropped,
@@ -210,9 +228,6 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
       void loadList();
       void getRunnerStatus()
         .then(setRunner)
-        .catch(() => undefined);
-      void getForwardEvidenceCounts()
-        .then(setEvidenceCounts)
         .catch(() => undefined);
     }, POLL_MS);
     return () => clearInterval(t);
