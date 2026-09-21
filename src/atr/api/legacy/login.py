@@ -160,6 +160,13 @@ def login_callback(
         + '<div class="card"><h1 class="ok">Logged in ✓</h1>'
         + f"<p>Client: <strong>{session.client_id}</strong></p>"
         + f"<p>Expires: <strong>{session.expires_at.strftime('%d-%b-%Y %H:%M')} IST</strong></p>"
-        + '<p>You can close this tab and return to the dashboard.</p>'
-        + "<button onclick='window.close()'>Close</button></div>"
+        + "<p>Taking you back to the dashboard…</p>"
+        + "<a href='/'><button>Go now</button></a></div>"
+        # Back to the dashboard on its own. If the dashboard opened this tab, it is still open
+        # behind it, so close this one; otherwise (a bookmarked or typed login URL) go to it.
+        + "<noscript><meta http-equiv='refresh' content='1;url=/'></noscript>"
+        + "<script>setTimeout(function () {"
+        + " if (window.opener && !window.opener.closed) { window.close(); }"
+        + " else { location.replace('/'); }"
+        + " }, 1200);</script>"
     )
