@@ -289,14 +289,16 @@ def test_an_identical_definition_is_a_conflict_not_a_new_version(auth_client):
 
 
 def test_there_is_no_route_that_edits_a_version(auth_client):
-    """Immutability is the absence of a write path, so the absence is asserted."""
+    """A version's rules are never changed in place: it is created, or deleted, never patched.
+
+    Deleting is allowed and tested in test_strategy_archive; editing means a new version.
+    """
     created = _create(auth_client)
     _version(auth_client, created["strategy_id"])
 
     for method, path in (
         ("patch", f"{BASE}/{created['strategy_id']}/versions/1"),
         ("put", f"{BASE}/{created['strategy_id']}/versions/1"),
-        ("delete", f"{BASE}/{created['strategy_id']}/versions/1"),
         ("patch", f"{BASE}/{created['strategy_id']}"),
     ):
         response = getattr(auth_client, method)(path)
