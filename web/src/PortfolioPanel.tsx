@@ -1129,12 +1129,14 @@ export default function PortfolioPanel() {
   const availableMargin = useMemo(() => num(data?.sections?.limits?.rows?.[0]?.tradingLimit), [data]);
   const currentSection = section !== "execute" ? data?.sections?.[section as PortfolioSection] : null;
 
-  function DataContent({ children }: { children: React.ReactNode }) {
+  // A plain function, not a component: a component declared here is a new type on every
+  // render, so React would rebuild the whole table on every price tick and lose its state.
+  const guard = (children: React.ReactNode) => {
     if (error && !data) return <StaleNotice lastUpdated={lastUpdated} onRetry={() => void load()} />;
     if (!data) return <Hint>Loading…</Hint>;
     if (currentSection?.error) return <ErrorBox>{currentSection.error}</ErrorBox>;
     return <>{children}</>;
-  }
+  };
 
   return (
     <div className="space-y-6">
@@ -1185,19 +1187,19 @@ export default function PortfolioPanel() {
         <div className="pt-4">
           <Tabs value={section} onValueChange={(v) => setSection(v as TabId)}>
             <TabsContent value="limits">
-              <DataContent><LimitsView row={currentSection?.rows?.[0] ?? null} /></DataContent>
+              {guard(<LimitsView row={currentSection?.rows?.[0] ?? null} />)}
             </TabsContent>
             <TabsContent value="positions">
-              <DataContent><PositionsView rows={currentSection?.rows ?? []} getTick={getTick} /></DataContent>
+              {guard(<PositionsView rows={currentSection?.rows ?? []} getTick={getTick} />)}
             </TabsContent>
             <TabsContent value="holdings">
-              <DataContent><HoldingsView rows={currentSection?.rows ?? []} getTick={getTick} /></DataContent>
+              {guard(<HoldingsView rows={currentSection?.rows ?? []} getTick={getTick} />)}
             </TabsContent>
             <TabsContent value="orders">
-              <DataContent><OrdersView rows={currentSection?.rows ?? []} /></DataContent>
+              {guard(<OrdersView rows={currentSection?.rows ?? []} />)}
             </TabsContent>
             <TabsContent value="trades">
-              <DataContent><TradesView rows={currentSection?.rows ?? []} /></DataContent>
+              {guard(<TradesView rows={currentSection?.rows ?? []} />)}
             </TabsContent>
             <TabsContent value="execute">
               <ExecuteTab availableMargin={availableMargin} />
