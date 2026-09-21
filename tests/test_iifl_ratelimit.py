@@ -2,7 +2,13 @@
 
 import pytest
 
-from atr.brokers.iifl.ratelimit import RateLimits, allowed, bucket_for
+import multiprocessing
+import time
+
+import httpx
+
+from atr.brokers.iifl.client import IiflApiError, IiflClient, _is_retryable
+from atr.brokers.iifl.ratelimit import MemoryWindow, RateLimits, SharedWindow, allowed, bucket_for
 
 
 class Clock:
@@ -20,7 +26,7 @@ class Clock:
 
 def limits():
     clock = Clock()
-    return RateLimits(monotonic=clock.now, sleep=clock.sleep), clock
+    return RateLimits(MemoryWindow(), now=clock.now, sleep=clock.sleep), clock
 
 
 @pytest.mark.parametrize(
@@ -108,3 +114,95 @@ def test_contract_files_are_limited_per_segment():
     rl.wait("GET", "/contractfiles/NSEEQ.json")
     assert rl.wait("GET", "/contractfiles/BSEEQ.json") == 0
     assert rl.wait("GET", "/contractfiles/NSEEQ.json") > 0  # one allowed a second
+
+
+# -- the allowance belongs to the session, not to one object -----------------------------------
+def test_two_limiters_on_one_file_share_one_allowance(tmp_path):
+    clock = Clock()
+    a = RateLimits(SharedWindow(tmp_path / "rl.sqlite"), now=clock.now, sleep=clock.sleep)
+    b = RateLimits(SharedWindow(tmp_path / "rl.sqlite"), now=clock.now, sleep=clock.sleep)
+    a.wait("GET", "/holdings", scope="C1")
+    b.wait("GET", "/holdings", scope="C1")  # holdings allows 2 a second, between them
+    assert a.wait("GET", "/holdings", scope="C1") > 0
+    assert clock.slept
+
+
+def test_a_different_session_has_its_own_allowance(tmp_path):
+    clock = Clock()
+    rl = RateLimits(SharedWindow(tmp_path / "rl.sqlite"), now=clock.now, sleep=clock.sleep)
+    for _ in range(2):
+        rl.wait("GET", "/holdings", scope="C1")
+    assert rl.wait("GET", "/holdings", scope="C2") == 0
+
+
+def _hammer(path, calls, out):
+    rl = RateLimits(SharedWindow(path))
+    for _ in range(calls):
+        rl.wait("GET", "/holdings", scope="C1")
+        out.append(time.time())
+
+
+def test_separate_processes_together_stay_within_the_limit(tmp_path):
+    """The real case: the server and a script running at the same time."""
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Manager() as manager:
+        stamps = manager.list()
+        procs = [ctx.Process(target=_hammer, args=(tmp_path / "rl.sqlite", 4, stamps)) for _ in range(3)]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(60)
+        times = sorted(stamps)
+    assert len(times) == 12
+    # What matters is IIFL's own limit (3 a second) measured on when calls actually went out. The
+    # 80% headroom exists for exactly this: a call goes out a few milliseconds after it is counted.
+    for start in times:
+        in_window = [t for t in times if start <= t < start + 1.0]
+        assert len(in_window) <= 3, "the processes together went over IIFL's documented limit"
+    # And the counts themselves never exceed what we allow ourselves.
+    import sqlite3
+
+    rows = [r[0] for r in sqlite3.connect(tmp_path / "rl.sqlite").execute("SELECT ts FROM calls")]
+    for start in rows:
+        assert len([t for t in rows if start <= t < start + 1.0]) <= allowed(3)
+
+
+def test_a_broken_shared_file_falls_back_to_this_process_and_never_blocks_a_call(tmp_path):
+    class Broken:
+        def try_take(self, key, limit, clock):
+            raise OSError("disk full")
+
+    clock = Clock()
+    rl = RateLimits(Broken(), now=clock.now, sleep=clock.sleep)
+    for _ in range(2):
+        assert rl.wait("GET", "/holdings") == 0
+    assert rl.wait("GET", "/holdings") > 0  # still limited, by the in-process count
+
+
+# -- a 429 is retried with backoff, other client errors are not ---------------------------------
+def test_429_is_retryable_but_other_client_errors_are_not():
+    assert _is_retryable(IiflApiError("x", status_code=429))
+    assert _is_retryable(IiflApiError("x", status_code=503))
+    assert not _is_retryable(IiflApiError("x", status_code=400))
+    assert not _is_retryable(IiflApiError("x", status_code=401))
+
+
+def test_the_client_waits_its_turn_and_retries_a_429(tmp_path, monkeypatch):
+    from atr.brokers.iifl.auth import Session, SessionStore
+    from datetime import datetime
+
+    answers = [httpx.Response(429), httpx.Response(200, json={"status": "Ok", "result": []})]
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return answers.pop(0)
+
+    store = SessionStore(tmp_path / "session.json")
+    client = IiflClient(session_store=store)
+    client._http = httpx.Client(base_url="https://api.test/v1", transport=httpx.MockTransport(handler))
+    client.set_session(Session("tok", "C1", datetime.now().astimezone()))
+    monkeypatch.setattr("time.sleep", lambda s: None)  # skip the backoff wait
+    assert client.holdings() == {"status": "Ok", "result": []}
+    assert calls == ["/v1/holdings", "/v1/holdings"]
+    assert (tmp_path / "iifl_ratelimit.sqlite").exists()  # counted in the shared file

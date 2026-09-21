@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -22,7 +23,7 @@ from tenacity import (
 )
 
 from atr.brokers.iifl.auth import Session, SessionStore, build_checksum
-from atr.brokers.iifl.ratelimit import RateLimits
+from atr.brokers.iifl.ratelimit import RateLimits, SharedWindow
 
 BASE_URL = "https://api.iiflcapital.com/v1"
 
@@ -63,17 +64,27 @@ class IiflApiError(RuntimeError):
 
 
 def _is_retryable(exc: Exception) -> bool:
-    """Only retry genuine transport failures and 5xx server errors.
+    """Only retry genuine transport failures, 5xx server errors and 429 rate-limit refusals.
 
-    4xx responses are client errors (bad request, unauthorized, validation
-    failures) — retrying them just amplifies load on the broker API. 5xx and
+    Other 4xx responses are client errors (bad request, unauthorized, validation
+    failures) — retrying them just amplifies load on the broker API. 5xx, 429 and
     network errors may be transient, so they get the backoff.
     """
     if isinstance(exc, httpx.TransportError):
         return True
     if isinstance(exc, IiflApiError):
-        return exc.status_code is not None and exc.status_code >= 500
+        # 429 means we went over a rate limit despite waiting (the docs give no penalty and the
+        # limits may be tighter than published): back off and try again rather than fail.
+        return exc.status_code is not None and (exc.status_code >= 500 or exc.status_code == 429)
     return False
+
+
+def _limits_for(store: SessionStore) -> RateLimits:
+    """The rate limiter, sharing its counts through a file next to the session file."""
+    try:
+        return RateLimits(SharedWindow(Path(store.path).parent / "iifl_ratelimit.sqlite"))
+    except Exception:  # noqa: BLE001 - no usable file: count in this process instead
+        return RateLimits()
 
 
 def _transport(force_ipv4: bool) -> httpx.HTTPTransport | None:
@@ -120,7 +131,9 @@ class IiflClient:
         self.base_url = base_url.rstrip("/")
         self.session: Session | None = None
         self._store = session_store or SessionStore()
-        self._limits = RateLimits()  # IIFL's documented per-endpoint limits: see ratelimit.py
+        # IIFL's documented per-endpoint limits (see ratelimit.py), counted in a file beside the
+        # session so every process and client using the session shares one allowance.
+        self._limits = _limits_for(self._store)
         limits = httpx.Limits(
             max_keepalive_connections=20,
             max_connections=50,
@@ -193,7 +206,7 @@ class IiflClient:
         if auth and self.session is None:
             raise IiflApiError("no active session — call create_session() or restore_session()")
 
-        self._limits.wait(method, path)
+        self._limits.wait(method, path, scope=self.session.client_id if self.session else "")
         response = self._http.request(method, path, json=json, params=params)
         if response.status_code >= 500:
             raise IiflApiError(

@@ -6,17 +6,28 @@ for non-registered apps (under 10 orders/second) and one for registered ones. Th
 figure is used here, because that is what an individual account gets. The docs do not say what IIFL
 does when a limit is exceeded; v1 was refused with HTTP 429.
 
-We stay at 80% of each limit (rounded down, at least 1 call a second), so clock skew or a second
-process on the same session does not tip us over. A call that would exceed the limit waits.
+We stay at 80% of each limit (rounded down, at least 1 call a second) and a call that would exceed
+the limit waits.
+
+The limit belongs to the *session*, not to a Python object, so the calls are counted where every
+client of that session can see them: in a small SQLite file next to the session file. The server, a
+script run beside it and a second ``IiflClient`` all draw from the same allowance. If that file
+cannot be used, counting falls back to this process alone, and says so once: a broken limiter must
+not stop a trading call from being made.
 """
 
 from __future__ import annotations
 
+import logging
 import re
+import sqlite3
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 HEADROOM = 0.8
 
@@ -64,32 +75,94 @@ def bucket_for(method: str, path: str) -> tuple[str, int]:
     return f"other:{method.upper()} {route}", _UNKNOWN_LIMIT
 
 
-class RateLimits:
-    """A sliding one-second window per bucket. Safe to call from many threads."""
+class MemoryWindow:
+    """Counts calls inside this process only. The fallback, and what tests use."""
 
-    def __init__(
-        self,
-        monotonic: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        self._monotonic, self._sleep = monotonic, sleep
+    def __init__(self) -> None:
         self._calls: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
 
-    def wait(self, method: str, path: str) -> float:
+    def try_take(self, key: str, limit: int, clock: Callable[[], float]) -> float:
+        """Count a call and return 0.0 if it is allowed, else how long to wait before trying again."""
+        with self._lock:
+            now = clock()
+            window = self._calls.setdefault(key, deque())
+            while window and now - window[0] >= 1.0:
+                window.popleft()
+            if len(window) < limit:
+                window.append(now)
+                return 0.0
+            return 1.0 - (now - window[0])
+
+
+class SharedWindow:
+    """Counts calls in a SQLite file, so every process using the session shares one allowance.
+
+    ``BEGIN IMMEDIATE`` makes count-then-insert atomic across processes and threads.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS calls (key TEXT NOT NULL, ts REAL NOT NULL)")
+            conn.execute("CREATE INDEX IF NOT EXISTS calls_key_ts ON calls (key, ts)")
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._path, timeout=5.0, isolation_level=None)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def try_take(self, key: str, limit: int, clock: Callable[[], float]) -> float:
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            now = clock()  # read only once we hold the lock, so counted times are in commit order
+            conn.execute("DELETE FROM calls WHERE ts < ?", (now - 60.0,))  # housekeeping
+            (count, oldest) = conn.execute(
+                "SELECT COUNT(*), MIN(ts) FROM calls WHERE key = ? AND ts >= ?", (key, now - 1.0)
+            ).fetchone()
+            if count < limit:
+                conn.execute("INSERT INTO calls (key, ts) VALUES (?, ?)", (key, now))
+                conn.execute("COMMIT")
+                return 0.0
+            conn.execute("COMMIT")
+            return 1.0 - (now - oldest)
+        except BaseException:
+            conn.execute("ROLLBACK") if conn.in_transaction else None
+            raise
+        finally:
+            conn.close()
+
+
+class RateLimits:
+    """Waits, before a call, until IIFL's documented limit for that endpoint allows it."""
+
+    def __init__(
+        self,
+        window: MemoryWindow | SharedWindow | None = None,
+        now: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._window = window or MemoryWindow()
+        self._fallback = MemoryWindow()
+        self._now, self._sleep = now, sleep
+        self._warned = False
+
+    def wait(self, method: str, path: str, scope: str = "") -> float:
         """Block until this call is allowed, count it, and return how long it waited."""
         bucket, documented = bucket_for(method, path)
-        limit = allowed(documented)
+        key, limit = f"{scope}|{bucket}", allowed(documented)
         waited = 0.0
         while True:
-            with self._lock:
-                now = self._monotonic()
-                window = self._calls.setdefault(bucket, deque())
-                while window and now - window[0] >= 1.0:
-                    window.popleft()
-                if len(window) < limit:
-                    window.append(now)
-                    return waited
-                delay = 1.0 - (now - window[0])
-            self._sleep(delay)  # outside the lock, so other buckets are not held up
+            try:
+                delay = self._window.try_take(key, limit, self._now)
+            except Exception as error:  # noqa: BLE001 - never let the limiter stop a call
+                if not self._warned:
+                    log.warning("shared rate limiter unavailable (%s); limiting this process only", error)
+                    self._warned = True
+                delay = self._fallback.try_take(key, limit, self._now)
+            if delay <= 0.0:
+                return waited
+            self._sleep(delay)
             waited += delay
