@@ -683,6 +683,11 @@ export const getStrategyVersion = (strategyId: string, version: number) =>
     `/api/v1/strategies/${encodeURIComponent(strategyId)}/versions/${version}`,
   );
 
+export const deleteStrategyVersion = (strategyId: string, version: number) =>
+  req<{ deleted: boolean }>(`/api/v1/strategies/${encodeURIComponent(strategyId)}/versions/${version}`, {
+    method: "DELETE",
+  });
+
 export const createStrategyVersion = (
   strategyId: string,
   body: { definition: unknown; change_note?: string | null; force?: boolean },

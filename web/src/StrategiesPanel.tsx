@@ -7,6 +7,8 @@ import {
   listSavedStrategies,
   removeSavedStrategy,
   createDeployment,
+  deleteStrategyVersion,
+  getStrategyVersion,
   getResearchedStocks,
   startDeployment,
   listStrategyVersions,
@@ -123,6 +125,26 @@ function buildDefinition(r: Rules) {
   return { rules: { entry, exit }, engine_key: "signals_entry", params: { ...entry, ...exit, lookback: 120, allocation: 0.1, max_positions: 5 } };
 }
 
+/** The form values a stored version was made from, so Edit can start from them. */
+function rulesFrom(definition: Record<string, unknown> | null): Rules {
+  const blocks = (definition?.rules ?? {}) as { entry?: Record<string, unknown>; exit?: Record<string, unknown> };
+  const entry = blocks.entry ?? {};
+  const exit = blocks.exit ?? {};
+  const kind = entry.setup === "gap_down" ? "gap" : entry.setup === "triple_rsi" ? "triple" : "breakout";
+  const pick = (value: unknown, fallback: string) => (typeof value === "number" ? String(value) : fallback);
+  return {
+    kind,
+    lookback: pick(entry.breakout_lookback, START_RULES.lookback),
+    volume: pick(entry.volume_multiple, START_RULES.volume),
+    stop: pick(exit.stop_loss_pct, START_RULES.stop),
+    target: pick(exit.take_profit_pct, START_RULES.target),
+    below: pick(entry.triple_rsi_below, START_RULES.below),
+    sellAt: pick(exit.rsi_overbought, START_RULES.sellAt),
+    gap: pick(entry.gap_down_pct, START_RULES.gap),
+    market: pick(entry.gap_market_min_pct, START_RULES.market),
+  };
+}
+
 function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper: () => void }) {
   const [saved, setSaved] = useState<SavedStrategy[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -198,6 +220,30 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
       setReport(null);
       await refresh(null);
       setNotice(`Removed ${s.name}.`);
+    });
+  };
+
+  /** Open the rules form with a version's values, ready to save as the next version. */
+  const editVersion = (version: number) =>
+    run("edit", async () => {
+      const detail = await getStrategyVersion(selected as string, version);
+      setRules(rulesFrom(detail.definition));
+      setEditing(true);
+      setNotice(`Editing from v${version}. Saving makes a new version.`);
+    });
+
+  const removeVersion = async (version: number) => {
+    const ok = await dialog.confirm({
+      title: `Delete v${version}?`,
+      description: "This erases it, with the paper runs and backtests that used it. It cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await run("delete-version", async () => {
+      await deleteStrategyVersion(selected as string, version);
+      await refresh(selected);
+      setNotice(`Deleted v${version}.`);
     });
   };
 
@@ -295,6 +341,17 @@ function Authoring({ tiles, onOpenPaper }: { tiles: React.ReactNode; onOpenPaper
                             Run on paper
                           </button>
                         )}
+                        <button type="button" disabled={busy !== null} onClick={() => void editVersion(v.version)} className={ghost}>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => void removeVersion(v.version)}
+                          className={cn(ghost, "text-muted-foreground hover:text-rose-500")}
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   ))}
