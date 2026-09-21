@@ -71,11 +71,8 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
           <div className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-lg font-extrabold text-white">
             A
           </div>
-          <h2 className="text-lg font-semibold tracking-tight">IIFL session needed</h2>
-          <p className="mx-auto mt-1.5 max-w-xs text-[13px] leading-relaxed text-muted-foreground">
-            ATR talks to your broker through a daily IIFL session. It just expired —
-            reconnecting takes about a minute.
-          </p>
+          <h2 className="text-lg font-semibold tracking-tight">Log in to IIFL</h2>
+          <p className="mt-1.5 text-[13px] text-muted-foreground">Your session has expired.</p>
           <div className="mt-5 grid gap-2.5">
             <Button
               size="lg"
@@ -83,20 +80,11 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
               disabled={opening}
               onClick={() => void openLogin()}
             >
-              {opening ? "Building the login URL…" : "Log in with IIFL"}
+              {opening ? "Opening…" : "Log in"}
             </Button>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Opens markets.iiflcapital.com in a new tab. After you sign in it
-              redirects back and the session activates automatically.
-            </p>
             {error ? (
               <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-left text-xs leading-relaxed text-destructive">
                 {error}
-              </p>
-            ) : !status ? (
-              <p className="text-left text-xs leading-relaxed text-muted-foreground">
-                Waiting on the backend for the login URL — the button still works,
-                it will fetch one when you click.
               </p>
             ) : null}
             <button
@@ -104,7 +92,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
               onClick={() => setView("manual")}
               className="text-[13px] font-medium text-primary hover:underline"
             >
-              I already have an auth code →
+              Use an auth code
             </button>
             {onClose ? (
               <button
@@ -112,7 +100,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
                 onClick={onClose}
                 className="text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                Not now — backtests, research and paper trading work without it
+                Not now
               </button>
             ) : null}
           </div>
