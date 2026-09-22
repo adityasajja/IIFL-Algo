@@ -154,14 +154,9 @@ export default function OverviewPanel({ onNavigate }: Props) {
 
   return (
     <div className="space-y-4 pb-12">
-      {/* Mode + refresh: the only chrome above the content. */}
-      <div className="flex items-center justify-between">
-        <span
-          title="Signals are generated and tracked, but no real order is sent to the broker."
-          className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-500"
-        >
-          Practice mode
-        </span>
+      {/* Refresh: the only chrome above the content. The mode is already the app-wide
+          banner at the top of every page, so it is not repeated here. */}
+      <div className="flex items-center justify-end">
         <button
           onClick={() => loadData(true)}
           disabled={refreshing}
