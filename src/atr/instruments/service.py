@@ -168,38 +168,59 @@ class InstrumentMaster:
         return "|".join(parts) or "empty"
 
     def snapshot(self) -> MasterSnapshot:
+        """The current index. Never blocks a request for the ~11s rebuild once one snapshot
+        exists: a snapshot going stale after its TTL means "check for new data soon", not
+        "the page must wait." Serve what we have and refresh on a background thread instead —
+        a snapshot a few minutes old is a fine trade for a request that returns immediately.
+
+        Only the very first call, with nothing in memory and nothing usable on disk, builds on
+        the request thread; that is the one case where there is nothing else to serve.
+        """
         with self._lock:
             if self._snapshot is not None and self._fresh():
                 return self._snapshot
-            loaded = self._load_from_disk()
-            if loaded is not None and loaded.fingerprint == self.fingerprint():
-                self._snapshot = loaded
-                self._built_monotonic = time.monotonic()
-                return loaded
-            # Nothing usable cached — build synchronously. Callers that cannot
-            # afford ~11s should warm this at startup instead (see
-            # ``atr.api.main``), which is what the API does.
-            self._snapshot = self._build()
+            if self._snapshot is not None:
+                self.warm()  # stale, but we have something: hand it out, refresh in the background
+                return self._snapshot
+            # Truly cold: nothing in memory. Nothing to serve while we wait, so this one call
+            # pays for it — cheaply, if the disk cache still matches the data, or fully if not.
+            self._snapshot = self._load_if_current() or self._build()
             self._built_monotonic = time.monotonic()
             return self._snapshot
 
     def refresh(self, *, force: bool = True) -> MasterSnapshot:
+        """Bring the snapshot up to date. With ``force=False`` this is "at least as fresh as the
+        TTL"; with the default ``force=True`` it is "at least as fresh as the data on disk" —
+        cheap (a fingerprint check) when nothing has changed, a full rebuild when it has.
+        """
         with self._lock:
             if not force and self._snapshot is not None and self._fresh():
                 return self._snapshot
-            self._snapshot = self._build()
+            self._snapshot = self._load_if_current() or self._build()
             self._built_monotonic = time.monotonic()
             return self._snapshot
 
+    def _load_if_current(self) -> MasterSnapshot | None:
+        """The persisted snapshot, if its fingerprint still matches the data on disk."""
+        loaded = self._load_from_disk()
+        if loaded is not None and loaded.fingerprint == self.fingerprint():
+            return loaded
+        return None
+
     def warm(self) -> None:
-        """Build off the request path, on a daemon thread. Never raises."""
+        """Refresh off the request path, on a daemon thread. Never raises.
+
+        Calls ``refresh``, not ``snapshot``: a stale snapshot already in memory makes ``snapshot``
+        hand itself back out without rebuilding (that is the point, for a caller on the request
+        path), which would make a warm triggered by staleness do nothing forever.
+        """
         if self._building:
             return
 
         def work() -> None:
             self._building = True
             try:
-                self.snapshot()
+                self.refresh()
             except Exception as exc:  # noqa: BLE001 - best effort
                 logger.warning("instrument master warm-up failed: %s", exc)
             finally:

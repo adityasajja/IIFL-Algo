@@ -184,3 +184,87 @@ def test_an_empty_cache_yields_an_empty_master_not_an_error(tmp_path):
     assert snapshot.source == "scan"
     assert master.status()["latest_bar_date"] is None
     assert master.search("RELIANCE") == []
+
+
+# ─── staleness never blocks a request ──────────────────────────────────────────
+def test_a_stale_snapshot_is_served_immediately_while_a_rebuild_happens_in_the_background(
+    master, market_cache, monkeypatch
+):
+    """A snapshot past its TTL used to be rebuilt on the request thread (~11s on the real
+    cache). Once anything is cached, staleness must return at once and refresh off to the side."""
+    import threading
+    import time
+
+    master.snapshot()
+    master.ttl_seconds = 0  # already stale on the next call
+    build_calls = []
+    real_build = master._build
+
+    def slow_build():
+        build_calls.append(threading.current_thread())
+        time.sleep(0.2)
+        return real_build()
+
+    monkeypatch.setattr(master, "_build", slow_build)
+    # No cache file matches (forces the background refresh to actually rebuild, not just reload).
+    monkeypatch.setattr(master, "fingerprint", lambda: "changed-since-the-last-build")
+
+    started = time.monotonic()
+    result = master.snapshot()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.1, "the request waited for the rebuild instead of getting the old snapshot"
+    assert result is not None and "RELIANCE" in result.records
+
+    for _ in range(50):
+        if build_calls:
+            break
+        time.sleep(0.02)
+    assert build_calls, "staleness must still trigger a rebuild, just not on the request thread"
+    assert build_calls[0] is not threading.current_thread()
+
+
+def test_warm_triggered_by_staleness_actually_rebuilds_not_just_hands_back_the_stale_copy(
+    master, monkeypatch
+):
+    """``warm()`` used to call ``snapshot()``, which — once a stale snapshot already exists —
+    hands itself back out without rebuilding: staleness would never actually refresh anything."""
+    import time
+
+    first = master.snapshot()
+    master.ttl_seconds = 0
+    monkeypatch.setattr(master, "fingerprint", lambda: "changed-since-the-last-build")
+
+    master.snapshot()  # kicks off the background warm
+    for _ in range(100):
+        if master._snapshot is not first and not master._building:
+            break
+        time.sleep(0.02)
+    assert master._snapshot is not first, "the background refresh never actually rebuilt"
+    assert master._built_monotonic > 0
+
+
+def test_only_the_very_first_build_with_nothing_cached_anywhere_blocks_the_caller(tmp_path):
+    """The one case where blocking is correct: nothing in memory, nothing usable on disk."""
+    from atr.instruments.service import InstrumentMaster
+
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    fresh = InstrumentMaster(cache_root=empty)
+    result = fresh.snapshot()  # returns, rather than hanging forever waiting for a background job
+    assert not (set(result.records) - {sym for sym, _ in INDEX_INSTRUMENTS})
+    assert fresh._snapshot is result
+
+
+def test_a_still_current_cache_is_used_on_refresh_instead_of_a_needless_full_rebuild(
+    master, monkeypatch
+):
+    """``force=True`` means "at least as fresh as disk", not "always rebuild": if the fingerprint
+    still matches, a rebuild that would just reproduce the same data is wasted work."""
+    master.snapshot()
+    called = []
+    monkeypatch.setattr(master, "_build", lambda: called.append(1) or master._snapshot)
+
+    master.refresh(force=True)
+
+    assert called == []
