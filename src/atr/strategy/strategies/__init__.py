@@ -23,9 +23,13 @@ from atr.strategy.strategies.paper_alpha import (
     VolatilityBreakout,
 )
 from atr.strategy.strategies.momentum_breakout import MomentumBreakout
+from atr.strategy.strategies.oversold_reversion import ValidatedOversoldReversion
+from atr.strategy.strategies.regime_adaptive import RegimeAdaptiveStrategy
 from atr.strategy.strategies.sma_crossover import SmaCrossover
 
 STRATEGIES = {
+    ValidatedOversoldReversion.name: ValidatedOversoldReversion,
+    RegimeAdaptiveStrategy.name: RegimeAdaptiveStrategy,
     SmaCrossover.name: SmaCrossover,
     MomentumBreakout.name: MomentumBreakout,
     OpeningRangeBreakout.name: OpeningRangeBreakout,
@@ -54,6 +58,7 @@ STRATEGIES = {
 }
 
 __all__ = [
+    "RegimeAdaptiveStrategy",
     "SmaCrossover",
     "OpeningRangeBreakout",
     "SignalEntryStrategy",
