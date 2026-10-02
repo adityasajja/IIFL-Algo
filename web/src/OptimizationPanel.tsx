@@ -178,8 +178,11 @@ export const OptimizationPanel: React.FC = () => {
               <h1 className="m-0 mb-1.5 text-xl font-semibold tracking-tight text-foreground">
                 Controlled Strategy Optimization
               </h1>
-              <p className="m-0 text-muted-foreground text-sm">
-                Forward Evidence → Hypothesis → Candidate Parameter Change → Backtest → Walk-Forward Validation → Robustness Check → User Approval → New Immutable Version
+              <p
+                className="m-0 text-muted-foreground text-sm"
+                title="Forward Evidence → Hypothesis → Candidate Parameter Change → Backtest → Walk-Forward Validation → Robustness Check → User Approval → New Immutable Version"
+              >
+                Evidence → Backtest → Walk-forward → Approval → New version
               </p>
             </div>
 
@@ -200,14 +203,15 @@ export const OptimizationPanel: React.FC = () => {
       </div>
 
       {/* Strict Safety Guarantee Banner */}
-          <div className={cn(surface, "mb-6 flex items-center gap-3 border-info px-4 py-3.5")}>
+          <div
+            className={cn(surface, "mb-6 flex items-center gap-3 border-info px-4 py-2.5")}
+            title="Live strategies are never modified automatically. Only parameters marked adaptive: true are tuned. Approval never overwrites version V_N; it creates V_{N+1} with full audit provenance."
+          >
             <div className="text-xl">🛡️</div>
-            <div className="text-body text-foreground leading-normal">
-            <strong className="text-info">Safety Boundaries Enforced:</strong> Automatic live strategy modification is strictly prohibited.
-            Only parameters explicitly designated as <code className="text-info">adaptive: true</code> are tuned.
-            Approval never overwrites existing version <code className="text-primary-soft">V_N</code>; it generates <code className="text-primary-soft">V_{'{N+1}'}</code> with full audit provenance.
-        </div>
-      </div>
+            <div className="text-body text-foreground">
+              <strong className="text-info">Safe:</strong> approval creates a new version only.
+            </div>
+          </div>
 
       {/* Messages */}
       {error && (
@@ -225,16 +229,13 @@ export const OptimizationPanel: React.FC = () => {
           <Card padding="md" className="mb-7">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-semibold m-0 text-foreground">
-            Configured Adaptive Parameters ({Object.keys(adaptiveParams).length})
+            Adaptive Parameters ({Object.keys(adaptiveParams).length})
           </h3>
-              <span className="text-xs text-muted-foreground">
-            Only these parameters may be optimized
-          </span>
         </div>
 
         {Object.keys(adaptiveParams).length === 0 ? (
               <div className="p-4 text-center text-muted-foreground text-body">
-            No parameters are marked adaptive on this strategy. To optimize, declare parameters under <code>adaptive_parameters</code> in the strategy definition.
+            No adaptive parameters.
           </div>
         ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
@@ -264,16 +265,13 @@ export const OptimizationPanel: React.FC = () => {
               <h2 className="text-lg font-semibold m-0 text-foreground">
             Optimization Recommendations ({recommendations.length})
           </h2>
-              <span className="text-body text-muted-foreground">
-            Requires explicit user approval before version generation
-          </span>
         </div>
 
         {loading ? (
           <div className="p-10 text-center text-muted-foreground">Loading recommendations...</div>
         ) : recommendations.length === 0 ? (
               <EmptyState>
-            No recommendations generated yet. Click <strong>"Run Optimization Cycle"</strong> above to evaluate forward observations against backtests and walk-forward validation.
+            No recommendations yet.
               </EmptyState>
         ) : (
               <div className="flex flex-col gap-5">

@@ -164,8 +164,7 @@ export default function BacktestWorkflowPanel() {
       if (cancelled) return;
       if (Date.now() - startedAt.current > POLL_GIVE_UP_MS) {
         setError(
-          "This run has not reported for 20 minutes. It may have been lost with the worker. " +
-            "The run is still recorded — reload to check its status.",
+          "No report for 20 min. Run may be lost; reload to check.",
         );
         return;
       }
@@ -487,7 +486,7 @@ function ConfigForm({
           <Section
             n={1}
             title="Strategy & version"
-            note="A version is what makes a run reproducible — a built-in has no version history."
+            note="A version makes a run reproducible. Built-ins have no version history."
           >
             <div className="grid gap-3.5 sm:grid-cols-2">
               <Field label="Strategy">
@@ -628,9 +627,7 @@ function ConfigForm({
             {form.source === "synthetic" && (
               <div className="mt-3">
                 <Callout tone="warn">
-                  Synthetic random walks exercise the harness correctly, but the numbers
-                  are <strong>not evidence about any market</strong>. Use the cache for
-                  anything you would act on.
+                  Synthetic data: <strong>not market evidence</strong>.
                 </Callout>
               </div>
             )}
@@ -699,9 +696,8 @@ function ConfigForm({
 
             {equalWeightConflict && (
               <div className="mt-3">
-                <Callout tone="bad" title="Equal-weight sizing needs more than one symbol">
-                  You asked to spread risk across a set with one member. Add symbols or
-                  pick a different sizing mode.
+                <Callout tone="bad" title="Equal-weight needs 2+ symbols">
+                  Add symbols or change sizing.
                 </Callout>
               </div>
             )}
@@ -711,7 +707,7 @@ function ConfigForm({
           <Section
             n={4}
             title="Transaction costs"
-            note="A backtest is only as good as its cost assumption. This is the field that most often makes a strategy look profitable when it is not."
+            note="A backtest is only as good as its cost assumption."
           >
             <div className="grid gap-3.5 sm:grid-cols-2">
               <Field label="Cost model">
@@ -728,9 +724,7 @@ function ConfigForm({
             {form.costModel === "none" && (
               <div className="mt-3">
                 <Callout tone="warn">
-                  Zero costs. Every trade is free, so any strategy with positive gross
-                  edge looks profitable. Use this only to measure how much the cost
-                  assumption is worth.
+                  Zero costs: results overstated.
                 </Callout>
               </div>
             )}
@@ -996,10 +990,7 @@ function RunProgress({
 
       <div className="mt-5">
         <Callout tone="info">
-          The run executes on a worker thread and is written to the database when it
-          finishes, so it survives a page reload. Progress reports in coarse steps — the
-          engine exposes no per-bar callback, and a smooth bar would only be reporting
-          the passage of time.
+          Runs in the background; safe to reload.
         </Callout>
       </div>
     </Card>
@@ -1181,7 +1172,7 @@ function Results({
           <Card>
             <CardHeader
               title="Equity curve"
-              sub="Marked once per bar, after costs. The drawdown below it is measured from the running peak."
+              sub="After costs"
             />
             <div className="p-5 pt-3">
               {plottable(curves?.equity) ? (
@@ -1358,11 +1349,7 @@ function Results({
                     </div>
                   )}
 
-                  <Hint className="mt-3">
-                    Click any row to see the full trade: entry, exit, quantity, P&L, the
-                    strategy version that produced it, and the signal conditions behind
-                    the entry.
-                  </Hint>
+                  <Hint className="mt-3">Click a row for details.</Hint>
                 </>
               )}
             </div>
@@ -1406,18 +1393,14 @@ function Results({
                     </tbody>
                   </table>
                 </div>
-                <Hint className="mt-3">
-                  Shown as reported. The headline strip above uses the same numbers —
-                  nothing here is recomputed for display.
-                </Hint>
               </div>
             )}
           </Card>
 
           <Hint>
-            This is an <strong>in-sample</strong> result: the strategy was run on a
-            dataset it may have been chosen using. Treat it as a description of the past,
-            not a forecast. The out-of-sample number lives in Evidence → Walk-forward.
+            <span title="The strategy ran on data it may have been chosen with. Treat as a description of the past, not a forecast. Out-of-sample numbers: Evidence → Walk-forward.">
+              <strong>In-sample</strong> result, not a forecast.
+            </span>
           </Hint>
         </>
       )}
@@ -1515,7 +1498,7 @@ function Headline({
         sub={`${fmtMoney(metrics.total_commission)} commission · ${fmtMoney(
           metrics.total_slippage,
         )} slippage`}
-        hint="Cost model plus slippage, over the whole run. A passing backtest is only as good as its cost assumption."
+        hint="Commission + slippage"
       />
       <Stat
         label="Window"
@@ -1553,8 +1536,8 @@ function Reproducibility({ run }: { run: BacktestRun }) {
             ) : (
               <Badge tone="warn">no data fingerprint</Badge>
             )}
-            <span className="text-muted-foreground">
-              the full config is stored, so this run can be replayed exactly
+            <span className="text-muted-foreground" title="The full config is stored, so this run can be replayed exactly.">
+              config stored
             </span>
           </div>
         </div>
@@ -1678,7 +1661,7 @@ function MonthlyMatrix({
     <Card>
       <CardHeader
         title="Monthly returns"
-        sub="Percentage return per calendar month. A dot means the series had no bars that month, which is not the same as a flat month."
+        sub="% per month · dot = no bars"
       />
       <div className="p-5 pt-3">
         <div className="overflow-x-auto rounded-lg border border-border">
@@ -1851,8 +1834,9 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
             </span>
           </div>
           <div className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-            A stop is a trigger, not a guaranteed fill — the engine fills on the next open,
-            so a gap can close a trade past its stop.
+            <span title="A stop is a trigger, not a guaranteed fill. The engine fills on the next open, so a gap can close past the stop.">
+              Fills at next open; gaps can skip stops.
+            </span>
           </div>
         </div>
       </div>
@@ -1866,8 +1850,7 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
           </div>
         ) : (
           <div className="mt-1.5 rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
-            Not recorded. This strategy does not report why it opened a position, so the
-            reason cannot be reconstructed after the fact — it is not stored anywhere else.
+            Not recorded.
           </div>
         )}
       </div>

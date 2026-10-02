@@ -313,7 +313,7 @@ export const StrategyExperimentLab: React.FC = () => {
   const renderEquityChart = () => {
     if (!currentExperiment?.results?.equity_curves) return null;
     const { baseline, candidate } = currentExperiment.results.equity_curves;
-    if (!baseline || baseline.length < 2) return <div className="text-muted-foreground py-8 text-center text-sm">Insufficient data points to plot curve.</div>;
+    if (!baseline || baseline.length < 2) return <div className="text-muted-foreground py-8 text-center text-sm">Not enough data.</div>;
 
     const baseVals = baseline.map((p) => p.value);
     const candVals = candidate.map((p) => p.value);
@@ -378,7 +378,7 @@ export const StrategyExperimentLab: React.FC = () => {
   const renderDrawdownChart = () => {
     if (!currentExperiment?.results?.drawdown_curves) return null;
     const { baseline, candidate } = currentExperiment.results.drawdown_curves;
-    if (!baseline || baseline.length < 2) return <div className="text-muted-foreground py-8 text-center text-sm">Insufficient data points to plot curve.</div>;
+    if (!baseline || baseline.length < 2) return <div className="text-muted-foreground py-8 text-center text-sm">Not enough data.</div>;
 
     const baseVals = baseline.map((p) => p.value);
     const candVals = candidate.map((p) => p.value);
@@ -437,8 +437,8 @@ export const StrategyExperimentLab: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 mb-4 border-b border-border">
         <div className="flex items-center gap-2.5">
           <FlaskConical className="size-4 text-primary" />
-          <p className="text-body text-muted-foreground">
-            Compare your strategy with a candidate and a baseline. No orders are placed.
+          <p className="text-body text-muted-foreground" title="Compare your strategy with a candidate and a baseline. No orders are placed.">
+            Candidate vs baseline · no orders
           </p>
         </div>
 
@@ -567,9 +567,7 @@ export const StrategyExperimentLab: React.FC = () => {
             <div className="p-12 text-center bg-card border border-border rounded-md text-muted-foreground">
               <FlaskConical className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <div className="text-base font-medium text-foreground">No Experiment Selected</div>
-              <p className="text-sm mt-1 text-muted-foreground">
-                Pick an experiment on the left, or create one.
-              </p>
+              <p className="text-sm mt-1 text-muted-foreground">Pick or create one.</p>
             </div>
           ) : (
             <>
@@ -784,7 +782,7 @@ export const StrategyExperimentLab: React.FC = () => {
                 </div>
               ) : (
                 <div className="p-8 text-center bg-card border border-border rounded-md text-muted-foreground text-xs">
-                  Evaluation results not available. Click &quot;Run Experiment&quot; to execute identical baseline and candidate evaluations.
+                  No results yet. Run the experiment.
                 </div>
               )}
 
@@ -1071,7 +1069,7 @@ export const StrategyExperimentLab: React.FC = () => {
                   <label className="block text-muted-foreground font-semibold mb-1">Select Candidate Recommendation</label>
                   {recommendations.length === 0 ? (
                     <div className="p-3 bg-background border border-border rounded-md text-muted-foreground text-xs">
-                      No active optimization recommendations for this strategy. You can switch to &quot;Manual Adaptive Param&quot; or run the optimization cycle first.
+                      No recommendations.
                     </div>
                   ) : (
                     <Select
@@ -1091,7 +1089,7 @@ export const StrategyExperimentLab: React.FC = () => {
                   <label className="block text-muted-foreground font-semibold mb-1">Adaptive Parameters</label>
                   {Object.keys(adaptiveParams).length === 0 ? (
                     <div className="p-3 bg-background border border-border rounded-md text-muted-foreground text-xs">
-                      No adaptive parameters registered for this strategy.
+                      No adaptive parameters.
                     </div>
                   ) : (
                     <div data-lenis-prevent className="flex flex-col gap-2 max-h-48 overflow-y-auto p-2 bg-background rounded-lg border border-border">

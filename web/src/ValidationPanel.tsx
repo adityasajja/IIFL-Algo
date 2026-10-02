@@ -57,11 +57,11 @@ export default function ValidationPanel() {
       <Card>
         <CardHeader
           title="Measured performance"
-          sub="No validation run on disk yet"
+          sub="No run yet"
         />
         <div className="px-4 pb-4">
           <Callout tone="warn">
-            Run the harness to produce real numbers:
+            Run the harness:
             <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               .venv/Scripts/python.exe scripts/validate_paper_strategies.py
             </code>
@@ -86,28 +86,20 @@ export default function ValidationPanel() {
           }
         />
         <div className="space-y-3 px-4 pb-4">
-          <Callout tone={passed > 0 ? "info" : "warn"}>
-            <span className="font-medium">
-              Every model below was checked on prices it had never seen.
-            </span>{" "}
-            The column labelled <em>claimed</em> is what{" "}
-            <code className="rounded-md bg-muted/60 px-1">papers.py</code> used to assert from the
-            literature. <em>Measured</em> is what actually happened.
-            {passed === 0 && (
-              <>
-                {" "}
-                None cleared the bar — the best out-of-sample Sharpe is still below buy-and-hold on
-                the same window, so none of these is actionable.
-              </>
-            )}
-          </Callout>
+          {passed === 0 && (
+            <Callout tone="warn">
+              <span title="The best out-of-sample Sharpe is still below buy and hold on the same window. Claimed = literature figure from papers.py; Measured = actual result.">
+                None cleared the bar. Not actionable.
+              </span>
+            </Callout>
+          )}
 
           {ctrl && ctrl.sharpe_mean !== null && (
             <div className="grid gap-3 sm:grid-cols-3">
               <ControlStat
                 label="Random control, mean Sharpe"
                 value={fmtNum(ctrl.sharpe_mean)}
-                hint={`${ctrl.sharpes.length} runs, same universe, same sizing, random symbols`}
+                hint={`${ctrl.sharpes.length} runs`}
               />
               <ControlStat
                 label="Buy & hold Sharpe"
@@ -117,7 +109,7 @@ export default function ValidationPanel() {
               <ControlStat
                 label="Best model Sharpe"
                 value={fmtNum(Math.max(...results.map((r) => r.oos_sharpe ?? -Infinity)))}
-                hint="must beat both bars above to count"
+                hint="must beat both"
               />
             </div>
           )}
@@ -131,9 +123,9 @@ export default function ValidationPanel() {
                   <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Measured</th>
                   <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">OOS Sharpe</th>
                   <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">OOS return</th>
-                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">vs control</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground" title="Std deviations above random selection. Under about +2σ could easily be luck.">vs control</th>
                   <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
-                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Expectancy</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground" title="Realised P&L per unit of risk across out-of-sample trades. Negative = lost money on average.">Expectancy</th>
                   <th className="px-3 py-2 text-center text-micro font-semibold uppercase tracking-wider text-muted-foreground">Verdict</th>
                 </tr>
               </thead>
@@ -145,19 +137,12 @@ export default function ValidationPanel() {
             </table>
           </div>
 
-          <Hint>
-            <span className="font-medium">Expectancy</span> is realised P&amp;L per unit of risk,
-            summed across the out-of-sample trades — so a negative number means the model lost money
-            on average even where its win rate looked respectable.{" "}
-            <span className="font-medium">vs control</span> is how many standard deviations above
-            random selection the model sat; anything under about +2σ could easily be luck.
-          </Hint>
         </div>
       </Card>
 
       {results.length > 0 && (
         <Card>
-          <CardHeader title="Per-model detail" sub="Case by case, including failures" />
+          <CardHeader title="Per-model detail" sub="All models" />
           <div className="space-y-3 px-4 pb-4">
             {results.map((r) => (
               <div key={r.strategy} className="rounded-lg border border-border/60 p-3">
@@ -195,7 +180,7 @@ export default function ValidationPanel() {
         {report.symbol_bars?.toLocaleString()} symbol-bars ·{" "}
         {String(report.config?.train_bars)} train / {String(report.config?.test_bars)} test /{" "}
         {String(report.config?.warmup_bars)} warmup · {String(report.config?.slippage_bps)} bps
-        slippage. Re-run the script to refresh; these are dated measurements, not live numbers.
+        slippage · dated, not live
       </Hint>
     </div>
   );

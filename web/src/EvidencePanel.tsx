@@ -57,7 +57,7 @@ export default function EvidencePanel() {
       <Card>
         <CardHeader title="Evidence" sub="Loading…" />
         <div className="px-5 pb-4 text-sm text-muted-foreground">
-          Reading the evidence file…
+          Loading…
         </div>
       </Card>
     );
@@ -66,10 +66,10 @@ export default function EvidencePanel() {
   if (!report.available) {
     return (
       <Card>
-        <CardHeader title="Evidence" sub="No research run on disk yet" />
+        <CardHeader title="Evidence" sub="No run yet" />
         <div className="px-5 pb-4">
           <Callout tone="warn">
-            Produce the findings and their verdicts:
+            Generate findings:
             <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               .venv/Scripts/python.exe scripts/research_honest_verdicts.py
             </code>
@@ -121,8 +121,8 @@ export default function EvidencePanel() {
         <div className="px-5 pb-5">
           <Callout tone={credible === 0 ? "warn" : "info"}>
             {credible === 0
-              ? "Nothing measured here is safe to trade. That is the finding, not a missing result — the tests are designed so that a strategy which only works in one market condition fails them."
-              : `${credible} of ${findings.length} findings cleared every test. Cleared is not the same as profitable: check the regime and stability lines before acting.`}
+              ? "Nothing here is safe to trade."
+              : `${credible} of ${findings.length} cleared every test. Not the same as profitable.`}
           </Callout>
         </div>
       </Card>
@@ -164,7 +164,7 @@ function FindingCard({ finding }: { finding: EvidenceFinding }) {
         <Stat
           label="Headline"
           value={`${finding.headline_pct >= 0 ? "+" : ""}${finding.headline_pct.toFixed(1)}%`}
-          sub="not quotable if rejected"
+          sub="rejected = ignore"
           tone={ok ? "neutral" : "warn"}
         />
         <Stat
@@ -196,7 +196,7 @@ function FindingCard({ finding }: { finding: EvidenceFinding }) {
         <Stat
           label="Trials run"
           value={finding.n_trials}
-          sub="how many ideas were tried"
+          sub="ideas tried"
           tone={finding.n_trials >= 20 ? "warn" : "neutral"}
         />
       </div>
@@ -236,16 +236,11 @@ function FindingCard({ finding }: { finding: EvidenceFinding }) {
               {stability.consistent ? "stable" : "unstable"} across time
             </Badge>
           ) : null}
-          <Badge tone="flat">{finding.universe}</Badge>
+          <span title={finding.notes.join(" ") || undefined}>
+            <Badge tone="flat">{finding.universe}</Badge>
+          </span>
         </div>
 
-        {finding.notes.length > 0 ? (
-          <div className="space-y-1 pt-1">
-            {finding.notes.map((n, i) => (
-              <Hint key={i}>{n}</Hint>
-            ))}
-          </div>
-        ) : null}
       </div>
     </Card>
   );

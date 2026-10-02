@@ -40,11 +40,11 @@ const SOURCE_BLURB: Record<Source, string> = {
 
 const SOURCE_HELP: Record<Source, string> = {
   cache:
-    "Runs instantly and needs no login, but only holds about a year of prices — usually too short for a conclusive answer. Fine for a first look.",
+    "Instant, no login. About a year of prices: not conclusive.",
   fetch:
-    "Pulls years of daily prices from your broker. Takes a few minutes, but it is the only option that gives a strategy enough room to prove itself. Use this when you want a real answer.",
+    "Years of daily prices from your broker. Slower, but the only option that gives a real answer.",
   synthetic:
-    "Computer-generated random prices. Only useful for confirming the testing machinery works — any result here is meaningless.",
+    "Random generated prices. Checks the machinery only; results are meaningless.",
 };
 
 const EXPLAINER_KEY = "atr.research.explainer";
@@ -64,34 +64,28 @@ const PRESETS: PresetDef[] = [
     id: "quick",
     icon: Zap,
     title: "Quick smoke test",
-    blurb: "Run on the saved data (~1 year). Fast, but the verdict will not be conclusive — good for a first look.",
+    blurb: "Saved data · ~1 yr",
   },
   {
     id: "full",
     icon: ShieldCheck,
     title: "Full validation",
-    blurb: "Run on broker history (~6 years) and search a grid of settings. The real answer — use this for a verdict you trust.",
+    blurb: "Broker data · ~6 yr",
     badge: "Recommended",
   },
   {
     id: "control",
     icon: Shuffle,
     title: "Control test",
-    blurb: "Run on computer-generated prices. Only confirms the testing machinery works — the numbers themselves are meaningless.",
+    blurb: "Synthetic · demo only",
   },
 ];
 
 /** What the run is about to do, phrased for a non-trader. */
 function previewLine(strategy: string, source: Source, nSymbols: number, search: boolean): string {
-  const stocks = nSymbols > 0 ? `${nSymbols} stocks` : "your default list of stocks";
-  const data =
-    source === "cache"
-      ? "on the saved data (~1 year)"
-      : source === "fetch"
-        ? "on broker history (~6 years)"
-        : "on computer-generated prices";
-  const search_ = search ? " It will search a grid of settings to be honest about the bar." : "";
-  return `Will test ${strategyLabel(strategy)} against ${stocks} ${data}.${search_}`;
+  const stocks = nSymbols > 0 ? `${nSymbols} stocks` : "default stocks";
+  const data = source === "cache" ? "saved ~1 yr" : source === "fetch" ? "broker ~6 yr" : "synthetic";
+  return `${strategyLabel(strategy)} · ${stocks} · ${data}${search ? " · grid search" : ""}`;
 }
 
 
@@ -102,49 +96,31 @@ function plainVerdict(
   bench: Record<string, number>,
 ): string {
   if (result.source === "synthetic") {
-    return "This ran on computer-generated prices, so the numbers mean nothing. It only tells you the testing machinery works.";
+    return "Synthetic prices: numbers are meaningless.";
   }
   const ret = oos.total_return_pct ?? 0;
   const bh = bench.total_return_pct ?? 0;
   const folds = result.folds.length;
   const trials = result.n_trials;
   if (result.verdict.passed) {
-    return `This held up. Across ${folds} stretches of prices it had never seen, it returned ${ret.toFixed(2)}%, against ${bh.toFixed(2)}% from simply buying and holding the same stocks. After adjusting for the ${trials} settings tried, the edge looks real rather than lucky.`;
+    return `Held up: ${ret.toFixed(2)}% vs ${bh.toFixed(2)}% buy & hold over ${folds} unseen folds, ${trials} trials.`;
   }
-  return `Do not trade this. Across ${folds} stretches of prices it had never seen, it returned ${ret.toFixed(2)}%, while simply buying and holding the same stocks would have returned ${bh.toFixed(2)}%. After adjusting for the ${trials} settings tried, the edge is not statistically real.`;
+  return `Do not trade: ${ret.toFixed(2)}% vs ${bh.toFixed(2)}% buy & hold over ${folds} unseen folds, ${trials} trials.`;
 }
 
 /** Why this page exists, in words anyone can follow. Dismissible. */
 function PlainExplainer({ onDismiss }: { onDismiss: () => void }) {
   return (
     <Card className="border-primary/25 bg-primary/[0.03]">
-      <div className="flex items-start gap-3 p-4">
+      <div className="flex items-center gap-3 px-4 py-2.5">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
           <HelpCircle size={15} />
         </span>
-        <div className="min-w-0 flex-1 space-y-2 text-[12.5px] leading-relaxed text-muted-foreground">
-          <div className="text-body font-semibold text-foreground">Why this page exists</div>
-          <p>
-            A normal backtest is easy to fool. It scores a strategy on the same
-            prices that were used to pick its settings, so a great-looking number
-            often just means the strategy memorised the past.
-          </p>
-          <p>
-            This page cuts history into consecutive chunks. The strategy learns
-            its settings on one chunk, then is scored on the chunk immediately
-            after — prices it has never seen. It slides forward and repeats. Only
-            the unseen chunks count.
-          </p>
-          <p>
-            Two extra guards a normal backtest skips: the result is compared
-            against simply buying and holding the same stocks, and the passing
-            bar gets stricter the more settings you try — so trying hundreds of
-            combinations cannot manufacture a result.
-          </p>
-          <p className="font-medium text-foreground">
-            Read the verdict as a yes/no on &ldquo;is this real?&rdquo;. Everything
-            else on this page is the evidence behind that answer.
-          </p>
+        <div
+          className="min-w-0 flex-1 text-body text-muted-foreground"
+          title="A normal backtest scores a strategy on the prices used to pick its settings, so it can memorise the past. Here the strategy learns on one chunk of history and is scored only on the next, unseen chunk, then slides forward. Results are compared with buy and hold, and the pass bar gets stricter with every setting tried."
+        >
+          <span className="font-semibold text-foreground">Scored on unseen prices only.</span> Verdict = is it real?
         </div>
         <Button
           size="icon-sm"
@@ -300,14 +276,14 @@ export default function ResearchPanel({
             localStorage.removeItem(EXPLAINER_KEY);
           }}
         >
-          <HelpCircle size={12} /> What is this page for?
+          <HelpCircle size={12} /> About
         </Button>
       )}
 
       <Card>
         <CardHeader
           title="Set up the test"
-          sub="A preset does the right thing by default. Override anything you want."
+          
         />
         <div className="space-y-5 p-5">
           <div>
@@ -369,6 +345,7 @@ export default function ResearchPanel({
             </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            <span title={SOURCE_HELP[source]}>
             <Tabs
               value={source}
               onValueChange={(v) => setSource(v as Source)}
@@ -382,6 +359,7 @@ export default function ResearchPanel({
                 ))}
               </TabsList>
             </Tabs>
+            </span>
             <Tooltip content="Window sizing, fold and confidence requirements" side="bottom" delay={400}>
             <Button
               size="sm"
@@ -393,9 +371,7 @@ export default function ResearchPanel({
                   </Tooltip>
           </div>
 
-          <Hint>{SOURCE_HELP[source]}</Hint>
-
-          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <label className="px-1 text-sm font-medium text-foreground">What to test</label>
               <Select
@@ -416,8 +392,7 @@ export default function ResearchPanel({
             />
             {info?.warmup_bars ? (
                 <Hint>
-                  Needs about <strong>{info.warmup_bars}</strong> bars of history before
-                  its rules fire.
+                  <span title="Bars of history needed before its rules fire.">Warmup {info.warmup_bars} bars</span>
                 </Hint>
                     ) : null}
               </div>
@@ -427,7 +402,7 @@ export default function ResearchPanel({
             <Switch
               checked={search}
               onCheckedChange={setSearch}
-              label="Try several settings (this makes the bar stricter, not the result better)"
+              label="Try several settings"
             />
           )}
 
@@ -459,9 +434,6 @@ export default function ResearchPanel({
                 symbols.trim() ? symbols.split(",").filter(Boolean).length : 0,
                 search,
               )}
-            </p>
-            <p className="text-[11.5px] text-muted-foreground">
-              A normal run takes 30–60 seconds. A broker-history run can take 2–3 minutes the first time.
             </p>
           </div>
           <div className="flex items-center justify-end p-5 sm:p-5">
@@ -503,7 +475,7 @@ export default function ResearchPanel({
                   )}
                 >
                   <strong className="font-semibold">
-                    {result.verdict.passed ? "What this means: " : "What this means: "}
+                    {result.verdict.passed ? "Verdict: " : "Verdict: "}
                   </strong>
                   {plainVerdict(result, oos, bench)}
                 </p>
@@ -519,21 +491,21 @@ export default function ResearchPanel({
                 value={fmtPct(oos.total_return_pct)}
                 tone={oos.total_return_pct >= 0 ? "good" : "bad"}
                 sub={`buy & hold ${fmtPct(bench.total_return_pct)}`}
-                hint="Total return across only the stretches of prices the strategy had never seen."
+                hint="Unseen prices only"
               />
               <Stat
                 label="Return vs risk (unseen)"
                 value={fmtNum(oos.sharpe)}
                 tone={beats ? "good" : "bad"}
                 sub={`buy & hold ${fmtNum(bench.sharpe)}`}
-                hint="Return earned per unit of risk taken, measured only on unseen prices. Higher is better; above 1 is decent."
+                hint="Per unit of risk; >1 decent"
               />
               <Stat
                 label="Edge after adjusting for attempts"
                 value={fmtNum(result.deflated_sharpe, 3)}
                 tone={result.deflated_sharpe >= 0.95 ? "good" : "bad"}
                 sub={`hurdle ${fmtNum(result.required_sharpe, 3)} for ${result.n_trials} trials`}
-                hint="The risk-adjusted return after discounting for how many settings were tried. Must clear the hurdle to count as real."
+                hint="Must clear hurdle"
               />
               <Stat
                 label="Worst fall (unseen)"
@@ -545,7 +517,7 @@ export default function ResearchPanel({
             {result.warnings.length > 0 && (
               <div className="mt-3.5 space-y-2">
                 {result.warnings.map((w) => (
-                  <Callout key={w} tone="warn" title="Read this before trusting the numbers">
+                  <Callout key={w} tone="warn" title="Caution">
                     {w}
                   </Callout>
                 ))}
@@ -572,7 +544,7 @@ export default function ResearchPanel({
           <Card>
             <CardHeader
               title="Verdict checks"
-              sub="Every box must be ticked. A red one is the test doing its job — it is protecting you."
+              sub="All must pass"
             />
             <div className="p-5 pt-3">
               <div className="overflow-hidden rounded-xl border border-border">
@@ -679,11 +651,6 @@ export default function ResearchPanel({
                   </tbody>
                 </table>
               </div>
-              <Hint className="mt-3">
-                A train Sharpe far above the test Sharpe is the signature of a
-                parameter set that was fitted to its window. Spread across folds
-                matters more than the average.
-              </Hint>
             </div>
           </Card>
         </>
