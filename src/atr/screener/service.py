@@ -797,9 +797,13 @@ class ScreenerService:
         """
         from atr.appdb.repositories import ScreenerRepository
 
-        self.get_saved(user_id, scan_id)  # 404 early, before touching anything
+        existing = self.get_saved(user_id, scan_id)  # 404 early, before touching anything
 
         if definition is not None:
+            # Editing the screen must not silently switch off its watch.
+            old_watch = existing["definition"].get("watch")
+            if old_watch and "watch" not in definition:
+                definition = {**definition, "watch": old_watch}
             report = self.validate(definition.get("conditions"))
             if not report["valid"]:
                 raise ScreenerError(

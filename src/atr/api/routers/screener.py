@@ -225,6 +225,28 @@ def update_saved(
         raise _fail(exc) from exc
 
 
+class WatchRequest(BaseModel):
+    enabled: bool
+    every_minutes: int | None = Field(default=None, ge=1, le=1440)
+
+
+@router.put("/saved/{scan_id}/watch", dependencies=[_RUN])
+def set_watch(scan_id: str, payload: WatchRequest, principal: CurrentPrincipal) -> dict[str, Any]:
+    """Watch a saved scan: re-run it every ``every_minutes`` and Telegram new matches."""
+    from atr.screener import watch
+
+    try:
+        return watch.configure(
+            get_screener_service(),
+            principal.user_id,
+            scan_id,
+            enabled=payload.enabled,
+            every_minutes=payload.every_minutes,
+        )
+    except ScreenerError as exc:
+        raise _fail(exc) from exc
+
+
 @router.delete("/saved/{scan_id}", dependencies=[_RUN])
 def delete_saved(scan_id: str, principal: CurrentPrincipal) -> dict[str, Any]:
     try:

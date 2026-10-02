@@ -37,6 +37,21 @@ async def on_startup() -> None:
     asyncio.create_task(_insights_loop())
     asyncio.create_task(_eod_refresh_loop())
     asyncio.create_task(_jobs_loop())
+    asyncio.create_task(_screener_watch_loop())
+
+
+async def _screener_watch_loop() -> None:
+    """Re-run watched scans when their interval is up. Checked every 30 seconds."""
+    from atr.screener.service import get_screener_service
+    from atr.screener.watch import run_due
+
+    await asyncio.sleep(90)  # let startup finish first
+    while True:
+        try:
+            await asyncio.to_thread(run_due, get_screener_service())
+        except Exception:  # noqa: BLE001 - a failed pass must not stop the loop
+            logger.exception("screener watch pass failed")
+        await asyncio.sleep(30)
 
 
 async def _jobs_loop() -> None:

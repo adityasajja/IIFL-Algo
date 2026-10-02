@@ -2480,6 +2480,11 @@ class ScreenerRepository:
         return _many(session.execute(stmt).all())
 
     @staticmethod
+    def list_all(session: Session) -> list[dict[str, Any]]:
+        """Every user's scans — for the watch loop, which serves all of them."""
+        return _many(session.execute(select(screener_scans)).all())
+
+    @staticmethod
     def name_taken(session: Session, user_id: str, name: str) -> bool:
         stmt = select(func.count()).select_from(screener_scans).where(
             screener_scans.c.user_id == user_id,
