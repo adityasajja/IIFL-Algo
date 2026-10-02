@@ -6,6 +6,10 @@ chat id → TELEGRAM_CHAT_ID. Hit `atr alerts test` to verify.
 
 SMS later: sign up at fast2sms.com (free test credits), paste the key into
 FAST2SMS_API_KEY. Route "q" works without DLT registration for low volume.
+
+Discord/Slack: create an incoming webhook (Server Settings → Integrations →
+Webhooks on Discord; Slack app → Incoming Webhooks) and paste the URL into
+DISCORD_WEBHOOK_URL / SLACK_WEBHOOK_URL. No bot token or polling needed.
 """
 
 from __future__ import annotations
@@ -118,6 +122,64 @@ class Fast2SmsChannel(Channel):
             return False
 
 
+class DiscordChannel(Channel):
+    """Incoming webhook — a single POST, no bot token or polling."""
+
+    name = "discord"
+
+    def __init__(self, webhook_url: str = "", timeout: float = 10.0) -> None:
+        self.webhook_url = webhook_url
+        self.timeout = timeout
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.webhook_url)
+
+    def send(self, title: str, body: str) -> bool:
+        if not self.configured:
+            return False
+        # Discord caps message content at 2000 chars; truncate rather than reject.
+        content = f"**{title}**\n{body}"[:2000]
+        try:
+            resp = httpx.post(self.webhook_url, json={"content": content}, timeout=self.timeout)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("discord send failed: {}", exc)
+            return False
+        if resp.status_code in (200, 204):
+            return True
+        logger.warning("discord send rejected ({}): {}", resp.status_code, resp.text[:200])
+        return False
+
+
+class SlackChannel(Channel):
+    """Incoming webhook — a single POST, no bot token or polling."""
+
+    name = "slack"
+
+    def __init__(self, webhook_url: str = "", timeout: float = 10.0) -> None:
+        self.webhook_url = webhook_url
+        self.timeout = timeout
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.webhook_url)
+
+    def send(self, title: str, body: str) -> bool:
+        if not self.configured:
+            return False
+        try:
+            resp = httpx.post(
+                self.webhook_url, json={"text": f"*{title}*\n{body}"}, timeout=self.timeout
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("slack send failed: {}", exc)
+            return False
+        if resp.status_code == 200:
+            return True
+        logger.warning("slack send rejected ({}): {}", resp.status_code, resp.text[:200])
+        return False
+
+
 def channels_from_settings(settings) -> list[Channel]:
     """Ordered by preference — engine tries each until one succeeds."""
     out: list[Channel] = []
@@ -125,6 +187,12 @@ def channels_from_settings(settings) -> list[Channel]:
                          getattr(settings, "telegram_chat_id", ""))
     if tg.configured:
         out.append(tg)
+    discord = DiscordChannel(getattr(settings, "discord_webhook_url", ""))
+    if discord.configured:
+        out.append(discord)
+    slack = SlackChannel(getattr(settings, "slack_webhook_url", ""))
+    if slack.configured:
+        out.append(slack)
     sms = Fast2SmsChannel(getattr(settings, "fast2sms_api_key", ""))
     if sms.configured:
         out.append(sms)

@@ -25,7 +25,6 @@ from atr.strategy.indicators import crossover, rsi, sma
 
 IST = timezone(timedelta(hours=5, minutes=30))
 CONFIG_PATH = Path("data/alerts/intelligent.json")
-STATE_PATH = Path("data/alerts/intelligent_state.json")
 
 
 class IntelligentAlertConfig(BaseModel):
@@ -45,12 +44,30 @@ class IntelligentAlertConfig(BaseModel):
     sell_trailing_stop_enabled: bool = True
     sell_trailing_stop_pct: float = 3.0  # -3% drop from 20-day high
 
+    # Confluence needed, in weighted points, before the "soft" signals below
+    # (trend breakdown, RSI overbought, trailing stop) combine into a single
+    # exit call. Stop-loss and take-profit are hard exits and bypass this —
+    # a breached risk limit or hit target doesn't need a second opinion.
+    sell_composite_min_score: float = 2.0
+
+    # --- Capital rotation: a winner that stopped moving, vs. one moving now ---
+    # See `atr.capital_rotation`. Off the damage-based exits above: nothing is
+    # wrong with the position, the capital just has a better use.
+    sell_stall_enabled: bool = False
+    sell_stall_days: int = 10          # sessions of tight range before it counts as stalled
+    sell_stall_atr_mult: float = 1.5   # window's range vs ATR(14) — lower = tighter/more certain
+    sell_stall_min_gain_pct: float = 5.0  # must be up at least this much to call it "a winner gone quiet"
+
     # --- Buy / Entry Rules ---
     buy_golden_cross: bool = True  # SMA20 crosses above SMA50 within 3 bars
     buy_rsi_oversold: bool = True
     buy_rsi_threshold: float = 32.0
     buy_breakout_vol: bool = True  # Near 20-day high with > 1.5x avg volume
     buy_dip_sma20: bool = True  # Pullback bounce near 20-day SMA in strong uptrend
+    buy_box_oscillation: bool = False  # Bounce off the floor of a tight trading range
+    buy_box_lookback: int = 20      # bars defining the range
+    buy_box_width_pct: float = 8.0  # range must be at most this wide (% of floor) to count as a "box"
+    buy_box_floor_pct: float = 2.0  # must be within this % of the floor to count as "at support"
 
 
 def load_intelligent_config() -> IntelligentAlertConfig:
@@ -113,82 +130,82 @@ def evaluate_stock_signals(
     prev_s20 = float(s20.iloc[-2]) if len(s20) > 1 else last_s20
 
     # -----------------
-    # 1. SELL SIGNALS
+    # 1. SELL SIGNALS — one intelligent exit call per symbol
     # -----------------
-    # A. Trend Breakdown: price drops below SMA20 when previously above
-    if cfg.sell_sma_breakdown and last < last_s20 and prev >= prev_s20:
-        signals.append(
-            IntelligentSignal(
-                symbol=symbol,
-                action="SELL",
-                reason=f"Trend breakdown: Price ₹{last:,.2f} crossed below 20-day SMA (₹{last_s20:,.2f}).",
-                price=last,
-                day_chg_pct=day_chg,
-                rsi=last_rsi,
-                metric="SMA20 Breakdown",
-            )
-        )
-
-    # B. RSI Overbought Reversal
-    if cfg.sell_rsi_overbought and last_rsi >= cfg.sell_rsi_threshold:
-        signals.append(
-            IntelligentSignal(
-                symbol=symbol,
-                action="SELL",
-                reason=f"Momentum overbought: RSI reached {last_rsi:.1f} (≥ {cfg.sell_rsi_threshold}). High risk of cooling/pullback.",
-                price=last,
-                day_chg_pct=day_chg,
-                rsi=last_rsi,
-                metric="RSI Overbought",
-            )
-        )
-
-    # C. Trailing Stop from recent 20-day peak
-    if cfg.sell_trailing_stop_enabled:
-        recent_high = float(df["high"].tail(20).max())
-        drop_from_high = ((last / recent_high) - 1) * 100
-        if drop_from_high <= -abs(cfg.sell_trailing_stop_pct):
-            signals.append(
-                IntelligentSignal(
-                    symbol=symbol,
-                    action="SELL",
-                    reason=f"Trailing stop triggered: Down {drop_from_high:.1f}% from 20-day high (₹{recent_high:,.2f}).",
-                    price=last,
-                    day_chg_pct=day_chg,
-                    rsi=last_rsi,
-                    metric=f"Trailing Drop > {cfg.sell_trailing_stop_pct}%",
-                )
-            )
-
-    # D. Holding P&L checks if stock is in portfolio
+    # Hard exits (breached risk limit or hit target) are deterministic P&L
+    # facts and bypass scoring entirely — they fire alone, at max confidence.
+    # Everything else (trend breakdown, RSI overbought, trailing stop) is a
+    # "soft" warning sign that only means something in confluence, so those
+    # are weighted and combined into a single composite call instead of
+    # stacking separate alerts for what is really one deteriorating position.
+    hard_exit: IntelligentSignal | None = None
     if holding_info:
         avg_price = float(holding_info.get("avg_price") or holding_info.get("buy_price") or 0)
         if avg_price > 0:
             pnl_pct = round(((last / avg_price) - 1) * 100, 2)
             if cfg.sell_take_profit_enabled and pnl_pct >= cfg.sell_take_profit_pct:
-                signals.append(
-                    IntelligentSignal(
-                        symbol=symbol,
-                        action="SELL",
-                        reason=f"Target profit hit: Position at {pnl_pct:+.1f}% P&L (Target {cfg.sell_take_profit_pct}%). Lock gains!",
-                        price=last,
-                        day_chg_pct=day_chg,
-                        rsi=last_rsi,
-                        metric=f"Target +{cfg.sell_take_profit_pct}% Reached",
-                    )
+                hard_exit = IntelligentSignal(
+                    symbol=symbol,
+                    action="SELL",
+                    reason=f"Target profit hit: Position at {pnl_pct:+.1f}% P&L (Target {cfg.sell_take_profit_pct}%). Lock gains!",
+                    price=last,
+                    day_chg_pct=day_chg,
+                    rsi=last_rsi,
+                    metric=f"Target +{cfg.sell_take_profit_pct}% Reached",
                 )
             elif cfg.sell_stop_loss_enabled and pnl_pct <= -abs(cfg.sell_stop_loss_pct):
-                signals.append(
-                    IntelligentSignal(
-                        symbol=symbol,
-                        action="SELL",
-                        reason=f"Max loss cut: Position down {pnl_pct:.1f}% P&L (Limit -{cfg.sell_stop_loss_pct}%). Protect capital.",
-                        price=last,
-                        day_chg_pct=day_chg,
-                        rsi=last_rsi,
-                        metric=f"Stop Loss -{cfg.sell_stop_loss_pct}%",
-                    )
+                hard_exit = IntelligentSignal(
+                    symbol=symbol,
+                    action="SELL",
+                    reason=f"Max loss cut: Position down {pnl_pct:.1f}% P&L (Limit -{cfg.sell_stop_loss_pct}%). Protect capital.",
+                    price=last,
+                    day_chg_pct=day_chg,
+                    rsi=last_rsi,
+                    metric=f"Stop Loss -{cfg.sell_stop_loss_pct}%",
                 )
+
+    if hard_exit is not None:
+        signals.append(hard_exit)
+    else:
+        score = 0.0
+        reasons: list[str] = []
+        metrics: list[str] = []
+
+        # Trend breakdown: price drops below SMA20 when previously above
+        if cfg.sell_sma_breakdown and last < last_s20 and prev >= prev_s20:
+            score += 1.0
+            metrics.append("SMA20 Breakdown")
+            reasons.append(f"trend broke down (price ₹{last:,.2f} crossed below 20-SMA ₹{last_s20:,.2f})")
+
+        # RSI overbought reversal risk
+        if cfg.sell_rsi_overbought and last_rsi >= cfg.sell_rsi_threshold:
+            score += 1.0
+            metrics.append("RSI Overbought")
+            reasons.append(f"momentum overbought (RSI {last_rsi:.1f} ≥ {cfg.sell_rsi_threshold})")
+
+        # Trailing stop from recent 20-day peak
+        recent_high = float(df["high"].tail(20).max())
+        drop_from_high = ((last / recent_high) - 1) * 100
+        if cfg.sell_trailing_stop_enabled and drop_from_high <= -abs(cfg.sell_trailing_stop_pct):
+            score += 1.5
+            metrics.append(f"Trailing Drop > {cfg.sell_trailing_stop_pct}%")
+            reasons.append(f"down {drop_from_high:.1f}% from its 20-day high (₹{recent_high:,.2f})")
+
+        if score >= cfg.sell_composite_min_score:
+            signals.append(
+                IntelligentSignal(
+                    symbol=symbol,
+                    action="SELL",
+                    reason=(
+                        f"Composite exit (confluence score {score:.1f}/{cfg.sell_composite_min_score:.1f}): "
+                        + "; ".join(reasons) + "."
+                    ),
+                    price=last,
+                    day_chg_pct=day_chg,
+                    rsi=last_rsi,
+                    metric="Composite Exit: " + ", ".join(metrics),
+                )
+            )
 
     # -----------------
     # 2. BUY SIGNALS
@@ -244,6 +261,32 @@ def evaluate_stock_signals(
                 )
             )
 
+    # D. Box Oscillation: price is sitting near the floor of a tight,
+    # sideways range — a mean-reversion bounce rather than a trend trade.
+    if cfg.buy_box_oscillation and len(df) >= cfg.buy_box_lookback:
+        window = df.tail(cfg.buy_box_lookback)
+        floor = float(window["low"].min())
+        ceiling = float(window["high"].max())
+        if floor > 0:
+            box_width_pct = ((ceiling / floor) - 1) * 100
+            dist_from_floor_pct = ((last / floor) - 1) * 100
+            if box_width_pct <= cfg.buy_box_width_pct and 0 <= dist_from_floor_pct <= cfg.buy_box_floor_pct:
+                signals.append(
+                    IntelligentSignal(
+                        symbol=symbol,
+                        action="BUY",
+                        reason=(
+                            f"Box oscillation: range-bound {box_width_pct:.1f}% over "
+                            f"{cfg.buy_box_lookback} bars (₹{floor:,.2f}–₹{ceiling:,.2f}), "
+                            f"now {dist_from_floor_pct:.1f}% above the floor."
+                        ),
+                        price=last,
+                        day_chg_pct=day_chg,
+                        rsi=last_rsi,
+                        metric="Box Floor Bounce",
+                    )
+                )
+
     return signals
 
 
@@ -290,9 +333,7 @@ class IntelligentMonitorManager:
             return []
 
         from atr.api.legacy.alerts import _alert_store
-        from atr.api.legacy.common import _authed_client
 
-        client = _authed_client()
         store = _alert_store()
         channels = channels_from_settings(get_settings())
 
@@ -301,19 +342,25 @@ class IntelligentMonitorManager:
         holdings_dict: dict[str, dict[str, Any]] = {}
 
         # 1. Fetch Holdings if needed
+        #
+        # This used to read `h.get("symbol")` / `"avg_price"` / `"BuyAvgRate"` /
+        # `"TotalQty"` off the raw IIFL holdings response — none of which exist
+        # in that schema (it's `nseTradingSymbol` / `averageTradedPrice` /
+        # `totalQuantity`), so `holdings_dict` was silently always empty. That
+        # meant the P&L-based take-profit/stop-loss rule below never fired, and
+        # every SELL this cycle generates for a held symbol always looked
+        # identical to one for a symbol never bought. `_held_symbols()` is the
+        # same lookup already fixed and verified against a live response.
         if cfg.universe in ("holdings", "both"):
             try:
-                holdings_resp = client.holdings()
-                rows = holdings_resp if isinstance(holdings_resp, list) else holdings_resp.get("result", [])
-                for h in rows:
-                    raw_sym = str(h.get("symbol") or h.get("TradingSymbol") or "")
-                    if raw_sym:
-                        sym = raw_sym if raw_sym.endswith("-EQ") else f"{raw_sym}-EQ"
-                        symbols_to_check.add(sym)
-                        holdings_dict[sym] = {
-                            "avg_price": float(h.get("avg_price") or h.get("BuyAvgRate") or 0),
-                            "qty": int(h.get("qty") or h.get("TotalQty") or 0),
-                        }
+                from atr.api.legacy.signals import _held_symbols
+
+                for sym, info in _held_symbols().items():
+                    symbols_to_check.add(sym)
+                    holdings_dict[sym] = {
+                        "avg_price": float(info.get("avg_price") or 0),
+                        "qty": float(info.get("qty") or 0),
+                    }
             except Exception as e:
                 logger.debug("Could not fetch holdings for intelligent alert: {}", e)
 
@@ -399,7 +446,22 @@ class IntelligentMonitorManager:
                     "channel": sent_on,
                 })
 
-                # Also queue as a semi-automatic trade signal if it's actionable
+                # Also queue as a semi-automatic trade signal if it's actionable.
+                #
+                # A SELL only means something if there is something to sell. The
+                # rules above run over the whole `symbols_to_check` set — holdings
+                # *plus* a hardcoded watchlist (RELIANCE-EQ, TCS-EQ, ...) when
+                # `cfg.universe` includes "watchlist" — so "trend broke down" /
+                # "RSI overbought" / "trailing stop" fire for a symbol never
+                # bought just as readily as for one actually held. Queuing that
+                # as an executable trade signal put a real, approvable SELL
+                # order (with a fabricated stop/target/quantity, as if opening a
+                # fresh short) in front of the user for stock sitting in nobody's
+                # portfolio. The Telegram/log alert above stays either way — a
+                # "this broke down" notice is still useful watchlist intel — only
+                # the *actionable, executable* queue entry is gated on holding it.
+                if sig.action == "SELL" and sym not in holdings_dict:
+                    continue
                 try:
                     from atr.trade_signals import (
                         build_signal_from_intelligent,
@@ -426,6 +488,104 @@ class IntelligentMonitorManager:
                             tq.add(trade_sig)
                 except Exception as ex:
                     logger.debug("Could not queue trade signal from intelligent monitor: {}", ex)
+
+        # 3. Capital rotation: a held winner that has gone quiet, paired with
+        # whatever is showing real momentum right now. Separate from the
+        # per-symbol loop above because naming a replacement requires looking
+        # across the *whole* scanned universe, not just the one symbol being
+        # evaluated — see `atr.capital_rotation`.
+        if cfg.sell_stall_enabled and holdings_dict:
+            try:
+                from atr.capital_rotation import best_momentum_candidate, read_stall
+                from atr.trade_signals import (
+                    build_signal_from_intelligent,
+                    get_queue,
+                )
+                from atr.trade_signals import load_settings as load_ts_settings
+
+                ts_settings = load_ts_settings()
+                tq = get_queue()
+                for sym, info in holdings_dict.items():
+                    df = all_frames.get(sym)
+                    if df is None:
+                        continue
+                    avg_price = float(info.get("avg_price") or 0)
+                    stall = read_stall(
+                        df, avg_price,
+                        window_days=cfg.sell_stall_days,
+                        tight_atr_mult=cfg.sell_stall_atr_mult,
+                        min_gain_pct=cfg.sell_stall_min_gain_pct,
+                    )
+                    if stall is None:
+                        continue
+
+                    tracker_key = f"{sym}:ROTATE"
+                    last_sent = self._cooldown_tracker.get(tracker_key)
+                    if last_sent and (now - last_sent) < timedelta(minutes=cfg.cooldown_min):
+                        continue
+
+                    candidate = best_momentum_candidate(all_frames, exclude=set(holdings_dict) | {sym})
+                    if candidate is None:
+                        continue  # nothing better to rotate into right now
+
+                    self._cooldown_tracker[tracker_key] = now
+                    reason_a = (
+                        f"Stalled {stall.days_stalled} sessions (range only {stall.range_over_atr:.1f}x "
+                        f"ATR) since peaking at ₹{stall.high_in_window:,.2f} — up {stall.gain_from_avg_pct:+.1f}% "
+                        f"from your average, but not moving. {candidate.symbol.replace('-EQ', '')} is showing "
+                        f"real momentum now ({candidate.roc_pct:+.1f}% in 20d, RSI {candidate.rsi:.0f}) — "
+                        f"consider rotating this capital there."
+                    )
+                    header = f"ATR Intelligent Trigger: 🔄 [ROTATE] {sym.replace('-EQ', '')} → {candidate.symbol.replace('-EQ', '')}"
+                    for ch in channels:
+                        try:
+                            if ch.send(header, reason_a):
+                                break
+                        except Exception as err:
+                            logger.warning("Channel send failed: {}", err)
+                    store.log(AlertEvent(
+                        rule_id="intel-rotate",
+                        rule=f"🔄 [ROTATE] {sym.replace('-EQ', '')} → {candidate.symbol.replace('-EQ', '')}",
+                        message=reason_a,
+                        channel="log",
+                        ok=True,
+                    ))
+
+                    if tq.active_count() + 1 >= ts_settings.max_active:
+                        continue
+                    already = [s for s in tq.pending() if s.symbol == sym and s.setup == "Capital Rotation"]
+                    if already:
+                        continue
+
+                    sell_sig = build_signal_from_intelligent(
+                        symbol=sym, action="SELL", setup="Capital Rotation",
+                        reason=reason_a, entry_price=stall.last_price, df=df, settings=ts_settings,
+                    )
+                    # A rotation liquidates the actual position — sizing it off
+                    # `_compute_quantity`'s risk-based guess (right for opening
+                    # a *new* trade) would sell an arbitrary amount instead of
+                    # what is actually held.
+                    held_qty = info.get("qty")
+                    if held_qty:
+                        sell_sig.quantity = int(held_qty)
+                        sell_sig.risk_amount = round(
+                            sell_sig.quantity * abs(sell_sig.entry_price - sell_sig.stop_loss), 2
+                        )
+                    tq.add(sell_sig)
+
+                    buy_reason = (
+                        f"Rotation candidate for {sym.replace('-EQ', '')}: "
+                        f"{candidate.roc_pct:+.1f}% over 20 sessions, RSI {candidate.rsi:.0f}, "
+                        f"trading above both its 20- and 50-day averages."
+                    )
+                    buy_sig = build_signal_from_intelligent(
+                        symbol=candidate.symbol, action="BUY", setup="Rotation Candidate",
+                        reason=buy_reason, entry_price=candidate.price,
+                        df=all_frames[candidate.symbol], settings=ts_settings, rsi_val=candidate.rsi,
+                    )
+                    tq.add(buy_sig)
+            except Exception as exc:
+                logger.debug("Capital rotation check failed: {}", exc)
 
         self._last_run = now
         return generated_signals
