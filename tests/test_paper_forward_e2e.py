@@ -203,6 +203,7 @@ def chain(app_db, owner, monkeypatch) -> Chain:
             config={
                 "symbols": [SYMBOL],
                 "exchange": EXCHANGE,
+                "signal_basis": "live",
                 "order_value": ORDER_VALUE,
                 "lookback_days": 400,
                 "max_open_positions": 1,

@@ -105,7 +105,7 @@ def deployment(app_db):
             mode="PAPER",
             capital=200_000.0,
             status="RUNNING",
-            config={"symbols": [SYMBOL], "exchange": "NSEEQ"},
+            config={"symbols": [SYMBOL], "exchange": "NSEEQ", "signal_basis": "live"},
         )
     return row
 
@@ -798,7 +798,7 @@ def test_last_pass_orders_is_per_deployment_not_a_running_total(wired, deploymen
             mode="PAPER",
             capital=200_000.0,
             status="RUNNING",
-            config={"symbols": [SYMBOL], "exchange": "NSEEQ"},
+            config={"symbols": [SYMBOL], "exchange": "NSEEQ", "signal_basis": "live"},
         )
 
     runner, _feed = wired()
@@ -859,3 +859,76 @@ def test_intraday_bar_bucketing_does_not_crash(wired, app_db):
     bar = loop.intraday_bar[SYMBOL]
     assert bar["start"].minute % 5 == 0, "bucketed to the 5-minute boundary"
 
+
+
+# ---------------------------------------------------------------------------
+# signal basis: closed bars (like the backtest) vs the forming bar
+# ---------------------------------------------------------------------------
+def _fresh_history(monkeypatch, last_day="2026-09-11"):
+    """Daily history that ends on the last completed session before SESSION (Fri 11 Sep)."""
+    index = pd.date_range(end=last_day, periods=300, freq="B")
+    frame = _daily(SYMBOL).assign(ts=index)
+    monkeypatch.setattr("atr.signals.engine.load_daily", lambda symbol, exchange="NSEEQ", **kw: frame.copy())
+    return len(frame)
+
+
+def _record_entry_frames(monkeypatch):
+    from atr.signals import rules
+    from atr.signals.models import Signal
+
+    seen: list[int] = []
+
+    def entry(symbol, frame, rls, context=None):
+        seen.append(len(frame))
+        return [Signal(symbol=symbol, action="BUY", rule="test_entry", reason="forced", price=float(frame["close"].iloc[-1]))]
+
+    monkeypatch.setattr(rules, "eval_entry", entry)
+    return seen
+
+
+def _use_closed_bar(monkeypatch):
+    """Loops are rebuilt from the deployment row on every pass, so override the config at its source."""
+    from dataclasses import replace
+
+    original = RunnerConfig.from_deployment.__func__
+    monkeypatch.setattr(
+        RunnerConfig,
+        "from_deployment",
+        classmethod(lambda cls, row: replace(original(cls, row), signal_basis="closed_bar")),
+    )
+
+
+def test_closed_bar_mode_decides_on_completed_bars_only(wired, deployment, monkeypatch):
+    _use_closed_bar(monkeypatch)
+    runner, _ = wired()
+    n = _fresh_history(monkeypatch)
+    seen = _record_entry_frames(monkeypatch)
+    _loop(runner, deployment)
+    runner.pass_once(now=SESSION)
+    assert seen and seen[0] == n  # no forming bar appended
+
+
+def test_live_mode_still_appends_the_forming_bar(wired, deployment, monkeypatch):
+    runner, _ = wired()
+    n = _fresh_history(monkeypatch)
+    seen = _record_entry_frames(monkeypatch)
+    _loop(runner, deployment)
+    runner.pass_once(now=SESSION)
+    assert seen and seen[0] == n + 1
+
+
+def test_stale_history_pauses_new_entries(wired, deployment, monkeypatch):
+    _use_closed_bar(monkeypatch)
+    runner, _ = wired()
+    _fresh_history(monkeypatch, last_day="2026-09-04")  # a week old
+    seen = _record_entry_frames(monkeypatch)
+    loop = _loop(runner, deployment)
+    tick = runner.pass_once(now=SESSION)
+    loop = _loop(runner, deployment)
+    assert seen == [] and tick.orders == 0
+    assert "behind" in (loop.skipped_reason or "")
+
+
+def test_signal_basis_defaults_to_closed_bar():
+    assert RunnerConfig.from_deployment({"config": {"symbols": ["X"]}}).signal_basis == "closed_bar"
+    assert RunnerConfig.from_deployment({"config": {"symbols": ["X"], "signal_basis": "live"}}).signal_basis == "live"

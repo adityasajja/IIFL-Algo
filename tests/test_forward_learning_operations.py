@@ -163,7 +163,7 @@ def deployment(app_db, owner, strategy) -> str:
             status="RUNNING",
             config={
                 "symbols": [SYMBOL],
-                "exchange": EXCHANGE,
+                "exchange": EXCHANGE, "signal_basis": "live",
                 "timeframe": "1d",
                 "order_value": 250_000.0,
                 "lookback_days": 400,

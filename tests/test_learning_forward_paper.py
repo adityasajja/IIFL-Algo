@@ -178,6 +178,7 @@ def paper_runner(app_db, owner, monkeypatch):
                 "symbols": [SYMBOL],
                 "exchange": EXCHANGE,
                 "timeframe": "1d",
+                "signal_basis": "live",
                 "order_value": 250_000.0,
                 "lookback_days": 400,
                 "max_open_positions": 1,

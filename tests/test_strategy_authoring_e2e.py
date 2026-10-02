@@ -187,7 +187,7 @@ def chain(auth_client, app_db, monkeypatch) -> Chain:
             "mode": "PAPER",
             "config": {
                 "symbols": [SYMBOL],
-                "exchange": EXCHANGE,
+                "exchange": EXCHANGE, "signal_basis": "live",
                 "order_value": ORDER_VALUE,
                 "lookback_days": 400,
                 "max_open_positions": 1,

@@ -192,7 +192,7 @@ def gap_run(app_db, monkeypatch):
         deployment = DeploymentRepository.create(
             session, user_id="u_gap", strategy_id=strategy["strategy_id"], strategy_version=int(version["version"]),
             mode="PAPER", capital=500_000.0, status="RUNNING",
-            config={"symbols": [SYMBOL], "exchange": "NSEEQ", "order_value": 25_000.0, "lookback_days": 400,
+            config={"symbols": [SYMBOL], "exchange": "NSEEQ", "signal_basis": "live", "order_value": 25_000.0, "lookback_days": 400,
                     "max_open_positions": 20})
 
     from atr.services.runner import PaperRunner
@@ -281,7 +281,7 @@ def test_a_full_book_is_filled_by_the_deepest_gaps_not_the_first_names(app_db, m
         DeploymentRepository.create(
             session, user_id="u_rank", strategy_id=strategy["strategy_id"], strategy_version=int(version["version"]),
             mode="PAPER", capital=500_000.0, status="RUNNING",
-            config={"symbols": names, "exchange": "NSEEQ", "order_value": 25_000.0, "lookback_days": 400,
+            config={"symbols": names, "exchange": "NSEEQ", "signal_basis": "live", "order_value": 25_000.0, "lookback_days": 400,
                     "max_open_positions": 2})
 
     runner = PaperRunner(db=app_db)

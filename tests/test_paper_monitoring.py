@@ -139,6 +139,7 @@ def _deploy(app_db, *, strategy_id: str, version: int, capital: float = 500_000.
         "symbols": [SYMBOL],
         "exchange": EXCHANGE,
         "timeframe": "1d",
+        "signal_basis": "live",
         "order_value": 250_000.0,
         "lookback_days": 400,
         "max_open_positions": 1,

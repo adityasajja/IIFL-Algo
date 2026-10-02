@@ -146,6 +146,12 @@ class RunnerConfig:
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
     sizing: dict[str, Any] | None = None
+    #: What daily rules read. "closed_bar" (default) decides on completed daily bars and acts at
+    #: today's first price, which is how the backtest behaves (signal on a closed bar, fill at the
+    #: next open), so paper results can be set beside backtest results. Stops and targets still use
+    #: the live price. "live" evaluates a half-finished bar built from the current price: signals
+    #: can appear and vanish during the day, which a backtest never sees.
+    signal_basis: str = "closed_bar"
 
     @classmethod
     def from_deployment(cls, row: dict[str, Any]) -> RunnerConfig:
@@ -183,6 +189,7 @@ class RunnerConfig:
             stop_loss_pct=raw.get("stop_loss_pct"),
             take_profit_pct=raw.get("take_profit_pct"),
             sizing=raw.get("sizing") if isinstance(raw.get("sizing"), dict) else None,
+            signal_basis="live" if str(raw.get("signal_basis") or "").lower() == "live" else "closed_bar",
         )
 
 
@@ -400,6 +407,26 @@ class DeploymentLoop:
             self.frames[symbol] = frame
         self.frame_day[symbol] = today
         return frame
+
+    def _closed_frame(self, symbol: str, now: datetime, cal: Any) -> tuple[pd.DataFrame | None, int]:
+        """Completed daily bars only, and how many sessions the newest one is behind.
+
+        Today's bar is dropped (it is not finished). A history more than zero sessions behind the
+        last completed session means the end-of-day refresh failed, so signals read from it would
+        describe an older market than the one being traded.
+        """
+        from atr.services.data_status import expected_session, sessions_behind
+
+        frame = self.frames.get(symbol)
+        if frame is None or frame.empty or "ts" not in frame.columns:
+            return None, 0
+        days = pd.to_datetime(frame["ts"]).dt.date
+        closed = frame.loc[days < now.astimezone(IST).date() if now.tzinfo else days < now.date()]
+        if closed.empty:
+            return None, 0
+        last = pd.Timestamp(closed["ts"].iloc[-1]).date()
+        behind = sessions_behind(last, expected_session(now, cal), cal)
+        return closed.reset_index(drop=True), behind
 
     def live_frame(self, symbol: str) -> pd.DataFrame | None:
         """The symbol's history with the current price appended as a forming bar."""
@@ -663,6 +690,11 @@ class DeploymentLoop:
             if frame is None or len(frame) < 2:
                 continue
 
+            closed: pd.DataFrame | None = None
+            behind = 0
+            if self.timeframe_minutes is None and self.config.signal_basis == "closed_bar":
+                closed, behind = self._closed_frame(symbol, eval_time, cal)
+
             opened_at, minutes = self._session_open(symbol, price, eval_time, cal)
             context = replace(base_context, open_price=opened_at, minutes_since_open=minutes)
             position = self._position_quantity(symbol)
@@ -678,6 +710,17 @@ class DeploymentLoop:
                     quantity=abs(position),
                     context=context,
                 )
+                if closed is not None:
+                    # Protective price rules watch the live price; every other exit reads the
+                    # completed bars, as in the backtest.
+                    price_rules = {"stop_loss", "take_profit", "trailing_stop"}
+                    exit_signals = [x for x in exit_signals if str(x.rule) in price_rules] + [
+                        x
+                        for x in eval_exit(
+                            symbol, closed, entry_price, exit_rules, quantity=abs(position), context=context
+                        )
+                        if str(x.rule) not in price_rules
+                    ]
                 chosen = primary_exit(exit_signals)
                 if chosen is not None:
                     self.last_signal = {
@@ -707,7 +750,17 @@ class DeploymentLoop:
             if self._open_position_count() >= self.config.max_open_positions:
                 continue
 
-            signals = eval_entry(symbol, frame, entry_rules, context)
+            entry_frame = frame
+            if closed is not None:
+                if behind > 0:
+                    # Stale history: refuse to open on it rather than trade an older market.
+                    self.skipped_evaluations_count += 1
+                    self.skipped_reason = (
+                        f"price history is {behind} session(s) behind, so new entries are paused"
+                    )
+                    continue
+                entry_frame = closed
+            signals = eval_entry(symbol, entry_frame, entry_rules, context)
             if not signals:
                 continue
             chosen = signals[0]
@@ -721,7 +774,7 @@ class DeploymentLoop:
             key = (symbol, str(chosen.rule), self._bar_key(symbol))
             if key in self.acted:
                 continue
-            candidates.append((symbol, price, frame, chosen, key))
+            candidates.append((symbol, price, entry_frame, chosen, key))
 
         # Entries are placed after the whole universe has been looked at, best first, so
         # a full book is filled by the strongest candidates rather than the first ones
