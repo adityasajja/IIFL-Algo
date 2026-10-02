@@ -11,9 +11,11 @@ from collections import Counter
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
+import polars as pl
 from loguru import logger
 
 from atr.brokers.iifl.client import IiflClient
@@ -37,15 +39,20 @@ def _client() -> IiflClient:
     return _local.client
 
 
-def universe(exchange: str = "NSEEQ", series: str = "EQ") -> pd.DataFrame:
-    """All `<SYMBOL>-<SERIES>` contracts, e.g. 2654 NSEEQ equities."""
+@lru_cache(maxsize=4)
+def _cached_master_frame(exchange: str) -> pd.DataFrame:
     master = InstrumentMaster()
-    master.load_cached([exchange.upper()])
-    df = master.frame
-    df = df[df["exchange"].str.upper() == exchange.upper()]
+    return master.load_cached([exchange.upper()])
+
+
+def universe(exchange: str = "NSEEQ", series: str = "EQ") -> pl.DataFrame:
+    """All `<SYMBOL>-<SERIES>` contracts, e.g. 2654 NSEEQ equities."""
+    frame = _cached_master_frame(exchange.upper())
+    df = pl.from_pandas(frame)
+    df = df.filter(pl.col("exchange").str.to_uppercase() == exchange.upper())
     if series:
-        df = df[df["symbol"].str.endswith(f"-{series.upper()}")]
-    return df[["symbol", "conid"]].drop_duplicates().sort_values("symbol").reset_index(drop=True)
+        df = df.filter(pl.col("symbol").str.ends_with(f"-{series.upper()}"))
+    return df.select(["symbol", "conid"]).unique().sort("symbol")
 
 
 def _sync_one(exchange: str, symbol: str, conid: str, interval: str,
@@ -62,11 +69,14 @@ def _sync_one(exchange: str, symbol: str, conid: str, interval: str,
     try:
         raw = _client().historical_data(exchange, str(conid), interval, from_date, to_date)
         candles = raw["result"][0]["candles"]
-        df = pd.DataFrame(candles, columns=COLUMNS)
-        if df.empty:
+        df = pl.DataFrame(candles, schema=COLUMNS, orient="row")
+        if df.is_empty():
             return "empty"
-        df["ts"] = pd.to_datetime(df["ts"])
-        df.sort_values("ts").to_parquet(path, index=False)
+        if df.schema["ts"] == pl.Utf8:
+            df = df.with_columns(pl.col("ts").str.to_datetime(strict=False))
+        else:
+            df = df.with_columns(pl.col("ts").cast(pl.Datetime))
+        df.sort("ts").write_parquet(path)
         status = "ok"
     except Exception as exc:  # noqa: BLE001 — one bad symbol must not kill the job
         logger.warning("{}: {}", symbol, str(exc)[:120])
@@ -82,7 +92,7 @@ def sync_all(exchange: str = "NSEEQ", interval: str = "1d",
     """Download a slice [start:end] of the universe. Returns status counts."""
     to_date = to_date or date.today().strftime("%d-%b-%Y")
     from_date = from_date or (date.today() - timedelta(days=365)).strftime("%d-%b-%Y")
-    uni = universe(exchange).iloc[start:end]
+    uni = universe(exchange)[start:end]
     outdir = CACHE_ROOT / exchange.upper()
     outdir.mkdir(parents=True, exist_ok=True)
     logger.info("syncing {} {} {} bars ({} symbols, {} workers)",
@@ -90,9 +100,9 @@ def sync_all(exchange: str = "NSEEQ", interval: str = "1d",
     counts: Counter = Counter()
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {
-            pool.submit(_sync_one, exchange.upper(), r.symbol, r.conid,
-                        interval, from_date, to_date, outdir, pause): r.symbol
-            for r in uni.itertuples()
+            pool.submit(_sync_one, exchange.upper(), r["symbol"], r["conid"],
+                        interval, from_date, to_date, outdir, pause): r["symbol"]
+            for r in uni.iter_rows(named=True)
         }
         for i, fut in enumerate(as_completed(futs), 1):
             counts[fut.result()] += 1

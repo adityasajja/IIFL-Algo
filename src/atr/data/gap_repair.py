@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import polars as pl
 from loguru import logger
 
 COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
@@ -118,7 +119,7 @@ def repair(client: Any, data_root: Path, symbols: list[str], *, window: int = 15
 
     folder = Path(data_root) / "iifl_daily" / "NSEEQ"
     paths = {s: p for s in symbols if (p := _path(folder, s)) is not None}
-    frames = {s: pd.read_parquet(p) for s, p in paths.items()}
+    frames = {s: pl.read_parquet(p).to_pandas() for s, p in paths.items()}
     dates = {s: {t.date() for t in pd.to_datetime(f["ts"])} for s, f in frames.items()}
     gaps = missing_sessions(dates, window)
     if not gaps:

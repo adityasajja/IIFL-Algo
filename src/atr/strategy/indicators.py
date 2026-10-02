@@ -19,10 +19,47 @@ def ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
 
+def wma(series: pd.Series, window: int) -> pd.Series:
+    """Weighted moving average — later bars in the window weighted more heavily.
+
+    Vectorised via a strided view + matrix-multiply rather than
+    ``rolling().apply()``, which invokes a Python callback per window and is
+    an order of magnitude slower over a large universe.
+    """
+    values = series.to_numpy(dtype=float)
+    weights = np.arange(1, window + 1, dtype=float)
+    out = np.full(len(values), np.nan)
+    if len(values) >= window:
+        windows = np.lib.stride_tricks.sliding_window_view(values, window)
+        out[window - 1 :] = windows @ weights / weights.sum()
+    return pd.Series(out, index=series.index)
+
+
+def stochastic_k(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+    """Stochastic %K — where the close sits within the window's range, 0-100."""
+    lo = low.rolling(window, min_periods=window).min()
+    hi = high.rolling(window, min_periods=window).max()
+    span = (hi - lo).replace(0, np.nan)
+    return ((close - lo) / span * 100.0).fillna(50.0)
+
+
+def macd(
+    close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """(line, signal, histogram) — the standard 12/26/9 EMA MACD."""
+    line = ema(close, fast) - ema(close, slow)
+    sig = ema(line, signal)
+    return line, sig, line - sig
+
+
 def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     delta = close.diff()
-    gain = delta.clip(lower=0).ewm(alpha=1 / window, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1 / window, adjust=False).mean()
+    d_vals = delta.to_numpy(dtype=float)
+    g_vals = np.maximum(d_vals, 0.0)
+    l_vals = np.maximum(-d_vals, 0.0)
+    alpha = 1.0 / window
+    gain = pd.Series(g_vals, index=close.index).ewm(alpha=alpha, adjust=False).mean()
+    loss = pd.Series(l_vals, index=close.index).ewm(alpha=alpha, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     out = 100 - 100 / (1 + rs)
     # Zero average loss with gains present is the strongest possible uptrend:
@@ -34,8 +71,17 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
 
 
 def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
-    prev = close.shift(1)
-    return pd.concat([high - low, (high - prev).abs(), (low - prev).abs()], axis=1).max(axis=1)
+    h = high.to_numpy(dtype=float)
+    l = low.to_numpy(dtype=float)
+    c = close.to_numpy(dtype=float)
+    prev = np.empty_like(c)
+    prev[0] = np.nan
+    prev[1:] = c[:-1]
+    hl = h - l
+    hp = np.abs(h - prev)
+    lp = np.abs(l - prev)
+    tr = np.maximum(hl, np.maximum(hp, lp))
+    return pd.Series(tr, index=close.index)
 
 
 def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:

@@ -9,11 +9,11 @@ enough to exercise fills, margin, and metrics realistically.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import time as dtime
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from atr.core.enums import AssetClass, Timeframe
 from atr.core.models import Instrument, MarketSnapshot
@@ -35,9 +35,44 @@ class SyntheticConfig:
     base_volume: float = 1_000.0
 
 
-def _intraday_vol_multiplier(index: pd.DatetimeIndex, close_t: dtime, open_t: dtime) -> np.ndarray:
+_FREQ_UNITS = {"min": "minutes", "h": "hours", "D": "days", "s": "seconds"}
+
+
+def _parse_freq(freq: str) -> timedelta:
+    """Parse a pandas-style offset string ("1min", "1D", "5min") into a timedelta."""
+    for suffix, kwarg in _FREQ_UNITS.items():
+        if freq.endswith(suffix):
+            amount = int(freq[: -len(suffix)] or 1)
+            return timedelta(**{kwarg: amount})
+    raise ValueError(f"unsupported freq: {freq!r}")
+
+
+def _business_days(start: datetime, end: datetime) -> list[datetime]:
+    """Weekday dates (Mon-Fri) from ``start.date()`` to ``end.date()`` inclusive."""
+    days = []
+    day = datetime(start.year, start.month, start.day)
+    last = datetime(end.year, end.month, end.day)
+    while day <= last:
+        if day.weekday() < 5:
+            days.append(day)
+        day += timedelta(days=1)
+    return days
+
+
+def _session_times(open_t: dtime, close_t: dtime, freq: timedelta) -> list[dtime]:
+    base = datetime(1900, 1, 1, open_t.hour, open_t.minute, open_t.second)
+    stop = datetime(1900, 1, 1, close_t.hour, close_t.minute, close_t.second)
+    times = []
+    cur = base
+    while cur <= stop:
+        times.append(cur.time())
+        cur += freq
+    return times
+
+
+def _intraday_vol_multiplier(index: list[datetime], close_t: dtime, open_t: dtime) -> np.ndarray:
     """U-shaped intraday volatility: high at open, low midday, high at close."""
-    minutes = index.hour * 60 + index.minute
+    minutes = np.array([ts.hour * 60 + ts.minute for ts in index], dtype=float)
     open_m = open_t.hour * 60 + open_t.minute
     close_m = close_t.hour * 60 + close_t.minute
     span = max(close_m - open_m, 1)
@@ -46,21 +81,13 @@ def _intraday_vol_multiplier(index: pd.DatetimeIndex, close_t: dtime, open_t: dt
     return 0.6 + 1.6 * (2 * frac - 1) ** 2
 
 
-def generate_bars(cfg: SyntheticConfig) -> pd.DataFrame:
+def generate_bars(cfg: SyntheticConfig) -> pl.DataFrame:
     rng = np.random.default_rng(cfg.seed)
 
     # Business-day intraday grid
-    days = pd.bdate_range(cfg.start.date(), cfg.end.date())
-    times = pd.date_range(
-        f"1900-01-01 {cfg.session_open}", f"1900-01-01 {cfg.session_close}", freq=cfg.freq
-    ).time
-    index = pd.DatetimeIndex(
-        sorted(
-            pd.Timestamp.combine(d, t)
-            for d in days
-            for t in times
-        )
-    )
+    days = _business_days(cfg.start, cfg.end)
+    times = _session_times(cfg.session_open, cfg.session_close, _parse_freq(cfg.freq))
+    index = sorted(datetime.combine(d.date(), t) for d in days for t in times)
     n = len(index)
     steps_per_year = 252 * max(len(times), 1)
     dt = 1.0 / steps_per_year
@@ -88,10 +115,10 @@ def generate_bars(cfg: SyntheticConfig) -> pd.DataFrame:
         volume = cfg.base_volume * (1 + np.abs(rng.standard_normal(n)) * 0.6)
 
         frames.append(
-            pd.DataFrame(
+            pl.DataFrame(
                 {
                     "ts": index,
-                    "symbol": sym,
+                    "symbol": [sym] * n,
                     "open": open_,
                     "high": high,
                     "low": low,
@@ -101,7 +128,7 @@ def generate_bars(cfg: SyntheticConfig) -> pd.DataFrame:
             )
         )
 
-    return pd.concat(frames, ignore_index=True).sort_values(["ts", "symbol"])
+    return pl.concat(frames).sort(["ts", "symbol"])
 
 
 class SyntheticFeed(DataFeed):
@@ -139,7 +166,7 @@ class SyntheticFeed(DataFeed):
         return pivot_to_snapshots(self._frame, Timeframe.MIN_1)
 
     @property
-    def frame(self) -> pd.DataFrame:
+    def frame(self) -> pl.DataFrame:
         return self._frame
 
 

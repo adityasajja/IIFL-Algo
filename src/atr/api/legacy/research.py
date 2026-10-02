@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-import pandas as pd
+import polars as pl
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -55,8 +55,9 @@ def _history_feed(symbols: list[str], exchange: str):
             f"none of {wanted} are in the {exchange} cache "
             f"({len(frames)} symbols cached)",
         )
-    combined = pd.concat(
-        [df.assign(symbol=s) for s, df in picked.items()], ignore_index=True
+    combined = pl.concat(
+        [pl.from_pandas(df).with_columns(pl.lit(s).alias("symbol")) for s, df in picked.items()],
+        how="diagonal_relaxed",
     )
     snapshots = pivot_to_snapshots(combined, Timeframe.DAY_1)
     instruments = {s: Instrument(symbol=s, exchange=exchange) for s in picked}
@@ -147,7 +148,7 @@ def _fetch_feed(symbols: list[str], exchange: str, lookback_days: int):
             frame = load_daily(symbol, exchange, client, conid, lookback_days=lookback_days)
             if frame.empty or "ts" not in frame.columns:
                 continue
-            frames.append(frame.assign(symbol=symbol))
+            frames.append(pl.from_pandas(frame).with_columns(pl.lit(symbol).alias("symbol")))
             used.append(symbol)
 
     if not frames:
@@ -156,7 +157,7 @@ def _fetch_feed(symbols: list[str], exchange: str, lookback_days: int):
             "no daily history returned for any requested symbol — check the "
             "session and that the symbols exist on this exchange",
         )
-    combined = pd.concat(frames, ignore_index=True).sort_values("ts", kind="mergesort")
+    combined = pl.concat(frames, how="diagonal_relaxed").sort("ts", maintain_order=True)
     snapshots = pivot_to_snapshots(combined, Timeframe.DAY_1)
     instruments = {s: Instrument(symbol=s, exchange=exchange) for s in used}
     return ListFeed(snapshots, instruments), sorted(used)

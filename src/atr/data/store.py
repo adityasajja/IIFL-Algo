@@ -208,13 +208,25 @@ class Database:
 # --------------------------------------------------------------------------
 
 
+def _normalize_symbols(df: pd.DataFrame) -> pd.DataFrame:
+    """Uppercase bar symbols: reads query ``symbol.upper()`` (see
+    ``InstrumentRepository.upsert``), so a mixed-case write is stored but
+    never found again — a duplicate row plus a phantom miss."""
+    df = df.copy()
+    df["symbol"] = df["symbol"].astype(str).str.upper()
+    return df
+
+
 class InstrumentRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
     def upsert(self, inst: Instrument) -> None:
         row = {
-            "symbol": inst.symbol,
+            # Symbols are case-normalised on write because every read path
+            # queries ``symbol.upper()``: a mixed-case write is otherwise
+            # stored but never found again (duplicate row + phantom miss).
+            "symbol": inst.symbol.upper(),
             "asset_class": inst.asset_class.value,
             "currency": inst.currency,
             "exchange": inst.exchange,
@@ -239,8 +251,42 @@ class InstrumentRepository:
             conn.execute(stmt)
 
     def upsert_many(self, items: list[Instrument]) -> None:
-        for item in items:
-            self.upsert(item)
+        if not items:
+            return
+        rows = [
+            {
+                "symbol": inst.symbol.upper(),
+                "asset_class": inst.asset_class.value,
+                "currency": inst.currency,
+                "exchange": inst.exchange,
+                "primary_exchange": inst.primary_exchange,
+                "multiplier": inst.multiplier,
+                "tick_size": inst.tick_size,
+                "min_quantity": inst.min_quantity,
+                "quantity_step": inst.quantity_step,
+                "expiry": inst.expiry,
+                "strike": inst.strike,
+                "option_type": inst.option_type.value if inst.option_type else None,
+                "underlying": inst.underlying,
+                "conid": inst.conid,
+                "local_symbol": inst.local_symbol,
+                "trading_class": inst.trading_class,
+                "initial_margin_per_unit": inst.initial_margin_per_unit,
+                "maintenance_margin_per_unit": inst.maintenance_margin_per_unit,
+            }
+            for inst in items
+        ]
+        stmt = pg_insert(instruments).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["symbol"],
+            set_={
+                c.name: stmt.excluded[c.name]
+                for c in instruments.columns
+                if c.name != "symbol"
+            },
+        )
+        with self.db.engine.begin() as conn:
+            conn.execute(stmt)
 
     def get(self, symbol: str) -> Instrument | None:
         with self.db.engine.connect() as conn:
@@ -289,7 +335,7 @@ class BarRepository:
         """
         if df.empty:
             return 0
-        df = df.copy()
+        df = _normalize_symbols(df)
         df["timeframe"] = timeframe
         df["ts"] = pd.to_datetime(df["ts"], utc=True)
         cols = ["ts", "symbol", "timeframe", "open", "high", "low", "close", "volume",

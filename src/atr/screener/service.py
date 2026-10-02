@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
+import polars as pl
 
 from atr.data import history as history_module
 from atr.instruments.service import DAILY_DIR
@@ -313,14 +314,28 @@ def load_frames(
             stems.append(Path(cache_file).stem if cache_file else symbol)
 
         frames: dict[str, pd.DataFrame] = {}
-        for stem in stems:
+
+        def _read_stem(stem: str) -> tuple[str, pd.DataFrame] | None:
             path = outdir / f"{stem}.parquet"
             if not path.exists():
-                continue
+                return None
             try:
-                frames[stem] = pd.read_parquet(path)
-            except Exception:  # noqa: BLE001 - one corrupt file must not stop a scan
-                continue
+                return stem, pl.read_parquet(path).to_pandas()
+            except Exception:
+                return None
+
+        if len(stems) <= 4:
+            for stem in stems:
+                res = _read_stem(stem)
+                if res is not None:
+                    frames[res[0]] = res[1]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=min(8, len(stems))) as pool:
+                for res in pool.map(_read_stem, stems):
+                    if res is not None:
+                        frames[res[0]] = res[1]
         return _canonical_frames(frames)
 
     with _FRAMES_LOCK:
@@ -510,26 +525,40 @@ class ScreenerService:
         errors: list[dict[str, str]] = []
         unmeasurable_counts: dict[str, int] = {}
 
-        for symbol in universe_symbols:
+        def _eval_symbol(symbol: str):
             df = frames.get(symbol)
             if df is None:
-                continue
+                return None
             try:
                 matched, evidence = evaluate_symbol(df, root, min_bars=min_bars)
-            except Exception as exc:  # noqa: BLE001 - one bad symbol must not stop the scan
-                errors.append({"symbol": symbol, "error": str(exc)[:160]})
-                continue
+            except Exception as exc:
+                return ("err", symbol, str(exc)[:160])
             if not matched:
-                continue
-
+                return ("skip", evidence)
             row = self._build_row(symbol, df, requested)
             row["why"] = [e.as_dict() for e in evidence if e.passed]
             row["evidence"] = [e.as_dict() for e in evidence]
             row["setup"] = _setup_label(evidence)
-            rows.append(row)
-            for e in evidence:
-                if e.unmeasurable:
-                    unmeasurable_counts[e.label] = unmeasurable_counts.get(e.label, 0) + 1
+            return ("match", row, evidence)
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for res in pool.map(_eval_symbol, universe_symbols):
+                if res is None:
+                    continue
+                tag = res[0]
+                if tag == "err":
+                    errors.append({"symbol": res[1], "error": res[2]})
+                elif tag == "skip":
+                    for e in res[1]:
+                        if e.unmeasurable:
+                            unmeasurable_counts[e.label] = unmeasurable_counts.get(e.label, 0) + 1
+                elif tag == "match":
+                    rows.append(res[1])
+                    for e in res[2]:
+                        if e.unmeasurable:
+                            unmeasurable_counts[e.label] = unmeasurable_counts.get(e.label, 0) + 1
 
         rows = rank_rows(rows, sort, descending=descending)
         matched = len(rows)

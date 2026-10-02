@@ -495,7 +495,7 @@ def _run_signals(args) -> int:
     import dataclasses
     import json as _json
 
-    import pandas as pd
+    import polars as pl
 
     from atr.signals.engine import format_report, scan_holdings, scan_universe
     from atr.signals.models import DEFAULT_CONFIG_PATH, ScanResult, SignalConfig
@@ -542,15 +542,14 @@ def _run_signals(args) -> int:
                 )
                 if frame.empty:
                     continue
-                frame = frame.copy()
-                frame["symbol"] = symbol
+                frame = pl.from_pandas(frame).with_columns(pl.lit(symbol).alias("symbol"))
                 frames.append(frame)
                 logger.info("{}: {} daily bars", symbol, len(frame))
         if not frames:
             logger.error("no daily history available")
             return 1
 
-        combined = pd.concat(frames, ignore_index=True)
+        combined = pl.concat(frames, how="diagonal_relaxed")
         snapshots = pivot_to_snapshots(combined, Timeframe.DAY_1)
         instruments = {s: Instrument(symbol=s, exchange=cfg.exchange) for s in symbols}
         feed = ListFeed(snapshots, instruments)

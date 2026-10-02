@@ -109,17 +109,37 @@ class BacktestEngine:
     # ------------------------------------------------------------------
     def _build_frames(self, snapshots: list[MarketSnapshot]) -> None:
         """One aligned DataFrame per symbol over the shared time grid."""
+        n_snaps = len(snapshots)
         index = pd.DatetimeIndex([s.ts for s in snapshots])
-        columns = ["open", "high", "low", "close", "volume"]
+        nan_val = float("nan")
+
         for symbol in self.instruments:
-            data = []
-            for snap in snapshots:
+            # Pre-allocate column arrays for fast DataFrame construction
+            opens = [nan_val] * n_snaps
+            highs = [nan_val] * n_snaps
+            lows = [nan_val] * n_snaps
+            closes = [nan_val] * n_snaps
+            volumes = [nan_val] * n_snaps
+
+            for i, snap in enumerate(snapshots):
                 bar = snap.bars.get(symbol)
-                data.append(
-                    [bar.open, bar.high, bar.low, bar.close, bar.volume] if bar
-                    else [float("nan")] * 5
-                )
-            self.frames[symbol] = pd.DataFrame(data, index=index, columns=columns)
+                if bar is not None:
+                    opens[i] = bar.open
+                    highs[i] = bar.high
+                    lows[i] = bar.low
+                    closes[i] = bar.close
+                    volumes[i] = bar.volume
+
+            self.frames[symbol] = pd.DataFrame(
+                {
+                    "open": opens,
+                    "high": highs,
+                    "low": lows,
+                    "close": closes,
+                    "volume": volumes,
+                },
+                index=index,
+            )
 
     # ------------------------------------------------------------------
     def run(self) -> BacktestResult:
@@ -173,6 +193,17 @@ class BacktestEngine:
                     logger.warning("risk halt: {}", verdict.reason)
                     self._killed = True
                     self._kill_reason = verdict.reason
+                    # Cancel first, close second. `close_all` only flattens
+                    # held positions with fresh market orders — a resting
+                    # limit/stop order (an episodic-pivot-style entry, a stop
+                    # placed as its own order rather than through the sizing
+                    # wrapper's protective exits) is untouched by it and
+                    # would sit in the book indefinitely otherwise. Doing it
+                    # the other way round would cancel the close-all orders
+                    # themselves, since the broker's cancel-all has no way to
+                    # tell "was resting before this bar" from "submitted this
+                    # bar" — it clears the queued-market bucket too.
+                    self.broker.cancel_all()
                     ctx.close_all()
 
             # --- strategy ------------------------------------------------

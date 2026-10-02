@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import polars as pl
 
 from atr.appdb.engine import utcnow
 from atr.appdb.repositories import (
@@ -804,7 +805,7 @@ class SignalContextService:
         try:
             parsed_when = pd.to_datetime(when) if when is not None else pd.to_datetime(signal_ts)
         except Exception as exc:
-            raise ValueError(f"cannot parse when={when!r} signal_ts={signal_ts!r}: {exc}")
+            raise ValueError(f"cannot parse when={when!r} signal_ts={signal_ts!r}: {exc}") from exc
 
         return self.engine.enrich(
             signal_id=signal_id,
@@ -1124,7 +1125,7 @@ class SignalContextService:
                 if sym in frames:
                     continue
                 try:
-                    frames[sym] = pd.read_parquet(path)
+                    frames[sym] = pl.read_parquet(path).to_pandas()
                 except Exception:  # noqa: BLE001
                     continue
         if not frames:

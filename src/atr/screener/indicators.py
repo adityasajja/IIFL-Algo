@@ -41,7 +41,13 @@ from atr.strategy.indicators import ema, rsi, sma
 # helpers
 # ---------------------------------------------------------------------------
 def _close(df: pd.DataFrame) -> pd.Series:
-    return df["close"].astype(float)
+    col = df["close"]
+    return col if col.dtype == np.float64 else col.astype(float)
+
+
+def _col_float(df: pd.DataFrame, column: str) -> pd.Series:
+    col = df[column]
+    return col if col.dtype == np.float64 else col.astype(float)
 
 
 def _na_like(df: pd.DataFrame) -> pd.Series:
@@ -57,17 +63,23 @@ def _safe(fn: Callable[[], pd.Series], index: pd.Index) -> pd.Series:
         return pd.Series(np.nan, index=index, dtype=float)
     if series is None:
         return pd.Series(np.nan, index=index, dtype=float)
-    series = pd.Series(series, index=index, dtype=float)
-    return series.replace([np.inf, -np.inf], np.nan)
+    if not isinstance(series, pd.Series) or series.index is not index:
+        series = pd.Series(series, index=index, dtype=float)
+    vals = series.to_numpy()
+    if np.isinf(vals).any():
+        vals = vals.copy()
+        vals[np.isinf(vals)] = np.nan
+        return pd.Series(vals, index=series.index, dtype=float)
+    return series
 
 
 def _shifted(df: pd.DataFrame, column: str, bars: int) -> pd.Series:
     """The value of *column* ``bars`` sessions ago, aligned to the frame."""
-    return df[column].astype(float).shift(bars)
+    return _col_float(df, column).shift(bars)
 
 
 def _rolling_extreme(df: pd.DataFrame, column: str, window: int, fn: str) -> pd.Series:
-    return getattr(df[column].astype(float).rolling(window, min_periods=1), fn)()
+    return getattr(_col_float(df, column).rolling(window, min_periods=1), fn)()
 
 
 # ---------------------------------------------------------------------------
@@ -440,9 +452,12 @@ def last_value(series: pd.Series) -> float:
     """
     if series is None or len(series) == 0:
         return float("nan")
-    value = series.iloc[-1]
     try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return float("nan")
+        val = series._values[-1]
+        out = float(val)
+    except (TypeError, ValueError, AttributeError, IndexError):
+        try:
+            out = float(series.iloc[-1])
+        except (TypeError, ValueError, IndexError):
+            return float("nan")
     return out if math.isfinite(out) else float("nan")

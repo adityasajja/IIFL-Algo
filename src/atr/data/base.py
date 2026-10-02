@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from atr.core.enums import Timeframe
 from atr.core.models import Bar, Instrument, MarketSnapshot
@@ -30,7 +30,7 @@ class DataFeed(ABC):
     def instruments(self) -> dict[str, Instrument]:
         ...
 
-    def to_frame(self) -> pd.DataFrame:
+    def to_frame(self) -> pl.DataFrame:
         """Convenience: flatten snapshots into a tidy DataFrame."""
         rows = []
         for snap in self.load():
@@ -46,7 +46,19 @@ class DataFeed(ABC):
                         "volume": bar.volume,
                     }
                 )
-        return pd.DataFrame(rows).sort_values(["ts", "symbol"]).reset_index(drop=True)
+        if not rows:
+            return pl.DataFrame(
+                schema={
+                    "ts": pl.Datetime,
+                    "symbol": pl.Utf8,
+                    "open": pl.Float64,
+                    "high": pl.Float64,
+                    "low": pl.Float64,
+                    "close": pl.Float64,
+                    "volume": pl.Float64,
+                }
+            )
+        return pl.DataFrame(rows).sort(["ts", "symbol"])
 
 
 class ListFeed(DataFeed):
@@ -72,66 +84,48 @@ class ListFeed(DataFeed):
         return self._snapshots
 
 
-class LiveFeed(ABC):
-    """Push-based feed for realtime operation."""
-
-    @abstractmethod
-    async def connect(self) -> None: ...
-
-    @abstractmethod
-    async def subscribe(self, instruments: list[Instrument]) -> None: ...
-
-    @abstractmethod
-    async def stream(self):  # pragma: no cover - interface only
-        """Async iterator yielding MarketSnapshot objects."""
-        yield  # type: ignore[misc]
-
-    @abstractmethod
-    async def close(self) -> None: ...
-
-
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
 
 
-def pivot_to_snapshots(df: pd.DataFrame, timeframe: Timeframe) -> list[MarketSnapshot]:
+def pivot_to_snapshots(df: pl.DataFrame, timeframe: Timeframe) -> list[MarketSnapshot]:
     """Convert a long DataFrame (ts, symbol, ohlcv) into ordered snapshots.
 
     This is the hot path for every backtest — a full-market run pushes millions
     of bars through it — so it stays on numpy arrays and makes a single pass.
-    Grouping is done by walking the sorted timestamps rather than by
-    ``groupby("ts")``; the latter builds one group object per bar, which
-    dominated total runtime (measured ~40s of a 69s backtest).
+    Grouping is done by walking the sorted timestamps rather than a per-row
+    group-by, which builds one group object per bar and dominated total
+    runtime (measured ~40s of a 69s backtest).
     """
     required = {"ts", "symbol", "open", "high", "low", "close"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"DataFrame missing required columns: {sorted(missing)}")
 
-    if df.empty:
+    if df.is_empty():
         return []
 
     # Stable sort keeps the original symbol ordering within a timestamp.
-    work = df.sort_values("ts", kind="mergesort")
-    n = len(work)
+    work = df.sort("ts", maintain_order=True)
+    n = work.height
 
     symbols = work["symbol"].to_numpy()
-    opens = work["open"].to_numpy(dtype=float)
-    highs = work["high"].to_numpy(dtype=float)
-    lows = work["low"].to_numpy(dtype=float)
-    closes = work["close"].to_numpy(dtype=float)
-    volumes = (
-        np.nan_to_num(work["volume"].to_numpy(dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
-        if "volume" in work.columns
-        else np.zeros(n)
-    )
+    opens = work["open"].to_numpy().astype(float)
+    highs = work["high"].to_numpy().astype(float)
+    lows = work["low"].to_numpy().astype(float)
+    closes = work["close"].to_numpy().astype(float)
+    if "volume" in work.columns:
+        volumes = work["volume"].fill_nan(0.0).to_numpy().astype(float)
+        volumes[~np.isfinite(volumes)] = 0.0
+    else:
+        volumes = np.zeros(n)
     ts_values = work["ts"].to_numpy()
 
     # One group per distinct timestamp. ``np.unique`` sorts, and the frame
     # already is sorted, so ``starts`` are each timestamp's first index.
     unique_ts, starts = np.unique(ts_values, return_index=True)
-    timestamps = pd.DatetimeIndex(unique_ts).to_pydatetime()
+    timestamps = [pd_ts.item() if hasattr(pd_ts, "item") else pd_ts for pd_ts in unique_ts]
     stops = np.append(starts[1:], n)
 
     snapshots: list[MarketSnapshot] = []

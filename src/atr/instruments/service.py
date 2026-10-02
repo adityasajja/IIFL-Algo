@@ -146,23 +146,35 @@ class InstrumentMaster:
         actually live — ``iifl_daily/NSEEQ/*.parquet``. Globbing only the top
         level finds zero files and reports a fingerprint that never changes.
         """
+        import os
+
         parts: list[str] = []
         for directory in sorted(self.cache_root.glob("iifl_*")):
             if not directory.is_dir():
                 continue
             targets = [directory]
-            targets.extend(sorted(p for p in directory.iterdir() if p.is_dir()))
-            for target in targets:
+            try:
+                with os.scandir(str(directory)) as it:
+                    for entry in it:
+                        if entry.is_dir():
+                            targets.append(Path(entry.path))
+            except OSError:
+                pass
+            for target in sorted(targets, key=lambda p: str(p)):
                 count = 0
                 newest = 0.0
-                for entry in target.iterdir():
-                    if entry.suffix not in {".parquet", ".csv"}:
-                        continue
-                    count += 1
-                    try:
-                        newest = max(newest, entry.stat().st_mtime)
-                    except OSError:
-                        continue
+                try:
+                    with os.scandir(str(target)) as it:
+                        for entry in it:
+                            name = entry.name
+                            if name.endswith(".parquet") or name.endswith(".csv"):
+                                count += 1
+                                try:
+                                    newest = max(newest, entry.stat().st_mtime)
+                                except OSError:
+                                    continue
+                except OSError:
+                    pass
                 if count:
                     parts.append(f"{target.name}:{count}:{int(newest)}")
         return "|".join(parts) or "empty"
