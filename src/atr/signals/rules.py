@@ -13,12 +13,17 @@ from __future__ import annotations
 import math
 
 import pandas as pd
+from loguru import logger
 
 from atr.signals.models import EntryRules, ExitRules, SessionContext, Signal
+from atr.strategy.indicators import atr as _atr_indicator
 from atr.strategy.indicators import rsi, sma
 
 #: Order exits are reported in. A stop-loss outranks a take-profit.
-_EXIT_PRIORITY = ["stop_loss", "trailing_stop", "trend_break", "take_profit", "rsi_overbought", "week_end"]
+_EXIT_PRIORITY = [
+    "stop_loss", "custom_exit", "trailing_stop", "atr_chandelier", "trend_break",
+    "take_profit", "rsi_overbought", "week_end",
+]
 
 REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 
@@ -204,6 +209,31 @@ def eval_exit(
                     threshold=-abs(rules.trailing_stop_pct),
                 )
 
+    # --- ATR chandelier exit (dynamic, volatility-adaptive) ------------
+    # See `ExitRules.atr_chandelier_enabled`. This is what actually locks in
+    # a gain for a strategy with no `take_profit_pct` of its own.
+    if rules.atr_chandelier_enabled and len(frame) >= max(rules.atr_period + 5, 20):
+        atr_val = float(
+            _atr_indicator(frame["high"], frame["low"], frame["close"], rules.atr_period).iloc[-1]
+        )
+        lookback = min(len(frame), 120)
+        peak = float(frame["high"].tail(lookback).max())
+        if _finite(atr_val) and atr_val > 0 and _finite(peak) and peak > 0:
+            tightened = pnl_pct >= rules.atr_tighten_at_pct
+            mult = rules.atr_mult_tight if tightened else rules.atr_mult_wide
+            stop_price = peak - mult * atr_val
+            if price <= stop_price:
+                add(
+                    "atr_chandelier",
+                    f"{mult:.1f}x ATR trail from its {lookback}-bar high of {peak:,.2f} "
+                    f"(ATR {atr_val:,.2f}, stop {stop_price:,.2f})"
+                    + (" — tightened after reaching profit" if tightened else ""),
+                    peak=round(peak, 2),
+                    atr=round(atr_val, 2),
+                    stop_price=round(stop_price, 2),
+                    mult=mult,
+                )
+
     # --- trend break ---------------------------------------------------
     confirm = max(int(rules.trend_confirm_bars), 1)
     if rules.trend_sma and len(frame) >= rules.trend_sma + confirm:
@@ -237,6 +267,24 @@ def eval_exit(
                 f"RSI {float(value):.0f} at or above {rules.rsi_overbought:.0f}",
                 rsi=round(float(value), 1),
             )
+
+    # --- custom formula --------------------------------------------------
+    # A new exit *condition* published as data — see `atr.signals.formula`.
+    if rules.custom_exit_formula:
+        from atr.signals.formula import FormulaError, build_context, compile_formula
+
+        try:
+            compiled = compile_formula(rules.custom_exit_formula)
+            ctx = build_context(frame, avg_price)
+            if ctx and compiled.eval(ctx):
+                add("custom_exit", f"custom rule: {compiled.source}")
+        except FormulaError as exc:
+            # A formula is vetted at publish time (see `resolve_rules`), so
+            # reaching an invalid one here means the version was published
+            # before that check existed, or the indicator set changed under
+            # it. Either way: skip the rule, don't crash the evaluation the
+            # other rules in this same pass depend on.
+            logger.debug("custom exit formula for {} failed: {}", symbol, exc)
 
     return out
 
@@ -363,8 +411,32 @@ def eval_entry(
                 **gap,
             )
 
-    if rules.setup:
-        out = [s for s in out if s.rule == rules.setup]
+    # --- custom formula --------------------------------------------------
+    # A new entry *condition* published as data — see `atr.signals.formula`.
+    if _wants("custom_entry") and rules.custom_entry_formula:
+        from atr.signals.formula import FormulaError, build_context, compile_formula
+
+        try:
+            compiled = compile_formula(rules.custom_entry_formula)
+            ctx = build_context(frame)  # no position yet: avg_price/pnl_pct read 0
+            if ctx and compiled.eval(ctx):
+                add("custom_entry", f"custom rule: {compiled.source}")
+        except FormulaError as exc:
+            logger.debug("custom entry formula for {} failed: {}", symbol, exc)
+
+    # A strategy published as a `custom_entry_formula` and nothing else names
+    # no `setup` — and `setup: None` means "don't filter," so every built-in
+    # candidate rule (trend-pullback, breakout, RSI-oversold-30, triple-RSI,
+    # gap-down) fired too, at its own default thresholds, completely
+    # independent of whatever the formula actually said. That's not a
+    # strategy trading its stated thesis, it's a strategy trading five
+    # unrelated ones it never asked for. Whoever wrote only a formula meant
+    # exactly that formula; blending in the rest requires saying so, by
+    # setting `setup` to something else (or literally `"custom_entry"`, which
+    # is what this defaults to and changes nothing).
+    effective_setup = rules.setup or ("custom_entry" if rules.custom_entry_formula else None)
+    if effective_setup:
+        out = [s for s in out if s.rule == effective_setup]
     return out
 
 

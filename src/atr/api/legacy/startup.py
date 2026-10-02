@@ -28,6 +28,7 @@ async def on_startup() -> None:
     _warm_breadth_cache()
     _warm_market_intel()
     _warm_instrument_master()
+    _warm_setup_stats()
     asyncio.create_task(_insights_loop())
     asyncio.create_task(_eod_refresh_loop())
     asyncio.create_task(_jobs_loop())
@@ -172,6 +173,22 @@ def _warm_instrument_master() -> None:
         get_instrument_master().warm()
     except Exception as exc:  # noqa: BLE001 — best effort, never fatal
         logger.warning("instrument master warm-up could not start: %s", exc)
+
+
+def _warm_setup_stats() -> None:
+    """Replay every intelligent-alert rule's history off the request path.
+
+    ~60s over a few hundred symbols to answer "how long does this setup
+    usually take, and how often does it actually reach target" — see
+    `atr.signals_stats`. Paid once here, in the background, rather than on
+    whichever request first asks for it.
+    """
+    try:
+        from atr.signals_stats import warm_setup_stats
+
+        warm_setup_stats(background=True)
+    except Exception as exc:  # noqa: BLE001 — best effort, never fatal
+        logger.warning("setup-stats warm-up could not start: %s", exc)
 
 
 def _warm_market_intel() -> None:

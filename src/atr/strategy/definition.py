@@ -224,6 +224,28 @@ def resolve_rules(definition: dict[str, Any]) -> Resolution:
                 source="rules",
                 reason=f"the rule block has non-numeric values: {malformed}",
             )
+
+        # A custom formula (see `atr.signals.formula`) is data a strategy author
+        # wrote, not a value from a fixed set of fields — vet it here, once, at
+        # publish time, rather than discovering a bad one mid-session on a live
+        # deployment placing real orders.
+        from atr.signals.formula import FormulaError, compile_formula
+
+        for label, formula in (
+            ("entry", entry.custom_entry_formula),
+            ("exit", exit_rules.custom_exit_formula),
+            ("rank", entry.rank_formula),
+        ):
+            if not formula:
+                continue
+            try:
+                compile_formula(formula)
+            except FormulaError as exc:
+                return Resolution(
+                    source="rules",
+                    reason=f"the {label} formula is not valid: {exc}",
+                )
+
         return Resolution(entry=entry, exit_rules=exit_rules, source="rules")
 
     engine_key = definition.get("engine_key")

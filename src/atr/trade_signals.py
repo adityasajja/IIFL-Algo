@@ -56,7 +56,7 @@ class TradeSignalSettings(BaseModel):
 def load_settings() -> TradeSignalSettings:
     try:
         if SETTINGS_PATH.exists():
-            return TradeSignalSettings(**json.loads(SETTINGS_PATH.read_text()))
+            return TradeSignalSettings(**json.loads(SETTINGS_PATH.read_text(encoding="utf-8")))
     except Exception as e:
         logger.warning("trade_signals settings corrupt, resetting: {}", e)
     return TradeSignalSettings()
@@ -64,7 +64,7 @@ def load_settings() -> TradeSignalSettings:
 
 def save_settings(s: TradeSignalSettings) -> TradeSignalSettings:
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(s.model_dump_json(indent=2))
+    SETTINGS_PATH.write_text(s.model_dump_json(indent=2), encoding="utf-8")
     return s
 
 
@@ -87,6 +87,13 @@ class TradeSignal(BaseModel):
 
     rsi: float | None = None
     vol_x: float | None = None
+
+    # Backtested read on this `setup`, across history — see `atr.signals_stats`.
+    # None until the background stats cache has warmed, or for a setup it
+    # doesn't cover (e.g. a P&L-based exit, which has no "time to target": the
+    # target *is* the exit).
+    setup_hit_rate_pct: float | None = None
+    setup_median_days_to_target: float | None = None
 
     # Quant literature & self-learning fields
     paper_citation: str | None = None
@@ -150,6 +157,18 @@ def _compute_quantity(
     return max(qty, 1)
 
 
+def _intraday_expiry(now: datetime) -> datetime:
+    """Next 14:30 IST at or after ``now``.
+
+    A signal created at 16:00 expires at tomorrow's 14:30, not at 16:00
+    tomorrow: the cutoff is a session boundary, not a 24-hour timer.
+    """
+    cutoff = now.replace(hour=14, minute=30, second=0, microsecond=0)
+    if cutoff <= now:
+        cutoff = cutoff + timedelta(days=1)
+    return cutoff
+
+
 def build_signal_from_intelligent(
     symbol: str,
     action: Literal["BUY", "SELL"],
@@ -171,11 +190,17 @@ def build_signal_from_intelligent(
     risk_amt = round(qty * abs(entry_price - stop), 2)
     rr = round(abs(target - entry_price) / max(abs(entry_price - stop), 0.01), 2)
 
-    # Expire intraday at 14:30, positional at market close
+    # Deferred: `signals_stats` imports `_compute_stop_and_target` from this
+    # module, so importing it back at module scope would be circular.
+    from atr.signals_stats import get_setup_stats
+
+    setup_stat = get_setup_stats().get(setup)
+
+    # Expire intraday at 14:30, positional at market close. Past the cutoff
+    # the next expiry is tomorrow's 14:30 — not now-plus-a-day, which would
+    # let a 16:00 signal linger as "actionable" until 16:00 tomorrow.
     now = datetime.now(tz=IST)
-    expires = now.replace(hour=14, minute=30, second=0, microsecond=0)
-    if expires < now:
-        expires = now + timedelta(days=1)
+    expires = _intraday_expiry(now)
 
     return TradeSignal(
         symbol=symbol,
@@ -190,6 +215,8 @@ def build_signal_from_intelligent(
         rr_ratio=rr,
         rsi=rsi_val,
         vol_x=vol_x,
+        setup_hit_rate_pct=setup_stat.hit_rate_pct if setup_stat else None,
+        setup_median_days_to_target=setup_stat.median_days_to_target if setup_stat else None,
         paper_citation=paper_citation,
         thesis=thesis,
         confidence_score=confidence_score,
@@ -209,7 +236,7 @@ class SignalQueue:
     def _load(self) -> None:
         try:
             if QUEUE_PATH.exists():
-                raw = json.loads(QUEUE_PATH.read_text())
+                raw = json.loads(QUEUE_PATH.read_text(encoding="utf-8"))
                 for d in raw:
                     try:
                         s = TradeSignal(**d)
@@ -223,7 +250,7 @@ class SignalQueue:
         try:
             QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
             data = [s.model_dump(mode="json") for s in self._signals.values()]
-            QUEUE_PATH.write_text(json.dumps(data, indent=2, default=str))
+            QUEUE_PATH.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         except Exception as e:
             logger.warning("Could not persist signal queue: {}", e)
 

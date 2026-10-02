@@ -9,6 +9,7 @@ looks like a signal.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 from loguru import logger
@@ -36,23 +37,34 @@ def liquid_universe(
     unreliable prices and unrepresentative fills — but be clear that it is
     **look-ahead**: names are selected using *today's* liquidity and tested over
     the past. Both the strategy and the benchmark inherit that optimism, so the
-    comparison between them is more meaningful than either absolute number.
     """
     import numpy as np
+    import polars as pl
+    from concurrent.futures import ThreadPoolExecutor
 
     root = CACHE_ROOT / exchange.upper()
-    scored: list[tuple[float, str]] = []
-    for path in sorted(root.glob("*.parquet")):
+    paths = sorted(root.glob("*.parquet"))
+
+    def _score_path(path: Path) -> tuple[float, str] | None:
         try:
-            frame = pd.read_parquet(path, columns=["close", "volume"])
-        except Exception:  # noqa: BLE001 - a bad file must not kill the screen
-            continue
-        if len(frame) < min_bars:
-            continue
-        turnover = float(np.nanmedian(frame["close"].to_numpy() * frame["volume"].to_numpy()))
-        if not pd.notna(turnover) or turnover <= 0:
-            continue
-        scored.append((turnover, path.stem.upper()))
+            pldf = pl.read_parquet(path, columns=["close", "volume"])
+        except Exception:
+            return None
+        if len(pldf) < min_bars:
+            return None
+        turnover = float(
+            np.nanmedian(pldf["close"].to_numpy() * pldf["volume"].to_numpy())
+        )
+        if not np.isfinite(turnover) or turnover <= 0:
+            return None
+        return (turnover, path.stem.upper())
+
+    scored: list[tuple[float, str]] = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for item in pool.map(_score_path, paths):
+            if item is not None:
+                scored.append(item)
+
     scored.sort(reverse=True)
     return [symbol for _, symbol in scored[:limit]]
 
@@ -66,6 +78,33 @@ def _rows(payload) -> list[dict]:
             return [result]
         return []
     return [r for r in (payload or []) if isinstance(r, dict)]
+
+
+#: The broker's own code for "nothing held": an empty book, not a failure.
+NO_HOLDINGS = "EC920"
+
+
+def _broker_error(payload, *, quiet: str | None = None) -> str | None:
+    """The failure message if a broker response carries an error code, else None.
+
+    IIFL answers HTTP 200 with ``status: Ok`` at the envelope level and puts the
+    failure *inside* ``result`` — for example ``EC500 IP address not authorized
+    for trading``. Read as data, that row carries no symbol and no quantity, so
+    every holding is skipped and the sell scan reports no exits and no errors at
+    all: a refused call becomes indistinguishable from a clean book. Same check
+    as ``services/tradebook.py``, which already treats an EC code as a failure.
+    """
+    result = payload.get("result") if isinstance(payload, dict) else payload
+    if isinstance(result, dict):
+        result = [result]
+    for row in result or []:
+        if isinstance(row, dict):
+            status = str(row.get("status", ""))
+            if status.startswith("EC"):
+                if quiet is not None and status == quiet:
+                    continue
+                return str(row.get("message") or status)
+    return None
 
 
 def _candles_to_frame(payload) -> pd.DataFrame:
@@ -145,6 +184,56 @@ def load_daily(
     return pd.DataFrame(columns=["ts", *OHLCV])
 
 
+#: Intervals `client.historical_data` accepts for intraday bars — see
+#: `atr.brokers.iifl.client.INTERVALS`.
+INTRADAY_INTERVALS = {"1m", "5m", "10m", "15m", "30m", "60m"}
+
+
+def load_intraday(
+    symbol: str,
+    exchange: str,
+    client: IiflClient | None,
+    conid,
+    interval: str,
+    lookback_days: int = 5,
+) -> pd.DataFrame:
+    """This session's intraday candles, direct from the broker. No cache fallback.
+
+    Unlike `load_daily`, there is no maintained local cache to fall back to —
+    the closest thing (`data/iifl_1m`, `data/iifl_15m`) is one-off research
+    scratch data from earlier strategy hunting, inconsistent in both format and
+    coverage, and stale the moment the session it was pulled in ends. An
+    intraday strategy needs *this session's* bars, which only the broker has;
+    with no client or no fresh answer, this returns empty rather than a wrong
+    answer dressed as a real one — the caller (`DeploymentLoop`) then builds the
+    session up live, tick by tick, from here.
+
+    `lookback_days` defaults small: intraday history is naturally short-lived
+    (a 5-minute strategy has no use for a candle from three weeks ago), and a
+    long intraday request is exactly the shape of call the broker's rate limits
+    are least forgiving about.
+    """
+    if interval not in INTRADAY_INTERVALS:
+        raise ValueError(f"not an intraday interval: {interval!r}")
+    if client is None or conid is None:
+        return pd.DataFrame(columns=["ts", *OHLCV])
+
+    to_date = datetime.now(IST)
+    from_date = to_date - timedelta(days=lookback_days)
+    try:
+        payload = client.historical_data(
+            exchange=exchange,
+            instrument_id=str(conid),
+            interval=interval,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        return _candles_to_frame(payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("intraday {} candles failed for {}: {}", interval, symbol, exc)
+        return pd.DataFrame(columns=["ts", *OHLCV])
+
+
 def _quotes(client: IiflClient, legs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
     """One bulk quote call, keyed by (exchange, instrumentId).
 
@@ -192,7 +281,12 @@ def scan_holdings(
 ) -> tuple[list[Signal], list[str]]:
     """Run the exit rules over the positions actually held."""
     cfg = config or SignalConfig()
-    holdings = _rows(client.holdings())
+    raw = client.holdings()
+    failure = _broker_error(raw, quiet=NO_HOLDINGS)
+    if failure is not None:
+        # The book was never read, so "no exits triggered" would be a lie.
+        return [], [f"sell scan unavailable — {failure}"]
+    holdings = _rows(raw)
     if not holdings:
         return [], ["no holdings returned"]
 
@@ -293,6 +387,14 @@ def format_report(result: ScanResult, *, validated: bool = False) -> tuple[str, 
                 "These entry rules have NOT passed out-of-sample validation. "
                 "Treat as a watchlist, not a reason to buy. Run: atr signals validate"
             )
+        lines.append("")
+
+    if result.errors:
+        lines.append(f"NOT EVALUATED ({len(result.errors)})")
+        for error in result.errors[:5]:
+            lines.append(f"  {error}")
+        if len(result.errors) > 5:
+            lines.append(f"  ... and {len(result.errors) - 5} more")
         lines.append("")
 
     if not result.empty:

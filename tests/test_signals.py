@@ -321,3 +321,15 @@ def test_the_rsi_exit_reads_the_period_it_is_given():
     bounce = frame(np.concatenate([np.linspace(100, 60, 60), [70, 80]]))
     fired = eval_exit("X", bounce, avg_price=60.0, rules=exits, quantity=1)
     assert "rsi_overbought" in _names(fired)
+
+
+def test_intraday_expiry_is_the_next_1430_not_now_plus_a_day():
+    """A 16:00 signal dies at tomorrow's 14:30, not 16:00 tomorrow."""
+    from datetime import datetime
+
+    from atr.trade_signals import IST, _intraday_expiry
+
+    morning = datetime(2026, 9, 27, 10, 0, tzinfo=IST)
+    assert _intraday_expiry(morning) == datetime(2026, 9, 27, 14, 30, tzinfo=IST)
+    evening = datetime(2026, 9, 27, 16, 0, tzinfo=IST)
+    assert _intraday_expiry(evening) == datetime(2026, 9, 28, 14, 30, tzinfo=IST)

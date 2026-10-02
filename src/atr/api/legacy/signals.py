@@ -11,11 +11,73 @@ from atr.api.deps import get_principal, require_permission
 from atr.auth.rbac import Permission
 
 from atr.api.legacy.common import _append_audit
-from atr.api.legacy.risk import _live_broker, _order_principal, _require_live_execution
+from atr.api.legacy.risk import (
+    _live_broker,
+    _order_principal,
+    _require_live_execution,
+    _require_order_permission,
+)
 
 logger = logging.getLogger("atr.api")
 
 router = APIRouter()
+
+
+def _held_symbols() -> dict[str, dict[str, Any]]:
+    """Symbols currently held — delivery holdings, or a net-long position.
+
+    Keyed by trading symbol (``"RELIANCE-EQ"``), each value carries ``avg_price``
+    and ``qty`` so the P&L-based sell rules in ``evaluate_stock_signals`` — and
+    anything sizing an exit off the *actual* position rather than a risk-based
+    guess — can use them. A SELL signal built from a symbol absent here means
+    "nothing to sell" — see the check in ``trade_signals_scan``. Best-effort:
+    no broker session or a broker error just means nothing is known to be
+    held, not a scan failure.
+
+    The field names below (``nseTradingSymbol``, ``totalQuantity``,
+    ``averageTradedPrice``, ...) are IIFL's actual holdings/positions schema —
+    verified against a live response. A previous version of this same lookup
+    in ``atr.alerts.intelligent`` used field names that don't exist in that
+    schema (``symbol``, ``avg_price``, ``BuyAvgRate``, ...) and so always
+    matched nothing; that call site now reuses this one.
+    """
+    from atr.api.legacy.common import _authed_client, _broker_error, _broker_rows
+
+    held: dict[str, dict[str, Any]] = {}
+    try:
+        client = _authed_client()
+    except Exception:  # noqa: BLE001 - no session: nothing is held, as far as this scan knows
+        return held
+
+    try:
+        payload = client.holdings()
+        if not _broker_error(payload):
+            for row in _broker_rows(payload):
+                sym = str(
+                    row.get("nseTradingSymbol") or row.get("bseTradingSymbol") or row.get("symbol") or ""
+                ).strip().upper()
+                qty = float(row.get("totalQuantity") or 0)
+                if sym and qty != 0:
+                    held[sym] = {"avg_price": row.get("averageTradedPrice"), "qty": qty}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("holdings lookup failed for signal scan: %s", exc)
+
+    try:
+        payload = client.positions()
+        if not _broker_error(payload):
+            for row in _broker_rows(payload):
+                qty = float(row.get("netQuantity") or row.get("NetQuantity") or row.get("quantity") or 0)
+                if qty > 0:
+                    sym = str(row.get("tradingSymbol") or row.get("symbol") or "").strip().upper()
+                    if sym:
+                        held.setdefault(
+                            sym,
+                            {"avg_price": row.get("averagePrice") or row.get("avgPrice"), "qty": qty},
+                        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("positions lookup failed for signal scan: %s", exc)
+
+    return held
 
 
 @router.get("/self-learning/status")
@@ -63,6 +125,20 @@ def trade_signals_settings_put(body: dict[str, Any]) -> dict[str, Any]:
     return merged.model_dump()
 
 
+@router.get("/trade-signals/setup-stats")
+def trade_signals_setup_stats() -> dict[str, Any]:
+    """Backtested hit-rate and median days-to-target, per setup — see `atr.signals_stats`.
+
+    Empty right after a fresh start: the replay takes ~60s and is warmed on a
+    background thread rather than blocking the request that first asks for it.
+    """
+    from dataclasses import asdict
+
+    from atr.signals_stats import get_setup_stats
+
+    return {setup: asdict(stat) for setup, stat in get_setup_stats().items()}
+
+
 @router.get("/trade-signals")
 def trade_signals_list(status: str | None = None) -> dict[str, Any]:
     """Return the signal queue. Pass ?status=PENDING|ACTIVE|DONE|SKIPPED to filter."""
@@ -101,6 +177,7 @@ def trade_signals_scan() -> dict[str, Any]:
     frames = load_cached("NSEEQ")
     channels = channels_from_settings(get_settings())
     sl_engine = get_self_learning_engine()
+    held = _held_symbols()
 
     # 1. First add highest-conviction quantitative research paper signals
     new_signals = []
@@ -152,8 +229,19 @@ def trade_signals_scan() -> dict[str, Any]:
         if df is None or len(df) < 30:
             continue
         try:
-            found = evaluate_stock_signals(sym, df, cfg)
+            found = evaluate_stock_signals(sym, df, cfg, holding_info=held.get(sym))
             for sig_raw in found:
+                # A SELL only means something if there is something to sell.
+                # These rules run over the whole scan universe, not just what is
+                # held, so "trend broke down" / "RSI overbought" / "trailing
+                # stop" fire for any symbol that meets the technical condition —
+                # including one never bought. Left unfiltered, that produced a
+                # SELL card, complete with a fabricated stop/target/quantity as
+                # if opening a fresh short, for a stock sitting in nobody's
+                # portfolio; approving it would place a real SELL order with no
+                # position behind it.
+                if sig_raw.action == "SELL" and sym not in held:
+                    continue
                 existing = [s for s in q.pending() if s.symbol == sym and s.action == sig_raw.action]
                 if existing:
                     continue
@@ -227,6 +315,7 @@ def trade_signals_execute(signal_id: str, http_request: Request) -> dict[str, An
     from atr.trade_signals import format_telegram_confirm, get_queue
 
     principal = _order_principal(http_request)
+    _require_order_permission(principal)
 
     q = get_queue()
     sig = q.get(signal_id)

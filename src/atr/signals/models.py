@@ -53,6 +53,29 @@ class ExitRules:
     #: Bars of daily history required before trend/RSI rules are trusted.
     min_history_bars: int = 60
 
+    #: ATR chandelier exit: trails the recent high by a multiple of the
+    #: stock's own ATR, instead of a fixed percentage — a ₹3 move means
+    #: something different for a ₹50 stock than a ₹3,000 one, and a fixed %
+    #: can't tell the difference. The multiple itself tightens once the trade
+    #: is already up `atr_tighten_at_pct`, giving a move room to run early and
+    #: protecting more of it once there is real profit behind it. For a
+    #: strategy with no `take_profit_pct` (e.g. one that otherwise only exits
+    #: on a momentum signal normalizing, independent of P&L), this is what
+    #: actually locks in a gain rather than relying on ordinary drift.
+    atr_chandelier_enabled: bool = False
+    atr_period: int = 14
+    atr_mult_wide: float = 3.0
+    atr_mult_tight: float = 1.5
+    atr_tighten_at_pct: float = 5.0
+
+    #: A new exit *condition* as data, not code — see `atr.signals.formula`.
+    #: A boolean expression over a fixed indicator set (price, avg_price,
+    #: pnl_pct, rsi5/14, sma20/50/200, atr14, peak20/60, volume, vol_avg20,
+    #: day_chg_pct); True fires an exit. Compiled and vetted (no calls, no
+    #: attribute access, no imports — arithmetic and comparisons only) when
+    #: the strategy version is published, not when it trades. None disables.
+    custom_exit_formula: str | None = None
+
 
 @dataclass
 class EntryRules:
@@ -105,6 +128,21 @@ class EntryRules:
     #: The research buys at the close, so a signal read off the morning's price is a
     #: different signal: a stock that opens down can look oversold and recover by three.
     close_only: bool = False
+
+    #: A new entry *condition* as data, not code — see `ExitRules.custom_exit_formula`
+    #: and `atr.signals.formula`. `avg_price`/`pnl_pct` both read 0 here — there
+    #: is no position yet. None disables.
+    custom_entry_formula: str | None = None
+
+    #: Cross-symbol ranking: a formula (same grammar and indicator set as
+    #: `custom_entry_formula`) scoring every symbol that separately qualified
+    #: as a candidate this bar — higher score is preferred. With
+    #: `max_open_positions` capping the book, this is what turns "some names
+    #: pass the entry rule" into "buy the strongest N in the universe":
+    #: `rank_formula: "roc20"` ranks candidates by 20-day momentum and the
+    #: runner fills the book with the top-scoring ones first. None keeps the
+    #: runner's original ordering (a gap-down strategy's own gap size).
+    rank_formula: str | None = None
 
     #: Fire only this rule ("triple_rsi", "breakout", ...). None = any of them.
     #: Without it every strategy also trades the other three rules' setups.
