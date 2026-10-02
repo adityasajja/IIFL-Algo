@@ -74,6 +74,15 @@ def _source(path: Path, default: str | None = None) -> str | None:
         return default
 
 
+def is_demo(data_root: Path) -> bool:
+    """True when the data directory was filled by ``scripts/seed_demo.py``.
+
+    Demo data is synthetic. Every surface that shows numbers built from it must say so, so a
+    screenshot of the demo can never be mistaken for a result.
+    """
+    return (Path(data_root) / ".demo").exists()
+
+
 def build_status(data_root: Path, now: datetime | None = None, cal: NSEMarketCalendar | None = None) -> dict[str, Any]:
     from atr.data.eod_refresh import cache_dir, read_state
     from atr.data.indices import NIFTY_50, index_path
@@ -138,4 +147,5 @@ def build_status(data_root: Path, now: datetime | None = None, cal: NSEMarketCal
         "sources": sources,
         "topup": topup,
         "samples": len(files),
+        "demo": is_demo(data_root),
     }

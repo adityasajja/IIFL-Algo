@@ -20,7 +20,18 @@ logger = logging.getLogger("atr.api")
 # Append-only audit log. Every action that changes what the system will do to
 # real money lands here, with who and why. Kept as a file rather than in-memory
 # state so a restart cannot erase an inconvenient decision.
-_AUDIT_PATH = Path("data/audit/audit.jsonl")
+_DEFAULT_AUDIT = Path("data/audit/audit.jsonl")
+_AUDIT_PATH = _DEFAULT_AUDIT
+
+
+def _audit_file() -> Path:
+    """The sink: a path a test patched in, else ``ATR_AUDIT_PATH``, else the default.
+
+    Without the override every test run appended to the operator's real ``data/audit``."""
+    if _AUDIT_PATH != _DEFAULT_AUDIT:
+        return _AUDIT_PATH
+    override = os.environ.get("ATR_AUDIT_PATH")
+    return Path(override) if override else _AUDIT_PATH
 
 
 def _utcnow_iso() -> str:
@@ -39,8 +50,9 @@ def _append_audit(*, actor: str, action: str, subject: str, detail: str | None =
         "detail": detail,
     }
     try:
-        _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _AUDIT_PATH.open("a", encoding="utf-8") as fh:
+        path = _audit_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as exc:  # noqa: BLE001 — logging must never break trading
         logger.warning("audit append failed: %s", exc)
@@ -48,11 +60,12 @@ def _append_audit(*, actor: str, action: str, subject: str, detail: str | None =
 
 
 def _read_audit(limit: int = 200) -> list[dict[str, Any]]:
-    if not _AUDIT_PATH.exists():
+    path = _audit_file()
+    if not path.exists():
         return []
     limit = max(1, limit)  # `lines[-0:]` is the whole file, not zero lines
     try:
-        with _AUDIT_PATH.open("rb") as fh:
+        with path.open("rb") as fh:
             fh.seek(0, os.SEEK_END)
             size = fh.tell()
             # Read only the tail: the trail is append-only and grows forever, so

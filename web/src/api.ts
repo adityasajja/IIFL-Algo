@@ -4936,6 +4936,8 @@ export interface TrackRecordSummary {
 export interface TrackRecordProvenance {
   /** Always true today: the fills come from the paper venue, not a broker. */
   simulated: boolean;
+  /** True when the data directory was filled by the demo seeder: nothing here is a real result. */
+  demo?: boolean;
   fills: string;
   prices: string;
   prices_as_of: string | null;
@@ -4992,6 +4994,7 @@ export interface DataStatus {
     names: number | null;
   } | null;
   samples: number;
+  demo?: boolean;
 }
 
 export const getDataStatus = () => v1<DataStatus>("/data/status");

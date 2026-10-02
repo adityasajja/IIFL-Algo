@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from atr.config.settings import get_settings
 
-from atr.api.legacy.common import _AUDIT_PATH, _read_audit
+from atr.api.legacy.common import _audit_file, _read_audit
 from atr.api.legacy.risk import _risk_state
 
 logger = logging.getLogger("atr.api")
@@ -93,7 +93,7 @@ def _db_health(ttl: float = 60.0) -> bool:
 @router.get("/audit")
 def get_audit(limit: int = Query(200, ge=1, le=2000)) -> dict[str, Any]:
     """The immutable trail, newest first."""
-    return {"entries": _read_audit(limit), "path": str(_AUDIT_PATH)}
+    return {"entries": _read_audit(limit), "path": str(_audit_file())}
 
 
 # ----------------------------------------------------------------------

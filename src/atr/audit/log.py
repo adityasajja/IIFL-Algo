@@ -29,6 +29,15 @@ ROOT = Path(__file__).resolve().parents[3]
 AUDIT_PATH = ROOT / "data" / "audit" / "audit.jsonl"
 
 
+def audit_path() -> Path:
+    """The file sink. ``ATR_AUDIT_PATH`` overrides it, which is how tests keep their rows out of
+    the operator's real audit log (every test run used to append to ``data/audit``)."""
+    import os
+
+    override = os.environ.get("ATR_AUDIT_PATH")
+    return Path(override) if override else AUDIT_PATH
+
+
 def _iso(ts: datetime | None = None) -> str:
     moment = ts or datetime.now(UTC).replace(tzinfo=None)
     if moment.tzinfo is not None:
@@ -39,8 +48,9 @@ def _iso(ts: datetime | None = None) -> str:
 def append_file(record_row: dict[str, Any]) -> None:
     """Append one JSON object as a line. Best effort; never raises."""
     try:
-        AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with AUDIT_PATH.open("a", encoding="utf-8") as fh:
+        path = audit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record_row, default=str) + "\n")
     except Exception as exc:  # noqa: BLE001 - auditing must not break the action
         logger.warning("audit file append failed: %s", exc)
@@ -48,10 +58,11 @@ def append_file(record_row: dict[str, Any]) -> None:
 
 def read_file(limit: int = 200) -> list[dict[str, Any]]:
     """Newest-first slice of the file sink."""
-    if not AUDIT_PATH.exists():
+    path = audit_path()
+    if not path.exists():
         return []
     try:
-        lines = AUDIT_PATH.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except Exception as exc:  # noqa: BLE001
         logger.warning("audit file read failed: %s", exc)
         return []

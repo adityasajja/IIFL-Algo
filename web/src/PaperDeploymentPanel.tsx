@@ -117,6 +117,7 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
   const { toast } = useToast();
 
   const [view, setView] = useState<View>("deploy");
+  const openedOnce = useRef(false);
   const [options, setOptions] = useState<BacktestOptions | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
@@ -172,6 +173,12 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
       setDeployments(list.deployments);
       setRunner(run);
       setError(null);
+      // Open on what is running, not on an empty form: the first load only, and never over a tab
+      // the person has already chosen.
+      if (!openedOnce.current) {
+        openedOnce.current = true;
+        if (list.deployments.length > 0) setView((v) => (v === "deploy" ? "monitor" : v));
+      }
       setSelectedId((prev) => {
         if (prev && list.deployments.some((d) => d.deployment_id === prev)) {
           return prev;

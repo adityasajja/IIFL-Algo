@@ -8,6 +8,10 @@ import {
   getTradeSignals,
   listDeployments,
   listSavedStrategies,
+  seedExampleStrategy,
+  getResearchedStocks,
+  createDeployment,
+  startDeployment,
   type DataStatus,
   type Deployment,
   type Health,
@@ -50,6 +54,8 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
   const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   // Live feed websocket subscription
   const { connected: wsConnected, bridgeActive } = useLiveTicks(["NIFTYBEES-EQ", "RELIANCE-EQ"]);
@@ -80,6 +86,33 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
       setRefreshing(false);
     }
   }, []);
+
+  /**
+   * One click from an empty app to a paper run: the worked-example strategy (made if it is not
+   * there yet), put on practice money over the stocks it was researched on, and started.
+   */
+  const startStarter = useCallback(async () => {
+    setStarting(true);
+    setStartError(null);
+    try {
+      const seeded = await seedExampleStrategy();
+      const universe = await getResearchedStocks();
+      if (!universe.symbols.length) throw new Error("No researched stocks are available yet to run it on.");
+      const made = await createDeployment({
+        strategy_id: seeded.strategy.strategy_id,
+        strategy_version: seeded.version.version,
+        capital: 500_000,
+        mode: "PAPER",
+        config: { symbols: universe.symbols, exchange: "NSEEQ", timeframe: "1d", max_open_positions: 10 },
+      });
+      await startDeployment(made.deployment_id);
+      await loadData(true);
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : "Could not start it");
+    } finally {
+      setStarting(false);
+    }
+  }, [loadData]);
 
   useEffect(() => {
     void loadData();
@@ -149,7 +182,14 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
   return (
     <div className="space-y-6 pb-12">
       {/* The page leads with the evidence: what the strategies did, against the market. */}
-      <TrackRecordCard onStart={() => onNavigate("paper")} />
+      <TrackRecordCard
+        running={runningDeployments.length}
+        starting={starting}
+        startError={startError}
+        onStartStarter={() => void startStarter()}
+        onBuild={() => onNavigate("strategies")}
+        onSeePast={() => onNavigate("evidence", "backtest")}
+      />
 
       <JourneyCard steps={steps} next={next} onNavigate={onNavigate} />
 

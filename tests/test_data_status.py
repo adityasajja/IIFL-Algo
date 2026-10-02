@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pandas as pd
-import pytest
 from fastapi.testclient import TestClient
 
 from atr.api.main import app
@@ -52,6 +51,13 @@ def _write(path, last: date, n=30):
     path.parent.mkdir(parents=True, exist_ok=True)
     ts = pd.bdate_range(end=pd.Timestamp(last), periods=n)
     pd.DataFrame({"ts": ts, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1}).to_parquet(path)
+
+
+class TestDemo:
+    def test_a_marked_directory_is_reported_as_demo(self, tmp_path):
+        assert build_status(tmp_path, at(2026, 7, 8, 11), CAL)["demo"] is False
+        (tmp_path / ".demo").write_text("x")
+        assert build_status(tmp_path, at(2026, 7, 8, 11), CAL)["demo"] is True
 
 
 class TestBuild:

@@ -72,6 +72,17 @@ uv run atr serve        # http://127.0.0.1:8000/docs
 uv run pytest
 ```
 
+**Try the app with demo data** (synthetic, clearly marked, never touches real data):
+
+```bash
+uv run python scripts/seed_demo.py     # needs an EMPTY data/ directory; refuses otherwise
+uv run atr serve                       # log in as demo / DemoPassw0rd!
+```
+
+It makes ten synthetic stocks and a Nifty-like series, a worked-example strategy, two paper
+deployments and about three months of backdated paper fills. The header says **DEMO DATA** and
+the track record says so too, so a demo can never be mistaken for a result.
+
 **Authenticate with IIFL:**
 
 ```bash

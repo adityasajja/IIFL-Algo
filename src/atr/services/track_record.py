@@ -315,6 +315,11 @@ class TrackRecordService:
 
         return close_on, lambda: max(latest) if latest else None
 
+    def _is_demo(self) -> bool:
+        from atr.services.data_status import is_demo
+
+        return is_demo(self.data_root)
+
     def _benchmark(self) -> tuple[dict[date, float] | None, dict[str, Any]]:
         from atr.data.indices import NIFTY_50, index_path
 
@@ -389,6 +394,7 @@ class TrackRecordService:
             **record,
             "provenance": {
                 "simulated": True,
+                "demo": self._is_demo(),
                 "fills": "Simulated by the paper venue against recorded prices, with modelled slippage and brokerage. No real order was sent.",
                 "prices": "Daily closes from the local cache (broker history, topped up from public bars).",
                 "prices_as_of": stocks_as_of.isoformat() if stocks_as_of else None,

@@ -20,7 +20,22 @@ const RANGES = [30, 60, 90, 180] as const;
  * market, with the depth of every fall, and where the numbers came from. It leads with a single
  * figure and a picture, and keeps the words to labels.
  */
-export function TrackRecordCard({ onStart }: { onStart: () => void }) {
+export function TrackRecordCard({
+  running,
+  starting,
+  startError,
+  onStartStarter,
+  onBuild,
+  onSeePast,
+}: {
+  /** Paper runs that are going right now: tells "nothing yet" from "running, no trade yet". */
+  running: number;
+  starting: boolean;
+  startError: string | null;
+  onStartStarter: () => void;
+  onBuild: () => void;
+  onSeePast: () => void;
+}) {
   const [days, setDays] = useState<number>(90);
   const [data, setData] = useState<TrackRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +66,11 @@ export function TrackRecordCard({ onStart }: { onStart: () => void }) {
           <Chipish tone="warn" icon={<FlaskConical className="size-3" />} tip="Paper trading: fills are simulated, no real order was sent.">
             Simulated
           </Chipish>
+          {data?.provenance.demo ? (
+            <Chipish tone="warn" icon={<TriangleAlert className="size-3" />} tip="Synthetic data from the demo seeder. Nothing here is a real result.">
+              Demo data
+            </Chipish>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))} variant="segment">
@@ -78,7 +98,14 @@ export function TrackRecordCard({ onStart }: { onStart: () => void }) {
       ) : !data ? (
         <div className="h-72 animate-pulse rounded-lg bg-muted/40" aria-label="Loading" />
       ) : !data.has_data ? (
-        <EmptyRecord onStart={onStart} />
+        <EmptyRecord
+          running={running}
+          starting={starting}
+          error={startError}
+          onStartStarter={onStartStarter}
+          onBuild={onBuild}
+          onSeePast={onSeePast}
+        />
       ) : (
         <Filled data={data} view={view} refreshing={loading} />
       )}
@@ -109,8 +136,27 @@ function Chipish({ tone, icon, tip, children }: { tone: Tone; icon: ReactNode; t
   );
 }
 
-/** Nothing has traded yet: a ghost of the chart, so the shape of what is coming is clear. */
-function EmptyRecord({ onStart }: { onStart: () => void }) {
+/**
+ * Nothing has traded yet. Either nothing is running (so: one click to start a ready-made
+ * strategy), or something is running and is waiting for its rule to fire (so: say that, and
+ * point at what it did on past prices). A ghost of the chart shows the shape of what is coming.
+ */
+function EmptyRecord({
+  running,
+  starting,
+  error,
+  onStartStarter,
+  onBuild,
+  onSeePast,
+}: {
+  running: number;
+  starting: boolean;
+  error: string | null;
+  onStartStarter: () => void;
+  onBuild: () => void;
+  onSeePast: () => void;
+}) {
+  const waiting = running > 0;
   return (
     <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-dashed border-border">
       <svg viewBox="0 0 600 220" className="absolute inset-0 h-full w-full text-muted-foreground/30" preserveAspectRatio="none" aria-hidden="true">
@@ -120,17 +166,42 @@ function EmptyRecord({ onStart }: { onStart: () => void }) {
         <path d="M0,150 C80,150 120,110 200,120 S320,70 400,85 S520,40 600,50" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 6" />
         <path d="M0,150 C100,145 200,135 300,128 S480,112 600,100" fill="none" stroke="currentColor" strokeOpacity="0.6" strokeWidth="1.5" />
       </svg>
-      <div className="relative flex flex-col items-center gap-3 rounded-xl bg-card/90 px-8 py-8 text-center backdrop-blur-sm">
-        <div className="text-2xl font-semibold tracking-tight text-foreground">Nothing to show yet</div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-0.5 w-4 rounded-full bg-primary" aria-hidden="true" /> Your paper trades
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-0.5 w-4 rounded-full bg-muted-foreground/70" aria-hidden="true" /> Nifty 50
-          </span>
-        </div>
-        <Button onClick={onStart}>Start paper trading</Button>
+      <div className="relative flex max-w-md flex-col items-center gap-3 rounded-xl bg-card/90 px-8 py-8 text-center backdrop-blur-sm">
+        {waiting ? (
+          <>
+            <span className="relative grid size-3 place-items-center" aria-hidden="true">
+              <span className="absolute inline-flex size-3 animate-ping rounded-full bg-gain/40" />
+              <span className="relative size-2 rounded-full bg-gain" />
+            </span>
+            <div className="text-2xl font-semibold tracking-tight text-foreground">
+              {running} {running === 1 ? "strategy" : "strategies"} running
+            </div>
+            <div className="text-sm text-muted-foreground">No trade yet</div>
+            <Button variant="outline" onClick={onSeePast}>
+              See it on past prices
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="text-2xl font-semibold tracking-tight text-foreground">No paper trades yet</div>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-0.5 w-4 rounded-full bg-primary" aria-hidden="true" /> Your paper trades
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-0.5 w-4 rounded-full bg-muted-foreground/70" aria-hidden="true" /> Nifty 50
+              </span>
+            </div>
+            <Button onClick={onStartStarter} disabled={starting}>
+              {starting ? "Starting\u2026" : "Try a ready-made strategy"}
+            </Button>
+            <div className="text-caption text-muted-foreground">{"\u20B95,00,000 of practice money, no signup, no real orders"}</div>
+            <Button size="inline" variant="link" className="text-xs" onClick={onBuild}>
+              Or build your own
+            </Button>
+          </>
+        )}
+        {error ? <div className="text-xs text-loss">{error}</div> : null}
       </div>
     </div>
   );

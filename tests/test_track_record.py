@@ -310,3 +310,26 @@ def test_another_accounts_deployment_track_record_is_a_404(owner, closes_and_ind
 def test_days_is_bounded(owner):
     assert owner.get("/api/v1/paper/track-record", params={"days": 0}).status_code == 422
     assert owner.get("/api/v1/paper/track-record", params={"days": 9999}).status_code == 422
+
+
+def test_demo_marker_reaches_the_provenance(owner, closes_and_index, tmp_path, monkeypatch):
+    monkeypatch.setattr(tr.TrackRecordService, "_is_demo", lambda self: True)
+    assert owner.get("/api/v1/paper/track-record").json()["provenance"]["demo"] is True
+
+
+def test_the_curve_agrees_with_the_ledgers_own_total(owner, closes_and_index):
+    """Two independent computations of the same money must give the same answer.
+
+    The ledger folds fills into an account at one instant; the track record replays them day
+    by day. After a closed round trip (nothing left to value) they must agree to the paisa.
+    """
+    dep = _deploy(owner)
+    owner.post(f"/api/v1/paper/deployments/{dep}/start")
+    _buy(owner, dep, qty=10)
+    owner.post(f"/api/v1/paper/deployments/{dep}/orders",
+               json={"symbol": "RELIANCE", "side": "SELL", "quantity": 10,
+                     "requested_price": 2500.0, "limit_price": 2500.0})
+    ledger = owner.get(f"/api/v1/paper/deployments/{dep}/pnl").json()
+    record = owner.get(f"/api/v1/paper/deployments/{dep}/track-record").json()
+    assert record["summary"]["net_pnl"] == pytest.approx(ledger["total_pnl"], abs=0.01)
+    assert record["summary"]["closed_trades"] == 1

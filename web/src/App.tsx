@@ -693,6 +693,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+              {dataStatus?.demo ? (
+                <Tooltip content="This data is synthetic, made by the demo seeder. Nothing here is a real result." side="bottom" delay={200}>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-caption font-semibold text-warning">
+                    DEMO DATA
+                  </span>
+                </Tooltip>
+              ) : null}
               {health?.execution_mode === "live" ? (
                 // This build never places real orders, but the server reports a mode that can.
                 // Say so loudly instead of showing a calm "paper" badge over a live backend.

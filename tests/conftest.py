@@ -37,6 +37,9 @@ def fresh_env(tmp_path, monkeypatch):
     # the first time the ledger became a source.
     monkeypatch.setenv("ATR_DATA_ROOT", str(tmp_path / "data"))
     monkeypatch.setenv("ATR_SECRET_KEY", "unit-test-key")
+    # The audit file sink defaults to <repo>/data/audit: without this, every test run appended to the
+    # operator's real audit log.
+    monkeypatch.setenv("ATR_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
     # scrypt is deliberately ~0.2s per hash in production; every API test creates
     # accounts, so that cost was paid dozens of times per file. The cost factor
     # is stored in each hash, so verification still runs the real code path.
