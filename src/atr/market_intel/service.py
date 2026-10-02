@@ -132,26 +132,15 @@ class MarketIntelService:
     # Frame Loading & Benchmark Provenance
     # --------------------------------------------------------------------------
     def _load_frame(self, symbol: str) -> pd.DataFrame | None:
-        """Loads daily parquet frame for a symbol."""
-        from atr.data.history import load_cached
+        """Daily frame for a symbol, from the consolidated panel (see atr.data.panel)."""
+        from atr.data import panel
 
         clean = canonical_symbol(symbol)
+        shared = panel.frames(self.cache_dir)
         for cand in (clean, f"{clean}-EQ", clean.replace("-EQ", "")):
-            try:
-                df = load_cached(cand, exchange="NSEEQ", timeframe="daily")
-                if df is not None and not df.empty:
-                    return df
-            except Exception:
-                continue
-
-        p1 = self.cache_dir / f"{clean}.parquet"
-        p2 = self.cache_dir / f"{clean}-EQ.parquet"
-        target = p1 if p1.exists() else (p2 if p2.exists() else None)
-        if target is not None:
-            try:
-                return pd.read_parquet(target)
-            except Exception as e:
-                logger.debug("Failed reading parquet {}: {}", target, e)
+            df = shared.get(cand)
+            if df is not None and not df.empty:
+                return df.copy(deep=False)  # callers add columns; the panel's frames are shared
         return None
 
     def get_benchmark_frame_and_provenance(self) -> tuple[pd.DataFrame | None, BenchmarkProvenance]:

@@ -160,6 +160,15 @@ def refresh(
     except OSError as exc:
         logger.warning("could not save the eod refresh state: {}", exc)
     logger.info("eod refresh: {}", summary)
+    if counts["ok"]:
+        # Fold the new bars into the consolidated panel now, off any request, so the
+        # next page load finds it current instead of paying for the re-read.
+        try:
+            from atr.data import panel
+
+            panel.frames(root, max_age=0)
+        except Exception as exc:  # noqa: BLE001 - readers re-check the files themselves
+            logger.debug("panel refresh after eod failed: {}", exc)
     return summary
 
 

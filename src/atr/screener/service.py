@@ -344,19 +344,14 @@ def load_frames(
             return entry.frames
 
     t0 = time.monotonic()
+    from atr.data import panel
     from atr.instruments.service import get_instrument_master
 
-    # Glob the master's cache root rather than trusting ``load_cached``'s own
-    # module-level root, so the loader and the universe index always read the
-    # same directory.
+    # The master's cache root, so the loader and the universe index always read the
+    # same directory; the panel is one columnar file kept current with its files.
     root = Path(getattr(get_instrument_master(), "cache_root", history_module.CACHE_ROOT))
-    outdir = root / DAILY_DIR / exchange
-    raw: dict[str, pd.DataFrame] = {}
-    for path in sorted(outdir.glob("*.parquet")):
-        try:
-            raw[path.stem] = pd.read_parquet(path)
-        except Exception:  # noqa: BLE001 - skip a corrupt file, keep the scan
-            continue
+    raw = dict(panel.frames(root / DAILY_DIR / exchange))
+
     frames = _canonical_frames(raw)
     logger.info(
         "screener: loaded %d frames for %s in %.1fs",
