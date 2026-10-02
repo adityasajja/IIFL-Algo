@@ -794,7 +794,7 @@ export const AnimatedSidebarGroupLabel = forwardRef<
       aria-hidden={collapsed}
       data-slot="sidebar-group-label"
       className={cn(
-          "mb-1 h-7 overflow-hidden px-2 text-micro font-medium uppercase tracking-[0.14em] text-muted-foreground transition-opacity",
+          "mb-0.5 h-6 overflow-hidden px-3 text-micro font-medium uppercase tracking-[0.14em] text-muted-foreground transition-opacity",
         collapsed ? "opacity-0" : "opacity-100",
         className,
       )}
@@ -1077,7 +1077,7 @@ export function AnimatedSidebarMenuButton({
         <span
           aria-hidden="true"
           className={cn(
-            "relative z-10 grid size-5 shrink-0 place-items-center",
+            "relative z-10 grid size-4 shrink-0 place-items-center",
             panel.collapsed && isActive && "size-9 rounded-xl bg-primary/15 text-primary dark:bg-primary/25 dark:text-white",
           )}
         >
@@ -1135,7 +1135,7 @@ export function AnimatedSidebarMenuButton({
   );
 
   const interactiveClassName = cn(
-    "relative flex min-h-9 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-3 text-left text-sm font-medium outline-none group",
+    "relative flex min-h-8 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-3 text-left text-body font-medium outline-none group",
     "text-muted-foreground transition-colors hover:text-foreground",
     "focus-visible:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
     isActive && "text-primary hover:text-primary dark:text-primary-subdued dark:hover:text-primary-subdued",

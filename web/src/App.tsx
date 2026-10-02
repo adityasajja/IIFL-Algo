@@ -639,7 +639,7 @@ export default function App() {
                       <AnimatedSidebarMenuItem key={id}>
                         <AnimatedSidebarMenuButton
                           isActive={tab === id}
-                          icon={<Icon size={18} />}
+                          icon={<Icon size={16} />}
                           onSelect={() => setTab(id)}
                         >
                           {PAGES[id].name}
