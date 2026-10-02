@@ -224,9 +224,10 @@ class MarketIntelService:
         takes about a second, and doing it here means the very first load already
         shows the real index rather than the ETF.
         """
-        from atr.data.indices import sync_index, sync_index_public, synced_today
+        from atr.data.indices import INDIA_VIX, NIFTY_50, sync_index, sync_index_public, synced_today
 
-        if synced_today(self.data_root) or time.time() - self._index_attempt < 3600:
+        names = [n for n in (NIFTY_50, INDIA_VIX) if not synced_today(self.data_root, n)]
+        if not names or time.time() - self._index_attempt < 3600:
             return
         self._index_attempt = time.time()
         try:
@@ -234,16 +235,43 @@ class MarketIntelService:
 
             client = authed_client()
         except Exception:  # noqa: BLE001 - no session
-            sync_index_public(self.data_root)
+            for n in names:
+                sync_index_public(self.data_root, n)
             return
 
         def work() -> None:
             # If the broker call fails (expired token, changed response), the
             # public series still keeps the headline on the real index.
-            if sync_index(client, self.data_root) != "ok":
-                sync_index_public(self.data_root)
+            for n in names:
+                if sync_index(client, self.data_root, n) != "ok":
+                    sync_index_public(self.data_root, n)
 
         threading.Thread(target=work, name="index-sync", daemon=True).start()
+
+    def _vix_snapshot(self) -> dict[str, Any] | None:
+        """India VIX level, its day move and where it sits in its own year. None if uncached."""
+        from atr.data.indices import INDIA_VIX, load_index
+
+        frame = load_index(self.data_root, INDIA_VIX)
+        if frame is None:
+            return None
+        frame = frame.sort_values("ts")
+        close = frame["close"].astype(float).dropna()
+        if len(close) < 20:
+            return None
+        year = close.tail(252)
+        last = float(close.iloc[-1])
+        prev = float(close.iloc[-2])
+        return {
+            "close": round(last, 2),
+            "change_1d_pct": round((last / prev - 1) * 100, 2) if prev else None,
+            # Share of the past year's sessions on which VIX closed lower than now.
+            "percentile_1y": round(float((year < last).mean() * 100), 0),
+            "low_1y": round(float(year.min()), 2),
+            "high_1y": round(float(year.max()), 2),
+            "as_of": pd.Timestamp(frame["ts"].iloc[-1]).date().isoformat(),
+            "series": [round(float(v), 2) for v in close.tail(60)],
+        }
 
     def _compute_all_uncached(
         self, *, force_refresh: bool = False
@@ -626,6 +654,8 @@ class MarketIntelService:
             nifty_52w_high = round(float(year["high"].astype(float).max()), 2)
             nifty_52w_low = round(float(year["low"].astype(float).min()), 2)
 
+        vix = self._vix_snapshot()
+
         # A sector whose week disagrees with its month is changing direction.
         # Tiny sectors (a handful of stocks) swing too much to be worth reporting.
         sized = [s for s in sector_metrics_list if s.stock_count >= 5]
@@ -683,6 +713,7 @@ class MarketIntelService:
             nifty_52w_low=nifty_52w_low,
             sectors_turning_up=sectors_turning_up,
             sectors_fading=sectors_fading,
+            vix=vix,
             stocks_as_of=(breadth_history[-1]["d"] if breadth_history else None),
         )
 

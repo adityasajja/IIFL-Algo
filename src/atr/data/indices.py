@@ -36,17 +36,18 @@ from loguru import logger
 
 INDEX_EXCHANGE = "NSEEQ"
 NIFTY_50 = "NIFTY 50"
+INDIA_VIX = "INDIA VIX"
 COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
 
 # instrumentId values published in INDICES.json, used only if that file can't be
 # fetched and no copy is cached. They are exchange-assigned and do not change.
-_KNOWN_IDS = {NIFTY_50: "999920000"}
+_KNOWN_IDS = {NIFTY_50: "999920000", INDIA_VIX: "999920019"}
 
 # A cached index older than this is not shown as "the latest": the stock data it
 # would sit beside is newer, and a stale level is worse than the ETF's fresh one.
 MAX_STALE_DAYS = 5
 
-_PUBLIC_SYMBOLS = {NIFTY_50: "^NSEI"}
+_PUBLIC_SYMBOLS = {NIFTY_50: "^NSEI", INDIA_VIX: "^INDIAVIX"}
 _PUBLIC_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 
 
@@ -87,8 +88,8 @@ def synced_today(data_root: Path, name: str = NIFTY_50) -> bool:
         return False
 
 
-def instrument_id(data_root: Path, base_url: str, name: str = NIFTY_50) -> str:
-    """The exchange id for an index: cached contract file, then the public one."""
+def _contract_rows(data_root: Path, base_url: str) -> list[dict[str, Any]]:
+    """The index contract list: the cached copy, else the public file."""
     cache = Path(data_root) / "indices_contract.json"
     rows: list[dict[str, Any]] = []
     if cache.exists():
@@ -106,12 +107,37 @@ def instrument_id(data_root: Path, base_url: str, name: str = NIFTY_50) -> str:
             cache.write_text(json.dumps(rows), encoding="utf8")
         except Exception as exc:  # noqa: BLE001
             logger.warning("could not fetch INDICES.json: {}", exc)
-    for row in rows:
+    return rows
+
+
+def _contract_row(data_root: Path, base_url: str, name: str) -> dict[str, Any] | None:
+    for row in _contract_rows(data_root, base_url):
         if str(row.get("underlyingInstrumentSymbol", "")).upper() == name.upper():
-            return str(row["instrumentId"])
+            return row
+    return None
+
+
+def instrument_id(data_root: Path, base_url: str, name: str = NIFTY_50) -> str:
+    """The exchange id for an index: cached contract file, then the known table."""
+    row = _contract_row(data_root, base_url, name)
+    if row is not None:
+        return str(row["instrumentId"])
     if name in _KNOWN_IDS:
         return _KNOWN_IDS[name]
     raise LookupError(f"no instrument id for index {name!r}")
+
+
+def index_exchanges(data_root: Path, base_url: str, name: str = NIFTY_50) -> list[str]:
+    """Exchanges to try for an index's candles, the contract's own first.
+
+    The contract file files India VIX under ``NSEFO`` while the Nifty sits under
+    ``NSEEQ``. Which one the history endpoint serves it from is not documented,
+    so both are tried rather than guessed.
+    """
+    row = _contract_row(data_root, base_url, name)
+    own = str(row.get("exchange", "")).upper() if row else ""
+    order = [own, INDEX_EXCHANGE, "NSEFO"] if name == INDIA_VIX else [own, INDEX_EXCHANGE]
+    return list(dict.fromkeys(e for e in order if e))
 
 
 def sync_index(
@@ -129,16 +155,32 @@ def sync_index(
     if not force and synced_today(data_root, name):
         return "skip"
     try:
-        iid = instrument_id(data_root, getattr(client, "base_url", "https://api.iiflcapital.com/v1"), name)
+        base_url = getattr(client, "base_url", "https://api.iiflcapital.com/v1")
+        iid = instrument_id(data_root, base_url, name)
         today = date.today()
-        raw = client.historical_data(
-            INDEX_EXCHANGE,
-            iid,
-            "1d",
-            (today - timedelta(days=days)).strftime("%d-%b-%Y"),
-            today.strftime("%d-%b-%Y"),
-        )
-        candles = raw["result"][0]["candles"]
+        candles: list[Any] = []
+        errors = 0
+        attempts = 0
+        start = (today - timedelta(days=days)).strftime("%d-%b-%Y")
+        end = today.strftime("%d-%b-%Y")
+        for exchange in index_exchanges(data_root, base_url, name):
+            for interval in ("1d", "15m"):
+                attempts += 1
+                try:
+                    raw = client.historical_data(exchange, iid, interval, start, end)
+                    got = raw["result"][0]["candles"]
+                except Exception as exc:  # noqa: BLE001 - try the next source
+                    errors += 1
+                    logger.info("index {} {} via {} failed: {}", name, interval, exchange, str(exc)[:120])
+                    continue
+                if got:
+                    # India VIX has no daily series at the broker, only intraday.
+                    candles = got if interval == "1d" else _daily_from_intraday(got)
+                    break
+            if candles:
+                break
+        if not candles and attempts and errors == attempts:
+            return "fail"  # every call raised (session expired, network): not "no data"
         frame = pd.DataFrame(candles, columns=COLUMNS)
         if frame.empty:
             return "empty"
@@ -148,6 +190,23 @@ def sync_index(
     except Exception as exc:  # noqa: BLE001 - a failed refresh keeps the old file
         logger.warning("index {} sync failed: {}", name, str(exc)[:160])
         return "fail"
+
+
+def _daily_from_intraday(candles: list[Any]) -> list[list[Any]]:
+    """Fold intraday candles into one bar per session: first open, extremes, last close."""
+    frame = pd.DataFrame(candles, columns=COLUMNS)
+    frame["ts"] = pd.to_datetime(frame["ts"])
+    frame = frame.sort_values("ts")
+    frame["day"] = frame["ts"].dt.normalize()
+    daily = frame.groupby("day").agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+    )
+    daily.index.name = "ts"
+    return daily.reset_index()[COLUMNS].values.tolist()
 
 
 def _write(data_root: Path, name: str, frame: pd.DataFrame, *, source: str) -> None:

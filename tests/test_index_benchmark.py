@@ -172,9 +172,9 @@ def test_no_session_uses_the_public_series_right_away(root, monkeypatch):
 
     service = MarketIntelService(data_root=root)
     service._maybe_refresh_index()
-    assert calls == [root]  # inline: the first load already gets the real index
+    assert calls == [root, root]  # inline, one per index (Nifty 50 and India VIX)
     service._maybe_refresh_index()
-    assert calls == [root]  # throttled, so a down network is not hammered
+    assert calls == [root, root]  # throttled, so a down network is not hammered
 
 
 def test_a_failed_broker_download_falls_back_to_the_public_series(root, monkeypatch):
@@ -188,4 +188,4 @@ def test_a_failed_broker_download_falls_back_to_the_public_series(root, monkeypa
     monkeypatch.setattr("threading.Thread.start", lambda self: self.run())
 
     MarketIntelService(data_root=root)._maybe_refresh_index()
-    assert public == [1]
+    assert public == [1, 1]  # one fallback per index: Nifty 50 and India VIX

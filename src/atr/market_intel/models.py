@@ -253,6 +253,8 @@ class MarketSummary:
     # Sectors whose last week turned against their last month (top 3 each).
     sectors_turning_up: list[str] = field(default_factory=list)
     sectors_fading: list[str] = field(default_factory=list)
+    # India VIX from its own cached series; None when it has not been downloaded.
+    vix: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)

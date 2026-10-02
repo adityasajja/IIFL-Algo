@@ -777,7 +777,11 @@ def _run_history(args) -> int:
         from atr.market_intel.service import DATA_ROOT
         from atr.services.broker_access import authed_client
 
-        print("nifty 50 index:", sync_index(authed_client(), DATA_ROOT))
+        from atr.data.indices import INDIA_VIX
+
+        _client = authed_client()
+        print("nifty 50 index:", sync_index(_client, DATA_ROOT))
+        print("india vix:", sync_index(_client, DATA_ROOT, INDIA_VIX))
         return 0
 
     frames = load_cached(args.exchange)
