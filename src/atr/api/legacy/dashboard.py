@@ -443,29 +443,35 @@ def _breadth_trend(exchange: str = "NSEEQ") -> dict[str, Any]:
     dates: list[str] = []
     sample = sorted(frames.items())[:_BREADTH_SAMPLE]
 
+    # The trend flag is "close > 20-day average > 50-day average", and a rolling
+    # mean at bar i only looks backwards, so one pass per symbol gives the flag for
+    # every one of the five sessions. Scoring each truncated window with
+    # `score_frame` computed RSI, ATR and the rest five times to throw them away.
+    from atr.strategy.indicators import sma
+
+    flags: dict[int, list[bool]] = {back: [] for back in range(5)}  # back -> up-flags
+    last_dates: dict[int, str | None] = {back: None for back in range(5)}
+    for _symbol, df in sample:
+        if df is None or len(df) < 61:
+            continue
+        close = df["close"].astype(float)
+        c = close.to_numpy()
+        m20 = sma(close, 20).to_numpy()
+        m50 = sma(close, 50).to_numpy()
+        n = len(c)
+        for back in range(5):
+            if n <= back + 60:
+                continue
+            i = n - 1 - back
+            flags[back].append(bool(c[i] > m20[i] > m50[i]))
+            if last_dates[back] is None:
+                last_dates[back] = _frame_last_date(df.iloc[: n - back] if back else df)
+
     for back in range(4, -1, -1):
-        up = total = 0
-        as_of: str | None = None
-        for _symbol, df in sample:
-            if df is None or len(df) <= back + 60:
-                continue
-            window = df.iloc[: len(df) - back] if back else df
-            try:
-                row = score_frame("_", window)
-            except Exception:  # noqa: BLE001 — thin/odd histories just don't count
-                continue
-            total += 1
-            if row.get("trend") == "UP":
-                up += 1
-            if as_of is None:
-                # The frame index is a RangeIndex; the real timestamp lives in
-                # the `ts` column. Reading `.index[-1].date()` silently returns
-                # "" (RangeIndex holds ints) — a plausible-looking empty string
-                # rather than an error.
-                as_of = _frame_last_date(window)
+        total = len(flags[back])
         if total:
-            series.append(round(up / total * 100.0, 1))
-            dates.append(as_of or "")
+            series.append(round(sum(flags[back]) / total * 100.0, 1))
+            dates.append(last_dates[back] or "")
 
     delta = (series[-1] - series[0]) if len(series) >= 2 else None
     result = {

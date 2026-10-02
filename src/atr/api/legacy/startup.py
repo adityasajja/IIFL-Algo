@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 
 
 
@@ -11,6 +12,10 @@ from atr.api.legacy.dashboard import _breadth_trend
 from atr.api.legacy.scanner import _SCAN_CACHE
 
 logger = logging.getLogger("atr.api")
+
+#: Set when the first Markets pass has finished (or failed), so the slower breadth
+#: warm-up can queue behind it instead of competing for the CPU.
+_MARKET_INTEL_WARMED = threading.Event()
 
 
 async def on_startup() -> None:
@@ -184,9 +189,15 @@ def _warm_setup_stats() -> None:
     whichever request first asks for it.
     """
     try:
+        import threading
+
         from atr.signals_stats import warm_setup_stats
 
-        warm_setup_stats(background=True)
+        # A 30-60s CPU job; held back so the pages a user opens first (markets,
+        # watchlist) are not competing with it for the first minute.
+        timer = threading.Timer(90.0, lambda: warm_setup_stats(background=True))
+        timer.daemon = True
+        timer.start()
     except Exception as exc:  # noqa: BLE001 — best effort, never fatal
         logger.warning("setup-stats warm-up could not start: %s", exc)
 
@@ -205,6 +216,8 @@ def _warm_market_intel() -> None:
             get_market_intel_service().compute_all()
         except Exception as exc:  # noqa: BLE001 - best effort, never fatal
             logger.warning("market intelligence warm-up failed: %s", exc)
+        finally:
+            _MARKET_INTEL_WARMED.set()
 
     threading.Thread(target=work, daemon=True, name="atr-market-intel-warm").start()
 
@@ -223,6 +236,9 @@ def _warm_breadth_cache() -> None:
         try:
             import time as _t
 
+            # Behind the Markets pass: both are CPU-bound Python, and run together
+            # each takes several times longer, so the page opened first waited on both.
+            _MARKET_INTEL_WARMED.wait(timeout=60)
             t0 = _t.monotonic()
             _breadth_trend("NSEEQ")
             logger.info("breadth cache warmed in %.1fs", _t.monotonic() - t0)

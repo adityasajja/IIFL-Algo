@@ -222,17 +222,48 @@ def warm_setup_stats(*, background: bool = True) -> None:
             from atr.alerts.intelligent import load_intelligent_config
             from atr.data.history import load_cached
 
+            import hashlib
+            import pickle
+
             t0 = time.monotonic()
             files = sorted(glob.glob("data/iifl_daily/NSEEQ/*.parquet"))[:_SAMPLE_SIZE]
             symbols = [os.path.splitext(os.path.basename(f))[0] for f in files]
-            frames = load_cached("NSEEQ", symbols=symbols)
             cfg = load_intelligent_config()
-            stats = compute_setup_stats(frames, cfg)
+            # A ~30s replay whose inputs are the sampled files, the rules and this code:
+            # the same inputs give the same stats, so a restart reuses the stored ones.
+            h = hashlib.sha256(repr(cfg).encode())
+            for f in [*files, __file__]:
+                try:
+                    st = os.stat(f)
+                    h.update(f"{os.path.basename(f)}:{st.st_mtime_ns}:{st.st_size}".encode())
+                except OSError:
+                    pass
+            key = h.hexdigest()
+            store = os.path.join("data", "panel", "setup_stats.pkl")
+            stats = None
+            try:
+                with open(store, "rb") as fh:
+                    stored_key, stored = pickle.load(fh)
+                if stored_key == key:
+                    stats = stored
+            except Exception:  # noqa: BLE001 - missing or from other code: recompute
+                pass
+            frames: dict = {}
+            if stats is None:
+                frames = load_cached("NSEEQ", symbols=symbols)
+                stats = compute_setup_stats(frames, cfg)
+                try:
+                    os.makedirs(os.path.dirname(store), exist_ok=True)
+                    with open(store + ".tmp", "wb") as fh:
+                        pickle.dump((key, stats), fh, protocol=pickle.HIGHEST_PROTOCOL)
+                    os.replace(store + ".tmp", store)
+                except Exception:  # noqa: BLE001 - an optimisation only
+                    pass
             _STATS_CACHE = stats
             _STATS_AT = time.monotonic()
             logger.info(
                 "setup stats refreshed: {} setups from {} symbols in {:.1f}s",
-                len(stats), len(frames), time.monotonic() - t0,
+                len(stats), len(frames) or len(symbols), time.monotonic() - t0,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("setup-stat warm-up failed: {}", exc)

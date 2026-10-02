@@ -289,6 +289,16 @@ class MarketIntelService:
                 return self._cached_summary, self._cached_sectors, self._cached_stocks
             cfg = self.regime_config
 
+        # Everything below is a pure function of the cached bars, the universe files
+        # and this code, so a stored result with the same fingerprint is the answer.
+        fingerprint = self._fingerprint()
+        stored = self._load_persisted(fingerprint)
+        if stored is not None:
+            with self._lock:
+                self._cached_summary, self._cached_sectors, self._cached_stocks = stored
+                self._cache_time = time.time()
+            return stored
+
         sector_map = self.get_sector_map()
         universe_symbols = self.get_universe_symbols()
         benchmark_frame, bench_provenance = self.get_benchmark_frame_and_provenance()
@@ -723,7 +733,59 @@ class MarketIntelService:
             self._cached_stocks = stock_contexts
             self._cache_time = time.time()
 
+        self._persist(fingerprint, (summary, sector_metrics_list, stock_contexts))
         return summary, sector_metrics_list, stock_contexts
+
+    # --------------------------------------------------------------------------
+    # Stored result: a restart should not redo a pass whose inputs have not changed
+    # --------------------------------------------------------------------------
+    @property
+    def _store_path(self) -> Path:
+        return self.data_root / "panel" / "market_intel.pkl"
+
+    def _fingerprint(self) -> str:
+        import hashlib
+
+        from atr.data import panel
+        from atr.data.indices import INDIA_VIX, NIFTY_50, index_path
+
+        h = hashlib.sha256()
+        h.update(repr(sorted(panel._scan(self.cache_dir).items())).encode())
+        files = [index_path(self.data_root, n) for n in (NIFTY_50, INDIA_VIX)]
+        if self.universe_dir.is_dir():
+            files += sorted(self.universe_dir.glob("ind_*list.csv"))
+        files += [Path(__file__), Path(__file__).with_name("models.py")]  # new code, new answer
+        for f in files:
+            try:
+                st = f.stat()
+                h.update(f"{f.name}:{st.st_mtime_ns}:{st.st_size}".encode())
+            except OSError:
+                h.update(f"{f.name}:missing".encode())
+        h.update(repr(self.regime_config).encode())
+        return h.hexdigest()
+
+    def _load_persisted(self, fingerprint: str):
+        import pickle
+
+        try:
+            with self._store_path.open("rb") as fh:
+                stored_fp, payload = pickle.load(fh)
+            return payload if stored_fp == fingerprint else None
+        except Exception:  # noqa: BLE001 - missing, corrupt or from other code: recompute
+            return None
+
+    def _persist(self, fingerprint: str, payload) -> None:
+        import os
+        import pickle
+
+        try:
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._store_path.with_suffix(".tmp")
+            with tmp.open("wb") as fh:
+                pickle.dump((fingerprint, payload), fh, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, self._store_path)
+        except Exception as exc:  # noqa: BLE001 - an optimisation, never an error
+            logger.debug("market intel result not stored: {}", exc)
 
     # --------------------------------------------------------------------------
     # Regime Derivation from Raw Measurements
