@@ -23,7 +23,9 @@ friction: the sentence is what shows up in the audit trail when someone asks why
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, time
 from typing import Any
 
 from atr.appdb.engine import AppDatabase, get_app_db
@@ -81,6 +83,31 @@ class RiskStateSnapshot:
     def live(self) -> bool:
         return self.execution_mode == "live"
 
+    def live_protections(self) -> dict[str, Any]:
+        """What guards a LIVE order beyond the limits the operator set, and what is still unset.
+
+        ``defaults_applied`` are limits the platform imposes because none was configured, so the
+        interface can say "capped at ₹2,00,000 by default" instead of letting a person assume there
+        is no cap, or that there is none. ``warnings`` are things a careful desk would want set
+        before real orders: they do not block, they are shown.
+        """
+        from atr.config.settings import get_settings
+
+        settings = get_settings()
+        applied: dict[str, float] = {}
+        cap = self.limits.max_order_notional
+        default_cap = float(settings.live_default_max_order_notional)
+        if default_cap > 0 and (cap is None or cap == float("inf")):
+            applied["max_order_notional"] = default_cap
+        warnings: list[str] = []
+        if self.limits.max_daily_loss is None:
+            warnings.append("no_daily_loss_limit")
+        return {
+            "defaults_applied": applied,
+            "warnings": warnings,
+            "market_hours_enforced": bool(settings.enforce_market_hours),
+        }
+
     def as_dict(self) -> dict[str, Any]:
         """The shape the dashboard reads. ``limits`` is flattened for the UI."""
         return {
@@ -92,7 +119,44 @@ class RiskStateSnapshot:
             "changed_by": self.changed_by,
             "reason": self.reason,
             "limits": _limits_as_dict(self.limits),
+            "live_protections": self.live_protections(),
         }
+
+
+#: NSE cash session, with the pre-open that orders may be entered in.
+_ORDER_WINDOW = (time(9, 0), time(15, 30))
+
+
+def nse_accepting_orders(now: datetime) -> bool:
+    """True on an NSE trading day between 09:00 and 15:30 IST."""
+    from atr.market_calendar import IST, NSEMarketCalendar
+
+    local = now.astimezone(IST) if now.tzinfo else now.replace(tzinfo=IST)
+    if not NSEMarketCalendar().is_trading_day(local.date()):
+        return False
+    return _ORDER_WINDOW[0] <= local.time() <= _ORDER_WINDOW[1]
+
+
+@dataclass
+class LiveGuards:
+    """Checks that apply to LIVE orders only, in front of the limits gate.
+
+    Paper orders pass straight through: a practice order outside market hours harms nobody.
+    """
+
+    inner: Any
+    enforce_market_hours: bool = True
+    now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+
+    def __call__(self, draft: Any) -> Any:
+        from atr.execution.oms import RiskDecision
+
+        live = str(getattr(draft, "mode", "")).upper() == "LIVE"
+        if live and self.enforce_market_hours and not nse_accepting_orders(self.now()):
+            return RiskDecision.reject(
+                "the market is closed: NSE takes orders on trading days, 09:00 to 15:30 IST", "market_closed"
+            )
+        return self.inner(draft)
 
 
 def _limits_as_dict(limits: RiskLimits) -> dict[str, Any]:
@@ -289,7 +353,9 @@ class RiskStateService:
             return self._snapshot_in(session)
 
     # ------------------------------------------------------------------- gate
-    def gate(self, *, portfolio: Any = None, instruments: Any = None) -> Any:
+    def gate(
+        self, *, portfolio: Any = None, instruments: Any = None, now: Callable[[], datetime] | None = None
+    ) -> Any:
         """Build the OMS risk gate from the current state.
 
         Returns a :class:`~atr.execution.oms.LimitsRiskGate` over a
@@ -309,10 +375,21 @@ class RiskStateService:
         # The kill switch is read at gate-construction time; the OMS builds a gate
         # per request, so engaging it takes effect on the next order.
         limits.kill_switch = snapshot.kill_switch
-        return LimitsRiskGate(
+        # In live mode a missing order cap is not "no cap": a mistyped quantity must not be unbounded.
+        if snapshot.live:
+            for name, value in snapshot.live_protections()["defaults_applied"].items():
+                setattr(limits, name, value)
+        from atr.config.settings import get_settings
+
+        gate = LimitsRiskGate(
             engine=RiskEngine(limits=limits),
             portfolio=portfolio,
             instruments=instruments,
+        )
+        return LiveGuards(
+            inner=gate,
+            enforce_market_hours=bool(get_settings().enforce_market_hours),
+            **({"now": now} if now else {}),
         )
 
 

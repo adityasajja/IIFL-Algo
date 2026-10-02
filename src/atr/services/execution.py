@@ -399,6 +399,7 @@ class BrokerPortfolio:
         self._broker = broker
         self._by_symbol: dict[str, Any] = {}
         self._loaded = False
+        self.readable = True
 
     def _load(self) -> None:
         if self._loaded:
@@ -408,7 +409,19 @@ class BrokerPortfolio:
                 self._by_symbol[position.instrument.symbol] = position
         except Exception:  # noqa: BLE001 - an unreadable book is "no positions known"
             logger.exception("could not read positions from the broker")
+            self.readable = False
         self._loaded = True
+
+    def day_pnl(self) -> float | None:
+        """Today's P&L (realised + open) from the broker's own day positions, or ``None`` if
+        the book could not be read — unknown is not zero."""
+        self._load()
+        if not self.readable:
+            return None
+        return sum(
+            float(p.realized_pnl) + float(p.unrealized_pnl)
+            for p in self._by_symbol.values()
+        )
 
     def position(self, symbol: str) -> Any:
         self._load()

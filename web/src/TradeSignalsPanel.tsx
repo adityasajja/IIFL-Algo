@@ -45,6 +45,7 @@ import { humanizeSentence } from "./lib/format";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
 import { Chip } from "./components/ui/chip";
+import { useOrderConfirm } from "./components/ui/order-confirm";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ function PendingRow({
   onOpenChart,
 }: {
   sig: TradeSignal;
-  onExecute: (id: string) => Promise<void>;
+  onExecute: (sig: TradeSignal) => Promise<void>;
   onSkip: (id: string) => Promise<void>;
   onOpenChart?: (symbol: string) => void;
 }) {
@@ -138,7 +139,7 @@ function PendingRow({
     setExecuting(true);
     setErr(null);
     try {
-      await onExecute(sig.id);
+      await onExecute(sig);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -504,8 +505,24 @@ export default function TradeSignalsPanel({
     }
   };
 
-  const handleExecute = async (id: string) => {
-    await executeTradeSignal(id);
+  // Executing places a REAL entry order plus its stop-loss and target, so it is confirmed first. The
+  // server already keys each leg to the signal, so a double click cannot place the bracket twice.
+  const confirmOrder = useOrderConfirm();
+  const handleExecute = async (sig: TradeSignal) => {
+    const ok = await confirmOrder.ask({
+      symbol: sig.symbol,
+      side: sig.action,
+      quantity: sig.quantity,
+      orderType: "LIMIT",
+      price: sig.entry_price,
+      priceSource: "limit",
+      alsoDoes: [
+        `Places a stop-loss at \u20B9${sig.stop_loss.toLocaleString("en-IN")}`,
+        `Places a target at \u20B9${sig.target.toLocaleString("en-IN")}`,
+      ],
+    });
+    if (!ok) return;
+    await executeTradeSignal(sig.id);
     await refresh();
   };
 
@@ -541,6 +558,7 @@ export default function TradeSignalsPanel({
 
   return (
     <div className="space-y-5">
+      {confirmOrder.dialog}
 
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">

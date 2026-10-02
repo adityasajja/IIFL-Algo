@@ -85,6 +85,7 @@ import {
 import { Callout } from "./components/ui/stat";
 import { DataPill } from "./DataTrust";
 import { NAV_GROUPS, PAGES, SUBS, normaliseSub, parseRoute, type Tab } from "./lib/nav";
+import { useRiskContext } from "./lib/useRiskContext";
 import { useSession } from "./lib/useSession";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
@@ -199,6 +200,8 @@ function SignalsTabContainer({
 // ─── Live: your broker account, your limits, the kill switch ──────────────────
 function TradingTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (s: string) => void }) {
   const ex = useExecutionMode();
+  const risk = useRiskContext();
+  const unset = risk.warnings.includes("no_daily_loss_limit");
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -206,6 +209,23 @@ function TradingTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (
         <ModePill ex={ex} />
       </div>
       <ModeDetails ex={ex} />
+      {risk.live && (risk.capIsDefault || unset) ? (
+        <Callout tone="warn" title="Real orders are on, and your limits are not set">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              {risk.capIsDefault && risk.maxOrderNotional != null
+                ? `Each order is capped at \u20B9${risk.maxOrderNotional.toLocaleString("en-IN")} by default. `
+                : ""}
+              {unset ? "No daily loss limit is set." : ""}
+            </span>
+            {sub !== "control-center" ? (
+              <Button size="xs" variant="outline" onClick={() => onSubChange("control-center")}>
+                Set limits
+              </Button>
+            ) : null}
+          </div>
+        </Callout>
+      ) : null}
       {sub === "control-center" && <PortfolioControlCenter />}
       {sub === "portfolio" && <PortfolioPanel />}
     </div>

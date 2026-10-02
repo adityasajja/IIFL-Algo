@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     #: non-zero value on API market orders since 2026-04-01.
     iifl_market_protection_percent: float = 0.5
 
+    # ---------------- Live-order safety ----------------
+    #: A ceiling on the value of ONE live order, applied when the operator has not set their own
+    #: ``max_order_notional``. With no limit configured a live order of any size used to go through,
+    #: which makes a mistyped quantity unbounded. This is a floor of protection, not a recommendation:
+    #: set a real limit under Risk & limits and it replaces this. ``0`` or less turns it off.
+    live_default_max_order_notional: float = 200_000.0
+    #: Refuse live orders when NSE is closed (weekends, holidays, outside 09:00-15:30 IST). Turn off
+    #: only if you deliberately place after-market orders.
+    enforce_market_hours: bool = True
+
     # Market data bridge (MQTT)
     bridge_host: str = "bridge.iiflcapital.com"
     bridge_port: int = 8883

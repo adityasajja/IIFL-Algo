@@ -33,6 +33,7 @@ import { ErrorBox, Hint } from "./components/ui/card";
 import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { Button } from "./components/ui/button";
+import { useOrderConfirm } from "./components/ui/order-confirm";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Badge, Stat, fmtNum } from "./components/ui/stat";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
@@ -822,7 +823,19 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
   const marginPct = availableMargin > 0 ? (marginRequired / availableMargin) * 100 : 0;
   const canAfford = marginRequired <= availableMargin || availableMargin === 0;
 
+  // A real order: confirmed first, with an id the server de-duplicates on so a double click cannot place two.
+  const confirmOrder = useOrderConfirm();
   async function submit() {
+    const ok = await confirmOrder.ask({
+      symbol: symbol.trim().toUpperCase(),
+      exchange: exchange.trim().toUpperCase(),
+      side,
+      quantity: Math.abs(qty),
+      orderType,
+      price: estimatedPrice > 0 ? estimatedPrice : null,
+      priceSource: isLimit && price ? "limit" : "last",
+    });
+    if (!ok) return;
     setState("loading");
     try {
       const res = await placeOrder({
@@ -831,10 +844,11 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
         quantity: side === "SELL" ? -Math.abs(qty) : Math.abs(qty),
         order_type: orderType,
         price: price === "" ? null : Number(price),
+        client_order_id: ok.clientOrderId,
       });
       setState("success");
       res.status === "rejected" ? sound.playReject() : sound.playFill();
-      toast({ title: `Order ${res.order_id} \u2192 ${res.status}`, description: res.reject_reason ?? `${symbol.trim().toUpperCase()} \u00d7 ${qty} ${orderType}`, status: res.status === "rejected" ? "error" : "success" });
+      toast({ title: `Order ${res.order_id} \u2192 ${res.status}${res.duplicate ? " (already placed)" : ""}`, description: res.reject_reason ?? `${symbol.trim().toUpperCase()} \u00d7 ${qty} ${orderType}`, status: res.status === "rejected" ? "error" : "success" });
     } catch (e) {
       setState("error"); sound.playReject();
       toast({ title: "Order failed", description: e instanceof Error ? e.message : String(e), status: "error" });
@@ -843,6 +857,7 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px] xl:grid-cols-[1fr_360px]">
+      {confirmOrder.dialog}
       {/* Left: Order Ticket */}
       <div className="space-y-4">
         {/* BUY / SELL toggle */}

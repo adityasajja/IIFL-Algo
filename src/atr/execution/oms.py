@@ -243,6 +243,17 @@ def idempotency_key_for(
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
+def manual_idempotency_key(*, user_id: str, client_order_id: str) -> str:
+    """The identity of one manual order, from an id the CLIENT made for it.
+
+    ``idempotency_key_for`` must not be used for a manual order (two real "buy 10" orders would
+    collide). The caller's own id is the only honest identity: the interface makes one per
+    confirmation, so a double click or a retried request sends the same id and gets the same order
+    back, while a second deliberate order gets a new id and is placed.
+    """
+    return hashlib.sha256(f"manual|{user_id.strip()}|{client_order_id.strip()}".encode()).hexdigest()
+
+
 def elapsed_ms(start: datetime, end: datetime) -> int:
     """Whole milliseconds between two naive-UTC timestamps, floored at zero."""
     return max(0, int((end - start).total_seconds() * 1000))
@@ -415,6 +426,9 @@ class LimitsRiskGate:
             )
 
         limits = getattr(self.engine, "limits", None)
+        daily = self._daily_loss_check(draft, order, limits)
+        if daily is not None:
+            return daily
         needs_price = _has_finite_limit(
             getattr(limits, "max_order_notional", None)
         ) or _has_finite_limit(getattr(limits, "max_position_notional", None))
@@ -429,6 +443,33 @@ class LimitsRiskGate:
                 "unpriceable_order",
             )
         return RiskDecision.ok()
+
+    def _daily_loss_check(self, draft: OrderDraft, order: Any, limits: Any) -> RiskDecision | None:
+        """Refuse new risk once today's loss reaches ``max_daily_loss``. Exits stay allowed;
+        an unreadable book with a limit set is refused (fail closed)."""
+        limit = getattr(limits, "max_daily_loss", None)
+        day_pnl = getattr(self.portfolio, "day_pnl", None)
+        if not _has_finite_limit(limit) or day_pnl is None:
+            return None
+        try:
+            if self.engine._is_risk_reducing(order, self.portfolio):
+                return None
+        except Exception:  # noqa: BLE001 - cannot classify, so treat as new risk
+            pass
+        pnl = day_pnl()
+        if pnl is None:
+            return RiskDecision.reject(
+                "today's P&L could not be read from the broker, so the daily loss limit "
+                "cannot be checked — refusing new risk",
+                "daily_loss_unknown",
+            )
+        if -pnl >= float(limit):
+            return RiskDecision.reject(
+                f"daily loss {-pnl:,.2f} has reached the limit {float(limit):,.2f}; "
+                "only exits are allowed",
+                "daily_loss_limit",
+            )
+        return None
 
     def _last_price(self, draft: OrderDraft) -> float:
         """The price the engine would use, read the same way it reads it."""

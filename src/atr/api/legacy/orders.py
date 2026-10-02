@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 from atr.api.legacy.common import _append_audit
@@ -30,6 +30,9 @@ class OrderRequest(BaseModel):
     price: float | None = None
     product: str | None = None
     tag: str | None = None
+    #: Made by the client for each confirmed order. Sending the same id twice (a double click, a
+    #: retried request) returns the first order instead of placing a second one.
+    client_order_id: str | None = Field(default=None, min_length=8, max_length=64)
 
 
 @router.get("/positions")
@@ -65,7 +68,7 @@ def place_order(request: OrderRequest, http_request: Request) -> dict[str, Any]:
     stay open; the routes that can move money now require the caller to be
     identified, which is also what makes the per-account kill switch meaningful.
     """
-    from atr.execution.oms import OrderDraft
+    from atr.execution.oms import OrderDraft, manual_idempotency_key
     from atr.services.execution import (
         BrokerPortfolio,
         ExecutionService,
@@ -99,8 +102,13 @@ def place_order(request: OrderRequest, http_request: Request) -> dict[str, Any]:
         ),
         venue=iifl_venue(broker),
     )
+    key = (
+        manual_idempotency_key(user_id=principal.user_id, client_order_id=request.client_order_id)
+        if request.client_order_id
+        else None
+    )
     try:
-        placed = service.place(draft)
+        placed = service.place(draft, idempotency_key=key)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except VenueError as exc:
@@ -117,4 +125,6 @@ def place_order(request: OrderRequest, http_request: Request) -> dict[str, Any]:
         "broker_order_id": placed.broker_order_id,
         "status": placed.status,
         "reject_reason": placed.reject_reason,
+        # True when this was a repeat of an order already placed: nothing new was sent.
+        "duplicate": placed.duplicate,
     }

@@ -465,3 +465,7 @@ commit message.
 
 Reviewing a UI change? Ask: does it use tokens, an existing component, and the spacing scale? Does it
 look right in light and dark? Does it handle loading, empty and error? Is anything colour-only?
+
+## Real orders
+
+Every order that can reach a broker goes through `useOrderConfirm()` (`components/ui/order-confirm.tsx`): it shows notional, blockers and warnings, and sends a `client_order_id` so a double-click cannot place two orders. Never call `placeOrder` directly from a button.

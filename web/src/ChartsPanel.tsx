@@ -45,6 +45,7 @@ import { evaluatePineScript, parsePineInputs, PINE_PRESETS, type PineSeriesResul
 import { setVisibleInterval } from "./lib/visibleInterval";
 import { useChartWatchlist } from "./lib/useChartWatchlist";
 import { shortDay } from "./lib/track-view";
+import { useOrderConfirm } from "./components/ui/order-confirm";
 
 type BarTime = string | UTCTimestamp;
 
@@ -916,28 +917,47 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     };
   }, [candles, model, theme, showRibbon, showEMA200, showBB, showRSI, showVolume, timeframe, pineScript, pineInputs, pineStyles]);
 
-  // Quick Order Action
+  // Quick order: a REAL order, so it is confirmed first, cannot be sent without a price, and cannot be
+  // sent twice (the confirmation's id is what the server de-duplicates on).
+  const confirmOrder = useOrderConfirm();
+  const placing = useRef(false);
   const handleQuickOrder = async (isBuy: boolean) => {
+    if (placing.current) return;
     const lastPrice = hoverData?.close ?? candles[candles.length - 1]?.close ?? 0;
+    const side = isBuy ? "BUY" : "SELL";
+    const ok = await confirmOrder.ask({
+      symbol,
+      exchange: "NSEEQ",
+      side,
+      quantity: 1,
+      orderType: "MARKET",
+      price: lastPrice > 0 ? lastPrice : null,
+      priceSource: cacheAsOf !== null ? "cache" : "last",
+    });
+    if (!ok) return;
+    placing.current = true;
     try {
-      await placeOrder({
+      const res = await placeOrder({
         symbol,
         exchange: "NSEEQ",
         quantity: isBuy ? 1 : -1,
         order_type: "MARKET",
         price: lastPrice,
+        client_order_id: ok.clientOrderId,
       });
-      toast({
-        title: `${isBuy ? "BUY" : "SELL"} Order Executed`,
-        description: `1 unit of ${symbol} @ ₹${lastPrice}`,
-        status: "success",
-      });
+      if (String(res.status).toLowerCase() === "rejected") {
+        toast({ title: `${side} order refused`, description: res.reject_reason ?? "The risk checks refused it.", status: "error" });
+      } else {
+        toast({
+          title: res.duplicate ? "Already placed" : `${side} order sent`,
+          description: `1 unit of ${symbol.replace("-EQ", "")}, ${String(res.status).toLowerCase()}`,
+          status: "success",
+        });
+      }
     } catch (e) {
-      toast({
-        title: "Order Failed",
-        description: e instanceof Error ? e.message : String(e),
-        status: "error",
-      });
+      toast({ title: "Order failed", description: e instanceof Error ? e.message : String(e), status: "error" });
+    } finally {
+      placing.current = false;
     }
   };
 
@@ -1016,6 +1036,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               size="xs"
               variant="outline"
               className="border-loss/40 text-loss hover:border-loss hover:bg-loss/10"
+              disabled={currentPrice <= 0}
+              title={currentPrice <= 0 ? "No price yet" : "Sell 1 at market (asks first)"}
               onClick={() => void handleQuickOrder(false)}
             >
               <span>Sell</span>
@@ -1025,6 +1047,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               size="xs"
               variant="outline"
               className="border-gain/40 text-gain hover:border-gain hover:bg-gain/10"
+              disabled={currentPrice <= 0}
+              title={currentPrice <= 0 ? "No price yet" : "Buy 1 at market (asks first)"}
               onClick={() => void handleQuickOrder(true)}
             >
               <span>Buy</span>
@@ -1767,6 +1791,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           </div>
         </div>
       </div>
+
+      {confirmOrder.dialog}
 
       {/* ========================================================================= */}
       {/* TRADINGVIEW DYNAMIC INDICATOR SETTINGS MODAL */}

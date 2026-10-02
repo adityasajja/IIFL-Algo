@@ -142,6 +142,8 @@ export interface OrderRequest {
   price?: number | null;
   product?: string | null;
   tag?: string | null;
+  /** Made once per confirmation: the same id twice returns the first order instead of a second. */
+  client_order_id?: string;
 }
 
 export interface OrderResponse {
@@ -149,6 +151,8 @@ export interface OrderResponse {
   broker_order_id: string | null;
   status: string;
   reject_reason: string | null;
+  /** True when this repeated an order already placed: nothing new was sent. */
+  duplicate?: boolean;
 }
 
 export const getHealth = () => req<Health>("/health");
@@ -1196,6 +1200,23 @@ export interface ExecutionMode {
 }
 
 export const getExecutionMode = () => req<ExecutionMode>("/risk/execution-mode");
+
+/** The kill switch, mode and limits, and what guards a live order beyond the limits that are set. */
+export interface RiskState {
+  kill_switch: boolean;
+  execution_mode: "paper" | "live";
+  live: boolean;
+  limits: Record<string, unknown>;
+  live_protections?: {
+    /** Limits the platform imposes because none was configured, e.g. `{ max_order_notional: 200000 }`. */
+    defaults_applied: Record<string, number>;
+    /** Things worth setting before real orders, e.g. `no_daily_loss_limit`. */
+    warnings: string[];
+    market_hours_enforced: boolean;
+  };
+}
+
+export const getRiskState = () => v1<RiskState>("/risk/state");
 
 /** Switching to `live` requires a reason — the backend rejects it otherwise. */
 export const setExecutionMode = (mode: "paper" | "live", reason: string) =>

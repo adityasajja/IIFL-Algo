@@ -37,6 +37,9 @@ def fresh_env(tmp_path, monkeypatch):
     # the first time the ledger became a source.
     monkeypatch.setenv("ATR_DATA_ROOT", str(tmp_path / "data"))
     monkeypatch.setenv("ATR_SECRET_KEY", "unit-test-key")
+    # Live-order tests place orders at whatever time the suite runs; the market-hours guard has its own
+    # tests that inject a clock.
+    monkeypatch.setenv("ENFORCE_MARKET_HOURS", "false")
     # The audit file sink defaults to <repo>/data/audit: without this, every test run appended to the
     # operator's real audit log.
     monkeypatch.setenv("ATR_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
