@@ -133,6 +133,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ------------------------------------------------------------------
     sub.add_parser("backup", help="write a backup of the database and state now")
+    sub.add_parser("data-check", help="scan the price history for unadjusted splits and gaps")
+    restore = sub.add_parser("restore", help="restore a backup (stop the server first)")
+    restore.add_argument("archive", help="path to an atr-backup-*.zip")
+    restore.add_argument("--force", action="store_true", help="replace the existing database (kept as app.db.before-restore)")
 
     hist = sub.add_parser("history", help="bulk history cache + full-market scan")
     hist.add_argument("action", choices=["sync", "scan-all", "refresh-eod"])
@@ -763,6 +767,42 @@ def _run_backup(args) -> int:
 
     settings = get_settings()
     print(backup_now(DATA_ROOT, settings.backup_dir, keep=settings.backup_keep))
+    return 0
+
+
+def _run_data_check(args) -> int:
+    import pandas as pd
+
+    from atr.backtest.validity import gap_findings, jump_findings
+    from atr.data.eod_refresh import cache_dir
+    from atr.market_intel.service import DATA_ROOT
+
+    frames = {}
+    for path in sorted(cache_dir(DATA_ROOT).glob("*.parquet")):
+        frame = pd.read_parquet(path)
+        frames[path.stem] = frame.set_index(pd.to_datetime(frame["ts"]))
+    jumps, gaps = jump_findings(frames), gap_findings(frames)
+    print(f"{len(frames)} symbols scanned")
+    print(f"one-day moves over 35% (likely unadjusted splits/bonuses): {len(jumps)}")
+    for item in jumps:
+        print("  ", item)
+    print(f"gaps over 12 days: {len(gaps)}")
+    for item in gaps:
+        print("  ", item)
+    return 1 if jumps or gaps else 0
+
+
+def _run_restore(args) -> int:
+    from pathlib import Path
+
+    from atr.infra.backup import restore_backup
+    from atr.market_intel.service import DATA_ROOT
+
+    try:
+        print(restore_backup(Path(args.archive), DATA_ROOT, force=args.force))
+    except (OSError, ValueError) as exc:
+        print(f"restore failed: {exc}")
+        return 1
     return 0
 
 
@@ -1658,6 +1698,8 @@ def main(argv: list[str] | None = None) -> int:
         "instruments": _run_instruments,
         "history": _run_history,
         "backup": _run_backup,
+        "restore": _run_restore,
+        "data-check": _run_data_check,
         "alerts": _run_alerts,
         "brief": _run_brief,
         "learn": _run_learn,

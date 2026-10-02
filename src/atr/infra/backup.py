@@ -87,3 +87,37 @@ def backup_now(
     removed = prune(destination, keep)
     logger.info("backup written: {} ({} old removed)", target.name, len(removed))
     return target
+
+
+def restore_backup(archive_path: Path, data_root: Path, *, force: bool = False) -> Path:
+    """Put a backup back under ``data_root``. The server must be stopped.
+
+    Refuses to overwrite an existing database unless ``force``; with ``force`` the current one is
+    first moved aside as ``app.db.before-restore`` so a wrong restore can be undone. Returns the
+    restored database path.
+    """
+    archive_path, data_root = Path(archive_path), Path(data_root)
+    if not archive_path.exists():
+        raise FileNotFoundError(f"no such backup: {archive_path}")
+    db = data_root / "app.db"
+    with zipfile.ZipFile(archive_path) as archive:
+        bad = archive.testzip()
+        if bad is not None:
+            raise ValueError(f"backup is corrupt (first bad file: {bad})")
+        names = archive.namelist()
+        if any(n.startswith(("/", "..")) or ".." in Path(n).parts for n in names):
+            raise ValueError("backup contains unsafe paths")
+        if "app.db" not in names:
+            raise ValueError("backup has no app.db")
+        if db.exists():
+            if not force:
+                raise FileExistsError(f"{db} exists; stop the server and pass force to replace it")
+            db.replace(db.with_name("app.db.before-restore"))
+            for suffix in ("-wal", "-shm"):
+                stale = db.with_name(db.name + suffix)
+                if stale.exists():
+                    stale.unlink()
+        data_root.mkdir(parents=True, exist_ok=True)
+        archive.extractall(data_root)
+    logger.info("restored {} into {}", archive_path.name, data_root)
+    return db

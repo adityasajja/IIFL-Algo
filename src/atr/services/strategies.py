@@ -160,7 +160,26 @@ class StrategyService:
         """The stocks the strategy research was run on, spelled the way the price feed resolves them."""
         from atr.research.hunt import stock_universe
 
-        return broker_safe(stock_universe(min_bars=1500))
+        # The research used long histories (about six years). A newer cache would otherwise return
+        # nothing and leave the starter with no stocks, so fall back to shorter histories.
+        for min_bars in (1500, 750, 250):
+            names = broker_safe(stock_universe(min_bars=min_bars))
+            if names:
+                return names
+        # A fresh install has only the broker's "-EQ" files (about a year each), which the research
+        # list skips. A short history is better than leaving the one-click starter with no stocks.
+        import pandas as pd
+
+        from atr.research import hunt
+
+        out: list[str] = []
+        for path in sorted(hunt.STOCKS.glob("*-EQ.parquet")):
+            try:
+                if len(pd.read_parquet(path, columns=["ts"])) >= 200:
+                    out.append(path.stem)
+            except Exception:  # noqa: BLE001 - a corrupt file is simply not offered
+                continue
+        return out
 
     # -------------------------------------------------------------------- read
     def list(self, user_id: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
