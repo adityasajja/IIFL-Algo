@@ -104,13 +104,20 @@ class SharedWindow:
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS calls (key TEXT NOT NULL, ts REAL NOT NULL)")
-            conn.execute("CREATE INDEX IF NOT EXISTS calls_key_ts ON calls (key, ts)")
+        for _ in range(50):
+            try:
+                with self._connect() as conn:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("CREATE TABLE IF NOT EXISTS calls (key TEXT NOT NULL, ts REAL NOT NULL)")
+                    conn.execute("CREATE INDEX IF NOT EXISTS calls_key_ts ON calls (key, ts)")
+                break
+            except sqlite3.OperationalError:
+                time.sleep(0.05)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._path, timeout=5.0, isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA synchronous = NORMAL")
         return conn
 
     def try_take(self, key: str, limit: int, clock: Callable[[], float]) -> float:
@@ -118,7 +125,9 @@ class SharedWindow:
         try:
             conn.execute("BEGIN IMMEDIATE")
             now = clock()  # read only once we hold the lock, so counted times are in commit order
-            conn.execute("DELETE FROM calls WHERE ts < ?", (now - 60.0,))  # housekeeping
+            # Run prune housekeeping probabilistically (~1 in 50 calls) to eliminate write overhead on hot path
+            if int(now * 100) % 50 == 0:
+                conn.execute("DELETE FROM calls WHERE ts < ?", (now - 60.0,))
             (count, oldest) = conn.execute(
                 "SELECT COUNT(*), MIN(ts) FROM calls WHERE key = ? AND ts >= ?", (key, now - 1.0)
             ).fetchone()

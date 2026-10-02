@@ -29,7 +29,7 @@ PRODUCT_NORMAL = "NORMAL"
 _ORDER_TYPE_MAP = {
     OrderType.MARKET: "MARKET",
     OrderType.LIMIT: "LIMIT",
-    OrderType.STOP: "SL",
+    OrderType.STOP: "SLM",
     OrderType.STOP_LIMIT: "SL",
 }
 
@@ -92,7 +92,10 @@ class IiflBroker(Broker):
             "product": str(product).upper(),
             "orderComplexity": str(params.get("orderComplexity", "REGULAR")).upper(),
             "orderType": _ORDER_TYPE_MAP[order.order_type],
-            "validity": str(params.get("validity", "DAY")).upper(),
+            # An explicit broker_param wins (BO/CO legs need their own), but
+            # the order's own TIF is the default — silently sending DAY for
+            # an IOC/FOK turns a kill-or-fill into a resting order.
+            "validity": str(params.get("validity", order.tif.value)).upper(),
         }
         if order.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and order.limit_price:
             payload["price"] = round(order.limit_price, 2)
@@ -146,19 +149,31 @@ class IiflBroker(Broker):
 
     def cancel_order(self, broker_order_id: str) -> bool:
         result = self.client.cancel_order(broker_order_id)
+        if not isinstance(result, dict):
+            return False
         status = str(_pick(result, "status", "Status", default="")).upper()
-        return status in ("OK", "SUCCESS", "0") or result is not None
+        return status in ("OK", "SUCCESS", "0")
 
     # ------------------------------------------------------------------
     def open_orders(self) -> list[Order]:
-        return [
-            self._order_from_row(row, self._instrument_for(row))
-            for row in self.client.order_book()
-        ]
+        orders = []
+        for row in self.client.order_book():
+            try:
+                orders.append(self._order_from_row(row, self._instrument_for(row)))
+            except ValueError as exc:
+                logger.warning("skipping corrupt order-book row: {}", exc)
+        return orders
 
     def positions(self) -> list[Position]:
+        rows = self.client.positions()
+        # The v4 endpoint wraps rows in {"status","result"}; iterating the
+        # envelope yields its keys ("status","result") as if they were rows,
+        # and every real position silently vanishes. Unwrap defensively —
+        # the client is fixed too, but two layers agreeing beats one hoping.
+        if isinstance(rows, dict):
+            rows = rows.get("result", [])
         out = []
-        for row in self.client.positions():
+        for row in rows or []:
             instrument = self._instrument_for(row)
             qty = float(
                 _pick(row, "netQuantity", "NetQuantity", "quantity", "Quantity", default=0) or 0
@@ -183,7 +198,11 @@ class IiflBroker(Broker):
     def last_price(self, instruments: list[Instrument]) -> dict[str, float]:
         legs = [(i.exchange.upper(), str(i.conid)) for i in instruments]
         quotes = self.client.market_quotes(legs)
+        if isinstance(quotes, dict):
+            quotes = quotes.get("result", [])
         out: dict[str, float] = {}
+        if not isinstance(quotes, list):
+            return out
         for instrument, row in zip(instruments, quotes, strict=False):
             ltp = _pick(row, "ltp", "LTP", "lastTradedPrice", "lastPrice")
             if ltp is not None:
@@ -200,11 +219,24 @@ class IiflBroker(Broker):
         the difference is usually settlement, and calling it critical would train
         an operator to ignore the alarm.
         """
+        rows = self.client.holdings()
+        if isinstance(rows, dict):
+            rows = rows.get("result", [])
+            if isinstance(rows, dict):
+                # Some v4 shapes group rows by asset class; collect every list.
+                grouped: list = []
+                for value in rows.values():
+                    if isinstance(value, list):
+                        grouped.extend(value)
+                rows = grouped
+        if not isinstance(rows, list):
+            return []
         out = []
-        for row in self.client.holdings():
+        for row in rows:
             instrument = self._instrument_for(row)
             quantity = float(
-                _pick(row, "quantity", "Quantity", "holdingQuantity", "totalQty", default=0) or 0
+                _pick(row, "quantity", "Quantity", "holdingQuantity", "totalQty",
+                      "totalQuantity", default=0) or 0
             )
             if quantity == 0:
                 continue
@@ -214,7 +246,8 @@ class IiflBroker(Broker):
                     instrument=instrument,
                     quantity=quantity,
                     avg_price=float(
-                        _pick(row, "averagePrice", "AveragePrice", "avgPrice", default=0) or 0
+                        _pick(row, "averagePrice", "AveragePrice", "avgPrice",
+                              "averageTradedPrice", default=0) or 0
                     ),
                     last_price=float(_pick(row, "ltp", "LTP", "lastPrice", default=0) or 0),
                     sellable_quantity=float(sellable) if sellable is not None else None,
@@ -266,9 +299,9 @@ class IiflBroker(Broker):
     def _instrument_for(self, row: dict) -> Instrument:
         """Resolve the instrument for a broker row, falling back to a synthetic
         one built from the row itself when the contract isn't in the master."""
-        symbol = str(_pick(row, "tradingSymbol", "TradingSymbol", "symbol", default="?"))
+        symbol = str(_pick(row, "tradingSymbol", "TradingSymbol", "nseTradingSymbol", "symbol", default="?"))
         exchange = str(_pick(row, "exchange", "Exchange", default="NSEEQ")).upper()
-        instrument_id = _pick(row, "instrumentId", "InstrumentId")
+        instrument_id = _pick(row, "instrumentId", "InstrumentId", "nseInstrumentId")
         try:
             return self.master.find(symbol, exchange)
         except Exception:  # noqa: BLE001
@@ -288,10 +321,16 @@ class IiflBroker(Broker):
         filled = float(_pick(row, "filledQuantity", "FilledQuantity", default=0) or 0)
         avg = float(_pick(row, "averageTradedPrice", "AverageTradedPrice", default=0) or 0)
 
+        if qty <= 0:
+            # A row with no quantity is not a 1-share order — inventing one
+            # turns a corrupt feed row into a trade. Refuse it; open_orders
+            # skips refused rows.
+            raise ValueError(f"order row has no quantity: {row!r}")
+
         return Order(
             instrument=instrument,
             side=Side.BUY if side_text.startswith("B") else Side.SELL,
-            quantity=qty or 1,
+            quantity=qty,
             status=_STATUS_MAP.get(status_text, OrderStatus.SUBMITTED),
             filled_quantity=filled,
             avg_fill_price=avg,

@@ -100,6 +100,16 @@ def normalize_contract(row: dict, exchange: str) -> Instrument:
     multiplier = float(_pick(row, "multiplier", "Multiplier", "contractMultiplier",
                              "contractSize", default=0) or 0)
     strike = _pick(row, "strike", "StrikePrice", "strikePrice")
+    strike_value: float | None = None
+    if not _missing(strike):
+        try:
+            parsed = float(strike)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            parsed = float("nan")
+        # A literal "NaN" string in the file parses to nan, which never
+        # compares equal to anything — including the None that option
+        # matching expects for "no strike". Normalise it away.
+        strike_value = None if parsed != parsed else parsed
     option_type_raw = _pick(row, "optionType", "OptionType", "option_type")
 
     asset_class = _asset_class(ex, instrument_type)
@@ -108,6 +118,10 @@ def normalize_contract(row: dict, exchange: str) -> Instrument:
     else:
         multiplier = multiplier or 1.0
 
+    underlying_raw = _pick(row, "underlying", "Underlying", default="")
+    underlying_text = str(underlying_raw or "").strip().upper()
+    if underlying_text in ("", "NAN", "NONE", "NULL"):
+        underlying_text = ""
     option_type = None
     if option_type_raw:
         text = str(option_type_raw).upper()
@@ -126,9 +140,9 @@ def normalize_contract(row: dict, exchange: str) -> Instrument:
         min_quantity=lot_size if asset_class in (AssetClass.FUTURE, AssetClass.OPTION) else 1.0,
         quantity_step=lot_size if asset_class in (AssetClass.FUTURE, AssetClass.OPTION) else 1.0,
         expiry=_parse_expiry(_pick(row, "expiry", "ExpiryDate", "expiryDate", "Expiry")),
-        strike=float(strike) if strike not in (None, "") else None,
+        strike=strike_value,
         option_type=option_type,
-        underlying=str(_pick(row, "underlying", "Underlying", default="") or "").upper() or None,
+        underlying=underlying_text or None,
         conid=int(instrument_id),
         local_symbol=str(description or trading_symbol)[:64],
         trading_class=str(instrument_type or "")[:32] or None,

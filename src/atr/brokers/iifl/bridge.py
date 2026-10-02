@@ -135,14 +135,23 @@ class BridgeClient:
         self._subscribe_raw([f"{prefix}{t}" for t in topics])
 
     def _subscribe_raw(self, full_topics: list[str]) -> None:
-        if len(full_topics) > 1024:
-            raise ValueError("max 1024 topics per subscription request")
-        self._client.subscribe([(t, 0) for t in full_topics])
-        self._subscribed.update(full_topics)
+        if not full_topics:
+            return
+        # The broker allows a maximum of 1024 topics per SUBSCRIBE packet; chunk into safe batches
+        chunk_size = 1000
+        for i in range(0, len(full_topics), chunk_size):
+            chunk = full_topics[i : i + chunk_size]
+            self._client.subscribe([(t, 0) for t in chunk])
+            self._subscribed.update(chunk)
 
     def _unsubscribe_raw(self, full_topics: list[str]) -> None:
-        self._client.unsubscribe(full_topics)
-        self._subscribed.difference_update(full_topics)
+        if not full_topics:
+            return
+        chunk_size = 1000
+        for i in range(0, len(full_topics), chunk_size):
+            chunk = full_topics[i : i + chunk_size]
+            self._client.unsubscribe(chunk)
+            self._subscribed.difference_update(chunk)
 
     # Public subscription helpers; topics look like "nseeq/2885".
     def subscribe_feed(self, topics: list[str]) -> None:
@@ -202,7 +211,10 @@ class BridgeClient:
             # Re-subscribe all previously requested topics on reconnect
             if self._subscribed:
                 try:
-                    self._client.subscribe([(t, 0) for t in self._subscribed])
+                    all_sub = list(self._subscribed)
+                    for i in range(0, len(all_sub), 1000):
+                        chunk = all_sub[i : i + 1000]
+                        self._client.subscribe([(t, 0) for t in chunk])
                     logger.info("Bridge re-subscribed {} topics after connect", len(self._subscribed))
                 except Exception as e:
                     logger.warning("Could not re-subscribe topics on bridge connect: {}", e)

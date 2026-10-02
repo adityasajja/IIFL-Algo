@@ -6,7 +6,7 @@ import queue
 import threading
 from datetime import datetime
 
-import pandas as pd
+import polars as pl
 from loguru import logger
 
 from atr.brokers.iifl.auth import Session
@@ -114,9 +114,17 @@ class IiflHistoricalFeed(DataFeed):
     def instruments(self) -> dict[str, Instrument]:
         return self.instruments_map
 
-    def fetch(self) -> pd.DataFrame:
-        columns = ["ts", "symbol", "open", "high", "low", "close", "volume"]
-        frames = []
+    def fetch(self) -> pl.DataFrame:
+        schema = {
+            "ts": pl.Datetime,
+            "symbol": pl.Utf8,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        }
+        rows = []
         for symbol, inst in self.instruments_map.items():
             payload = self.client.historical_data(
                 exchange=inst.exchange,
@@ -125,15 +133,15 @@ class IiflHistoricalFeed(DataFeed):
                 from_date=self.from_date,
                 to_date=self.to_date,
             )
-            rows = _candles(payload)
-            logger.info("fetched {} {} candles for {}", len(rows), self.interval, symbol)
-            for raw in rows:
+            candles = _candles(payload)
+            logger.info("fetched {} {} candles for {}", len(candles), self.interval, symbol)
+            for raw in candles:
                 row = _candle_row(raw)
                 if row is None:
                     continue
-                frames.append(
+                rows.append(
                     {
-                        "ts": pd.to_datetime(row["ts"]),
+                        "ts": row["ts"],
                         "symbol": symbol,
                         "open": float(row["open"] or 0),
                         "high": float(row["high"] or 0),
@@ -142,9 +150,12 @@ class IiflHistoricalFeed(DataFeed):
                         "volume": float(row["volume"] or 0),
                     }
                 )
-        if not frames:
-            return pd.DataFrame(columns=columns)
-        return pd.DataFrame(frames).sort_values(["ts", "symbol"]).reset_index(drop=True)
+        if not rows:
+            return pl.DataFrame(schema=schema)
+        out = pl.DataFrame(rows)
+        if out.schema["ts"] == pl.Utf8:
+            out = out.with_columns(pl.col("ts").str.to_datetime(strict=False))
+        return out.sort(["ts", "symbol"])
 
     def load(self) -> list[MarketSnapshot]:
         if self._snapshots is None:
@@ -152,7 +163,7 @@ class IiflHistoricalFeed(DataFeed):
         return self._snapshots
 
     def save_parquet(self, path: str) -> None:
-        self.fetch().to_parquet(path, index=False)
+        self.fetch().write_parquet(path)
 
 
 class IiflLiveFeed:
@@ -172,23 +183,41 @@ class IiflLiveFeed:
         instruments: dict[str, Instrument],
         freq: str = "1min",
         maxsize: int = 10_000,
+        client: IiflClient | None = None,
     ) -> None:
         self.instruments = instruments
-        self._topics = {bridge_topic(i): sym for sym, i in instruments.items()}
+        # Index instruments live on prod/marketfeed/index/v1, everything else
+        # on prod/marketfeed/mw/v1. Subscribing an index token to the mw feed
+        # yields no ticks at all — a silent no-data failure.
+        self._topics = {
+            bridge_topic(i): sym
+            for sym, i in instruments.items()
+            if i.exchange.upper() != "INDICES"
+        }
+        self._index_topics = {
+            str(i.conid): sym
+            for sym, i in instruments.items()
+            if i.exchange.upper() == "INDICES" and i.conid is not None
+        }
         self._queues: dict[str, queue.Queue] = {}
         self._bridge: BridgeClient | None = None
         self._session = session
+        self._client = client
         self._snapshots: queue.Queue = queue.Queue(maxsize=maxsize)
         self._aggregators: dict[str, TickToBarAggregator] = {}
         self._bars_by_symbol: dict[str, Bar | None] = {}
         self._last_tick: dict[str, Tick] = {}
         self._lock = threading.Lock()
         self.freq = freq
+        self._stop_event = threading.Event()
+        self._poll_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     def start(self, subscribe_oi: bool = False) -> None:
+        self._stop_event.clear()
         self._bridge = BridgeClient(self._session)
         self._bridge.on_feed = self._on_feed
+        self._bridge.on_index = self._on_index
         self._bridge.on_error = lambda code, msg: logger.error("bridge error {}: {}", code, msg)
         self._bridge.connect()
 
@@ -196,6 +225,8 @@ class IiflLiveFeed:
             self._aggregators[symbol] = TickToBarAggregator(self.freq, on_bar=None)
 
         self._bridge.subscribe_feed(list(self._topics))
+        if self._index_topics:
+            self._bridge.subscribe_index(list(self._index_topics))
         if subscribe_oi:
             fno = [t for t, s in self._topics.items() if self.instruments[s].is_derivative]
             if fno:
@@ -203,27 +234,62 @@ class IiflLiveFeed:
         self._bridge.subscribe_order_updates()
         self._bridge.subscribe_trade_updates()
 
+        # If a client is provided, launch watchdog to poll REST quotes if bridge drops
+        if self._client:
+            self._poll_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+            self._poll_thread.start()
+
     def stop(self) -> None:
+        self._stop_event.set()
         if self._bridge:
             self._bridge.disconnect()
 
+    def _watchdog_loop(self) -> None:
+        """Polls REST quotes if the MQTT bridge becomes temporarily disconnected."""
+        import time
+
+        while not self._stop_event.is_set():
+            time.sleep(3.0)
+            if self._bridge and not self._bridge.is_connected and self._client:
+                try:
+                    legs = [(inst.exchange, str(inst.conid)) for inst in self.instruments.values() if inst.conid]
+                    if not legs:
+                        continue
+                    quotes = self._client.market_quotes(legs)
+                    rows = quotes if isinstance(quotes, list) else quotes.get("result", [])
+                    now_iso = datetime.now().isoformat()
+                    for q in rows:
+                        cid = str(q.get("instrumentId") or "")
+                        ltp = float(q.get("ltp") or 0.0)
+                        if ltp <= 0:
+                            continue
+                        for sym, inst in self.instruments.items():
+                            if str(inst.conid) == cid:
+                                aggregator = self._aggregators.get(sym)
+                                if aggregator:
+                                    completed = aggregator.update(now_iso, ltp, 0.0)
+                                    with self._lock:
+                                        self._last_tick[sym] = Tick(ts=now_iso, last=ltp)
+                                        self._bars_by_symbol[sym] = aggregator.current_bar()
+                                        if completed is not None:
+                                            self._snapshots.put(MarketSnapshot(ts=completed.ts, bars={sym: completed}))
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Bridge fallback polling error: {}", exc)
+
     # ------------------------------------------------------------------
-    def _on_feed(self, topic: str, feed) -> None:
-        symbol = self._topics.get(topic)
-        if symbol is None:
-            return
-        ts = feed.last_traded_time
+    def _ingest(self, symbol: str, ts, ltp: float, qty: float,
+                bid=None, ask=None) -> None:
         tick = Tick(
             ts=ts,
-            last=feed.ltp,
-            bid=feed.best_bid_price or None,
-            ask=feed.best_ask_price or None,
-            volume=feed.last_traded_quantity,
+            last=ltp,
+            bid=bid,
+            ask=ask,
+            volume=qty,
         )
         aggregator = self._aggregators.get(symbol)
         if aggregator is None:
             return
-        completed = aggregator.update(ts, feed.ltp, feed.last_traded_quantity)
+        completed = aggregator.update(ts, ltp, qty)
         with self._lock:
             self._last_tick[symbol] = tick
             self._bars_by_symbol[symbol] = aggregator.current_bar()
@@ -231,6 +297,41 @@ class IiflLiveFeed:
                 self._snapshots.put(
                     MarketSnapshot(ts=completed.ts, bars={symbol: completed})
                 )
+
+    def _on_feed(self, topic: str, feed) -> None:
+        symbol = self._topics.get(topic)
+        if symbol is None:
+            return
+        self._ingest(
+            symbol,
+            feed.last_traded_time,
+            feed.ltp,
+            feed.last_traded_quantity,
+            bid=feed.best_bid_price or None,
+            ask=feed.best_ask_price or None,
+        )
+
+    def _on_index(self, suffix: str, feed) -> None:
+        """Index ticks arrive on a separate feed with their own suffixes."""
+        symbol = self._index_topics.get(suffix)
+        if symbol is None:
+            # Fall back to matching by token: some suffixes carry the raw
+            # instrument id rather than the subscribed form.
+            for token, sym in self._index_topics.items():
+                if token in suffix or suffix in token:
+                    symbol = sym
+                    break
+        if symbol is None:
+            logger.debug("index tick for unknown suffix: {}", suffix)
+            return
+        self._ingest(
+            symbol,
+            feed.last_traded_time,
+            feed.ltp,
+            feed.last_traded_quantity,
+            bid=getattr(feed, "best_bid_price", None) or None,
+            ask=getattr(feed, "best_ask_price", None) or None,
+        )
 
     def get(self, timeout: float = 1.0) -> MarketSnapshot | None:
         try:

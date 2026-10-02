@@ -49,10 +49,11 @@ class Settings(BaseSettings):
     # Market data bridge (MQTT)
     bridge_host: str = "bridge.iiflcapital.com"
     bridge_port: int = 8883
-    #: Verify the bridge TLS certificate. The official IIFL BridgePy SDK
-    #: bypasses verification, so the default is False for compatibility — but
-    #: enabling it is recommended for any non-local deployment.
-    bridge_tls_verify: bool = False
+    #: Verify the bridge TLS certificate. Live market data and order/trade
+    #: updates flow over this connection with real-money implications, so
+    #: verification is on by default. Set ``BRIDGE_TLS_VERIFY=false`` only
+    #: for a local MITM-debugging session, never in production.
+    bridge_tls_verify: bool = True
 
     # ---------------- Database (Postgres + TimescaleDB) ----------------
     db_host: str = "localhost"
@@ -121,6 +122,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     fast2sms_api_key: str = ""  # SMS slot: paste key to activate real SMS
+    discord_webhook_url: str = ""
+    slack_webhook_url: str = ""
     alerts_poll_sec: int = 300
 
     @property

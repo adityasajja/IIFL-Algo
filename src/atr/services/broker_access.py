@@ -23,9 +23,48 @@ how a write path ends up with a client nobody gated.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 logger = logging.getLogger("atr.services.broker_access")
+
+# One IiflClient (and its httpx.Client/connection pool) *per worker thread*,
+# reused across that thread's requests. Read endpoints are polled every few
+# seconds during market hours; building a fresh IiflClient per request meant a
+# fresh TCP+TLS+HTTP2 handshake to IIFL on every single poll instead of reusing
+# a keep-alive socket.
+#
+# A single client shared across *all* threads was tried first and reverted: an
+# HTTP/2 stream reset (or any hard transport error) on one thread's request can
+# make httpx close the whole connection pool out from under every other thread
+# mid-request, which surfaced as concurrent requests failing with "the client
+# has been closed" under real load. One client per thread keeps the handshake
+# reuse — each thread in FastAPI's request threadpool settles on its own
+# long-lived client — without any thread ever touching another's transport.
+_local = threading.local()
+
+
+def _build_client() -> Any:
+    from atr.brokers.iifl.auth import SessionStore
+    from atr.brokers.iifl.client import IiflClient
+    from atr.config.settings import get_settings
+
+    settings = get_settings()
+    return IiflClient(
+        app_key=settings.iifl_app_key,
+        app_secret=settings.iifl_app_secret,
+        base_url=settings.iifl_base_url,
+        session_store=SessionStore(settings.iifl_session_cache),
+    )
+
+
+def _get_shared_client() -> Any:
+    """This thread's client, (re)built if it's missing or was closed out from under it."""
+    client = getattr(_local, "client", None)
+    if client is None or client.is_closed:
+        client = _build_client()
+        _local.client = client
+    return client
 
 
 class BrokerUnavailable(RuntimeError):
@@ -42,22 +81,16 @@ class BrokerUnavailable(RuntimeError):
 
 
 def authed_client() -> Any:
-    """An IIFL client with a restored session. Works in any environment.
+    """This thread's IIFL client, with its session refreshed from disk. Works in
+    any environment.
 
     Read-only endpoints use this: positions, holdings, funds and the order book do
-    not change anything, so they do not need the paper/live gate.
+    not change anything, so they do not need the paper/live gate. The client (and
+    its underlying connection pool) is kept per-thread — see
+    :func:`_get_shared_client` — so repeat calls from the same worker thread only
+    re-read the small cached session file, not rebuild the HTTP transport.
     """
-    from atr.brokers.iifl.auth import SessionStore
-    from atr.brokers.iifl.client import IiflClient
-    from atr.config.settings import get_settings
-
-    settings = get_settings()
-    client = IiflClient(
-        app_key=settings.iifl_app_key,
-        app_secret=settings.iifl_app_secret,
-        base_url=settings.iifl_base_url,
-        session_store=SessionStore(settings.iifl_session_cache),
-    )
+    client = _get_shared_client()
     if client.restore_session() is None:
         raise BrokerUnavailable(
             "no active IIFL session — run `atr login`", status=401, code="no_broker_session"
