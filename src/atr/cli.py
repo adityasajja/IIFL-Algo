@@ -1300,6 +1300,29 @@ def _open_browser(url: str) -> None:
         logger.info("dashboard at {}", url)
 
 
+def _open_browser_when_ready(host: str, port: int, url: str, timeout: float = 90.0) -> None:
+    """Open the dashboard once the server accepts connections, not before.
+
+    Opening it first meant a spinner or a refused connection while the app was
+    still starting.
+    """
+    import socket
+    import threading
+    import time
+
+    def wait_then_open() -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection((host, port), timeout=1):
+                    break
+            except OSError:
+                time.sleep(0.3)
+        _open_browser(url)
+
+    threading.Thread(target=wait_then_open, name="atr-open-browser", daemon=True).start()
+
+
 def _session_ready() -> None:
     from atr.brokers.iifl.auth import SessionStore
     from atr.config.settings import get_settings
@@ -1330,7 +1353,7 @@ def _run_serve(args) -> int:
     logger.info("starting ATR on {}", url)
     _session_ready()
     if not args.no_browser:
-        _open_browser(url)
+        _open_browser_when_ready(host, port, url)
     uvicorn.run("atr.api.main:app", host=host, port=port, reload=False, log_level="info")
     return 0
 
