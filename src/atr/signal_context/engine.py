@@ -460,8 +460,8 @@ class SignalContextEngine:
                 return str(window["ts"].iloc[-1])
         try:
             return str(pd.to_datetime(when))
-        except Exception:  # noqa: BLE001
-            raise ValueError(f"cannot parse when={when!r} and no frame available for as_of")
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"cannot parse when={when!r} and no frame available for as_of") from exc
 
     def _evaluate_criterion(
         self, criterion: Any, market: Any, sector: Any, stock: Any

@@ -360,7 +360,7 @@ class MarketIntelService:
         # Parquet reads are I/O bound and release the GIL, so load them together
         # instead of one at a time — reading was ~40% of the pass.
         with ThreadPoolExecutor(max_workers=8) as pool:
-            frames = dict(zip(symbols_to_scan, pool.map(self._load_frame, symbols_to_scan)))
+            frames = dict(zip(symbols_to_scan, pool.map(self._load_frame, symbols_to_scan), strict=True))
 
         for sym in symbols_to_scan:
             df = frames[sym]
@@ -404,7 +404,7 @@ class MarketIntelService:
                 days = 90
                 flags = closes.tail(days).to_numpy() >= ema50_series.tail(days).to_numpy()
                 labels = pd.to_datetime(df["ts"].tail(days)).dt.strftime("%Y-%m-%d").to_numpy()
-                for label, flag in zip(labels, flags):
+                for label, flag in zip(labels, flags, strict=True):
                     tally = breadth_days.setdefault(label, [0, 0])
                     tally[0] += int(flag)
                     tally[1] += 1

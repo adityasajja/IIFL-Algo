@@ -228,7 +228,7 @@ class Stability:
         arr = np.asarray(self.spreads)
         unit = self.unit
         below = [
-            f"{lb} {s:+.2f}{unit}" for lb, s in zip(self.labels, self.spreads) if s <= 0
+            f"{lb} {s:+.2f}{unit}" for lb, s in zip(self.labels, self.spreads, strict=True) if s <= 0
         ]
         tail = f"; negative: {', '.join(below[:4])}" if below else ""
         what = {

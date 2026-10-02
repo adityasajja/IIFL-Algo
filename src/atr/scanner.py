@@ -35,7 +35,7 @@ def resolve_conid(master: InstrumentMaster, symbol: str, exchange: str = "NSEEQ"
         hits = master.search(root, exchange=exchange, limit=10)
         hits = hits[hits["symbol"].str.startswith(root)]
         if hits.empty:
-            raise KeyError(f"no contract matching symbol={symbol} exchange={exchange}")
+            raise KeyError(f"no contract matching symbol={symbol} exchange={exchange}") from None
         best = hits.sort_values("symbol", key=lambda s: s.str.len()).iloc[0]
         return str(best["conid"])
 

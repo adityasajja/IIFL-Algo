@@ -228,7 +228,7 @@ def _load_scans() -> list[dict]:
         import json
         _SCANS_PATH.parent.mkdir(parents=True, exist_ok=True)
         if _SCANS_PATH.exists():
-            return json.loads(_SCANS_PATH.read_text())
+            return json.loads(_SCANS_PATH.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         pass
     return list(_DEFAULT_SCANS)
@@ -237,7 +237,7 @@ def _load_scans() -> list[dict]:
 def _save_scans(scans: list[dict]) -> None:
     import json
     _SCANS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _SCANS_PATH.write_text(json.dumps(scans, indent=2))
+    _SCANS_PATH.write_text(json.dumps(scans, indent=2), encoding="utf-8")
 
 
 @router.get("/scanner/saved")

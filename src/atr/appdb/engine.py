@@ -192,7 +192,7 @@ class AppDatabase:
             inspector = inspect(self.engine)
         except Exception as exc:
             logger.error("schema: could not inspect for additive columns: %s", exc)
-            raise RuntimeError(f"schema inspection failed: {exc}")
+            raise RuntimeError(f"schema inspection failed: {exc}") from exc
         for table, columns in self.ADDITIVE_COLUMNS.items():
             try:
                 if not inspector.has_table(table):
@@ -216,7 +216,7 @@ class AppDatabase:
                     table,
                     exc,
                 )
-                raise RuntimeError(f"schema migration failed for {table}: {exc}")
+                raise RuntimeError(f"schema migration failed for {table}: {exc}") from exc
 
     @contextlib.contextmanager
     def session(self) -> Iterator[Session]:

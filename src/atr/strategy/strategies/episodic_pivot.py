@@ -130,7 +130,7 @@ def _prep(frame: pd.DataFrame) -> pd.DataFrame:
     prev_close = close.shift(1)
 
     # --- neglect -------------------------------------------------------
-    ret = close.pct_change()
+    ret = close.pct_change(fill_method=None)
     # 120 sessions ≈ 6 months, matching "ignored for months" / "6–7 months".
     vol_120 = ret.rolling(120, min_periods=60).std()
     # Secondary neglect shapes the playbook describes: "trading near lows or
