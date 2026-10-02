@@ -1264,10 +1264,8 @@ function MonitorView({
       />
       {evidenceCounts && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Track record</span>
           <span>{evidenceCounts.by_class?.PAPER_FORWARD?.total ?? 0} paper trades</span>
-          <span>{evidenceCounts.last_7d_genuine_forward ?? 0} in the last 7 days</span>
-          <span>{evidenceCounts.by_class?.IN_SAMPLE?.total ?? 0} backtest trades</span>
+          <span>{evidenceCounts.last_7d_genuine_forward ?? 0} this week</span>
         </div>
       )}
       <Button
@@ -1276,7 +1274,7 @@ function MonitorView({
         className="text-muted-foreground hover:text-foreground hover:no-underline text-sm"
         onClick={() => setDetails((v) => !v)}
       >
-        {details ? "Hide controls and details" : "Pause, stop and see the full timeline"}
+        {details ? "Hide controls" : "Controls and timeline"}
       </Button>
       {details && (<>
       <ForwardEvidenceCounterCard

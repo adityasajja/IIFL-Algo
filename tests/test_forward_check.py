@@ -8,7 +8,7 @@ def _s(trades, win, avg, pf=1.5):
 def test_no_backtest_and_too_early_are_not_verdicts():
     assert verdict(_s(0, None, None), _s(50, 60, 1))[0] == "no_backtest"
     code, msg = verdict(_s(100, 55, 1.0), _s(5, 80, 3.0))
-    assert code == "too_early" and str(MIN_FORWARD_TRADES - 5) in msg
+    assert code == "too_early" and "5 of 20" in msg
 
 
 def test_holding_up_vs_weaker():

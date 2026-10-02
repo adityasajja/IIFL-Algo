@@ -37,16 +37,15 @@ def _stats(returns: list[float], pnls: list[float]) -> dict[str, Any]:
 def verdict(backtest: dict[str, Any], forward: dict[str, Any]) -> tuple[str, str]:
     """(code, plain sentence)."""
     if backtest["trades"] == 0:
-        return "no_backtest", "No backtest of this strategy yet, so there is nothing to compare paper trading with."
+        return "no_backtest", "No backtest to compare with."
     if forward["trades"] < MIN_FORWARD_TRADES:
-        left = MIN_FORWARD_TRADES - forward["trades"]
-        return "too_early", f"Too early to say: {forward['trades']} paper trades so far, {left} more needed."
+        return "too_early", f"Too early: {forward['trades']} of {MIN_FORWARD_TRADES} trades."
     bt_avg, fw_avg = backtest["avg_trade_pct"], forward["avg_trade_pct"]
     win_gap = (backtest["win_rate_pct"] or 0) - (forward["win_rate_pct"] or 0)
     keeps_edge = fw_avg > 0 and (bt_avg <= 0 or fw_avg >= KEEP_SHARE * bt_avg)
     if keeps_edge and win_gap <= WIN_TOLERANCE_PTS:
-        return "holding_up", "Paper trading is holding up against the backtest."
-    return "weaker", "Paper trading is weaker than the backtest. Treat the backtest as too optimistic."
+        return "holding_up", "Matching the backtest."
+    return "weaker", "Weaker than the backtest."
 
 
 def compare(db: Any, user_id: str, strategy_id: str, version: int | None = None) -> dict[str, Any]:

@@ -39,9 +39,9 @@ function Trigger({ raw, empty }: { raw: unknown; empty: string }) {
   const t = trigger(raw);
   if (!t) return <div className="text-caption text-muted-foreground">{empty}</div>;
   return (
-    <div className="mt-0.5">
+    <div className="mt-0.5" title={t.detail ?? undefined}>
       <div className="text-caption font-semibold text-foreground">{t.name}</div>
-      {t.detail && <div className="max-w-[18rem] text-caption text-muted-foreground">{t.detail}</div>}
+
     </div>
   );
 }
@@ -68,8 +68,8 @@ export function TradeLedger({ deploymentId }: { deploymentId: string }) {
     return [...data.closed].sort((a, b) => when(b).localeCompare(when(a)));
   }, [data]);
 
-  if (failed) return <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">Could not load the trades.</div>;
-  if (!data) return <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">Loading trades…</div>;
+  if (failed) return <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">Could not load trades.</div>;
+  if (!data) return <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">Loading…</div>;
   if (rows.length === 0 && data.open.length === 0) {
     return <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">No trades yet.</div>;
   }
@@ -82,17 +82,17 @@ export function TradeLedger({ deploymentId }: { deploymentId: string }) {
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <div className="text-xs text-muted-foreground">Profit made, after costs</div>
+          <div className="text-xs text-muted-foreground">Profit</div>
           <div className={cn("mt-0.5 text-lg font-semibold tabular-nums", tone(profit))}>{signed(profit)}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Won</div>
           <div className="mt-0.5 text-lg font-semibold tabular-nums">
-            {wins} <span className="text-sm font-normal text-muted-foreground">of {rows.length} sold</span>
+            {wins}<span className="text-sm font-normal text-muted-foreground"> / {rows.length}</span>
           </div>
         </div>
         <div>
-          <div className="text-xs text-muted-foreground">Still holding</div>
+          <div className="text-xs text-muted-foreground">Holding</div>
           <div className="mt-0.5 text-lg font-semibold tabular-nums">{data.open.length}</div>
         </div>
       </div>
@@ -112,13 +112,13 @@ export function TradeLedger({ deploymentId }: { deploymentId: string }) {
               <tr key={`open-${String(t.trade_id ?? i)}`} className="border-b border-border/50 bg-muted/20 align-top">
                 <td className="px-3 py-1.5 text-body font-medium">
                   {String(t.symbol).replace(/-EQ$/, "")}
-                  <div className="text-caption font-normal text-muted-foreground tabular-nums">{num(t.quantity)} shares</div>
+                  <div className="text-caption font-normal text-muted-foreground tabular-nums">{num(t.quantity)}</div>
                 </td>
                 <td className="px-3 py-1.5 text-body tabular-nums">
                   {day(t.entry_ts)} · {num(t.entry_price) != null ? price(num(t.entry_price)!) : "—"}
-                  <Trigger raw={t.signal_reason} empty="Reason not recorded" />
+                  <Trigger raw={t.signal_reason} empty="—" />
                 </td>
-                <td className="px-3 py-1.5 text-body text-muted-foreground">Still holding</td>
+                <td className="px-3 py-1.5 text-body text-muted-foreground">Holding</td>
                 <td className="px-3 py-1.5 text-right text-body text-muted-foreground">open</td>
               </tr>
             ))}
@@ -131,16 +131,16 @@ export function TradeLedger({ deploymentId }: { deploymentId: string }) {
                 <tr key={String(t.trade_id ?? i)} className="border-b border-border/50 align-top">
                   <td className="px-3 py-1.5 text-body font-medium">
                     {String(t.symbol).replace(/-EQ$/, "")}
-                    <div className="text-caption font-normal text-muted-foreground tabular-nums">{num(t.quantity)} shares</div>
+                    <div className="text-caption font-normal text-muted-foreground tabular-nums">{num(t.quantity)}</div>
                   </td>
                   <td className="px-3 py-1.5 text-body tabular-nums">
                     {day(t.entry_ts)} · {num(t.entry_price) != null ? price(num(t.entry_price)!) : "—"}
-                    <Trigger raw={t.signal_reason} empty="Reason not recorded" />
+                    <Trigger raw={t.signal_reason} empty="—" />
                   </td>
                   <td className="px-3 py-1.5 text-body tabular-nums">
                     {day(t.exit_ts)} · {num(t.exit_price) != null ? price(num(t.exit_price)!) : "—"}
                     {days != null && <span className="text-caption text-muted-foreground"> · held {days}d</span>}
-                    <Trigger raw={t.exit_detail ?? t.exit_reason} empty="Reason not recorded" />
+                    <Trigger raw={t.exit_detail ?? t.exit_reason} empty="—" />
                   </td>
                   <td className={cn("px-3 py-1.5 text-right text-body font-semibold tabular-nums", tone(net))}>
                     {signed(net)}
@@ -154,7 +154,7 @@ export function TradeLedger({ deploymentId }: { deploymentId: string }) {
       </div>
       {rows.length > 8 && (
         <Button size="inline" variant="link" className="text-xs" onClick={() => setAll((v) => !v)}>
-          {all ? "Show fewer" : `Show all ${rows.length} trades`}
+          {all ? "Fewer" : `All ${rows.length}`}
         </Button>
       )}
     </div>

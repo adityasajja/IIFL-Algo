@@ -736,13 +736,10 @@ export default function App() {
         />
         {feedDown && (
           <div role="alert" className="mx-auto w-full max-w-[1200px] px-6 pt-4 max-md:px-4">
-            <Callout tone="bad" title="Not trading: the broker login has lapsed">
-              {runningCount} running {runningCount === 1 ? "strategy is" : "strategies are"} not receiving live
-              prices, so no new trades are placed until you{" "}
+            <Callout tone="bad" title="Not trading: broker login lapsed">
               <Button size="inline" variant="link" onClick={() => setShowLogin(true)}>
-                log in again
+                Log in
               </Button>
-              .
             </Callout>
           </div>
         )}

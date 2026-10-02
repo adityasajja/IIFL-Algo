@@ -17,8 +17,8 @@ type RunnerRow = { deployment_id: string; state?: string; symbols?: number; skip
 function statusOf(d: Deployment, runner: RunnerRow | undefined): string {
   if (d.status === "PAUSED") return "Paused";
   if (!runner) return "Starting";
-  if (runner.state === "WAITING_FOR_MARKET") return "Waiting for the market";
-  if (runner.state === "WAITING_FOR_TICKS") return "Waiting for prices";
+  if (runner.state === "WAITING_FOR_MARKET") return "Market closed";
+  if (runner.state === "WAITING_FOR_TICKS") return "No prices";
   if (runner.state === "ERROR") return "Needs attention";
   return `Watching ${runner.symbols ?? "the"} stocks`;
 }
@@ -89,12 +89,12 @@ function RunCard({ d, name, pnl, runner, onManage }: {
         <ForwardCheck strategyId={d.strategy_id} version={d.strategy_version} />
 
         <Button size="inline" variant="link" className="text-sm" onClick={() => setTrades((v) => !v)}>
-          {trades ? "Hide trades" : "See every trade"}
+          {trades ? "Hide trades" : "Trades"}
         </Button>
         {trades && <TradeLedger deploymentId={d.deployment_id} />}
 
         {pnl && held.length === 0 ? (
-          <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">{total !== 0 ? "No open positions." : "No trades yet."}</div>
+          total === 0 ? <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">No trades yet.</div> : null
         ) : (
           <div className="divide-y divide-border/60 rounded-lg border border-border/60">
             {shown.map((p) => (

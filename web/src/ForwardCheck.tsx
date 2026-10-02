@@ -34,7 +34,7 @@ export function ForwardCheck({ strategyId, version }: { strategyId: string; vers
   useEffect(() => {
     getForwardCheck(strategyId, version).then(setC).catch(() => setC(null));
   }, [strategyId, version]);
-  if (!c) return null;
+  if (!c || c.verdict === "no_backtest") return null; // nothing to say, so say nothing
 
   const done = Math.min(c.paper.trades, c.min_paper_trades);
   const show = c.verdict === "holding_up" || c.verdict === "weaker";
