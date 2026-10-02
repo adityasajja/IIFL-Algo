@@ -164,6 +164,7 @@ class AppDatabase:
     ADDITIVE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
         "trade_journal": (
             ("exit_reason", "VARCHAR(32)"),
+            ("exit_detail", "TEXT"),
             ("evidence_grade", "VARCHAR(16)"),
         ),
     }
@@ -177,7 +178,30 @@ class AppDatabase:
         if not self._prepared:
             app_metadata.create_all(self.engine)
             self._reconcile_additive_columns()
+            self._normalise_exit_reasons()
             self._prepared = True
+
+    def _normalise_exit_reasons(self) -> None:
+        """One-time tidy of rows written when ``exit_reason`` held a sentence cut at 32 characters.
+
+        The rule (the part before the colon) becomes the reason; what was kept of the sentence moves to
+        ``exit_detail``. Rows already tidy have no colon and are never touched, so this is idempotent.
+        """
+        try:
+            with self.engine.begin() as conn:
+                rows = conn.execute(
+                    text('SELECT trade_id, exit_reason FROM trade_journal WHERE exit_reason LIKE \'%:%\'')
+                ).all()
+                for trade_id, reason in rows:
+                    conn.execute(
+                        text(
+                            "UPDATE trade_journal SET exit_reason = :code, "
+                            "exit_detail = COALESCE(exit_detail, :detail) WHERE trade_id = :id"
+                        ),
+                        {"code": str(reason).split(":", 1)[0].strip()[:32], "detail": reason, "id": trade_id},
+                    )
+        except Exception as exc:  # noqa: BLE001 - a tidy-up must never stop startup
+            logger.warning("schema: could not normalise exit reasons: %s", exc)
 
     def _reconcile_additive_columns(self) -> None:
         """Add any declared post-release column that the database lacks.

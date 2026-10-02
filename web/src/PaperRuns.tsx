@@ -4,6 +4,7 @@ import { Card } from "./components/ui/card";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
 import { ForwardCheck } from "./ForwardCheck";
+import { TradeLedger } from "./TradeLedger";
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${inr(Math.abs(n))}`;
@@ -39,6 +40,7 @@ function RunCard({ d, name, pnl, runner, onManage }: {
   onManage: () => void;
 }) {
   const [all, setAll] = useState(false);
+  const [trades, setTrades] = useState(false);
   const held = (pnl?.positions ?? []).filter((p) => p.quantity !== 0);
   const shown = all ? held : held.slice(0, 5);
   const total = pnl?.total_pnl ?? 0;
@@ -85,6 +87,11 @@ function RunCard({ d, name, pnl, runner, onManage }: {
         </div>
 
         <ForwardCheck strategyId={d.strategy_id} version={d.strategy_version} />
+
+        <Button size="inline" variant="link" className="text-sm" onClick={() => setTrades((v) => !v)}>
+          {trades ? "Hide trades" : "See every trade"}
+        </Button>
+        {trades && <TradeLedger deploymentId={d.deployment_id} />}
 
         {pnl && held.length === 0 ? (
           <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">{total !== 0 ? "No open positions." : "No trades yet."}</div>

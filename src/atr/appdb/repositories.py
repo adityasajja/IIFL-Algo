@@ -1469,6 +1469,12 @@ class ReconciliationRepository:
         return latest
 
 
+def _reason_code(reason: str) -> str:
+    """"stop_loss: down 10.2% against ..." -> "stop_loss". The rule is the category; the sentence after
+    it is detail. Cutting the whole sentence at 32 characters made every reason unique and garbled."""
+    return str(reason).split(":", 1)[0].strip()[:32]
+
+
 class TradeJournalRepository:
     """Closed and open trades, with the path statistics a journal exists for."""
 
@@ -1605,7 +1611,7 @@ class TradeJournalRepository:
                 trade_journal.c.trade_id == trade_id,
                 trade_journal.c.user_id == user_id,
             )
-            .values(exit_reason=str(exit_reason)[:32])
+            .values(exit_reason=_reason_code(exit_reason), exit_detail=str(exit_reason))
         )
         return int(result.rowcount or 0)
 

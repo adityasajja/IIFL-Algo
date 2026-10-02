@@ -389,6 +389,9 @@ trade_journal = Table(
     #: it is absent. Added after the table shipped; see
     #: ``AppDatabase.ADDITIVE_COLUMNS`` for how an existing database gets it.
     Column("exit_reason", String(32)),
+    #: The closing rule's full sentence ("stop_loss: down 10.2% against an average of 1,234.56"). The
+    #: short ``exit_reason`` is just its code, so trades group by rule instead of by wording.
+    Column("exit_detail", Text),
     Column("slippage_bps", Float),
     #: How independent this record is: ``forward`` when the opening order was
     #: raised live — the OMS stamps the ``NEW`` event with the wall-clock instant

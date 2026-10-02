@@ -132,6 +132,15 @@ def main() -> int:
             entry_day, exit_day = trade_days[i], trade_days[j]
             px_in, px_out = float(closes[sym][entry_day]), float(closes[sym][exit_day])
             qty = max(1, int(capital * 0.12 / px_in))
+            move = (px_out / px_in - 1.0) * 100.0
+            reasons = {
+                "BUY": f"breakout: closed above its 20-day high of {px_in * 0.99:,.2f}",
+                "SELL": (
+                    f"take_profit: up {move:.1f}% against an average of {px_in:,.2f}" if move >= 4
+                    else f"stop_loss: down {move:.1f}% against an average of {px_in:,.2f}" if move <= -3
+                    else "trend_exit: closed below its 10-day average"
+                ),
+            }
             for side, day, px in (("BUY", entry_day, px_in * 1.0005), ("SELL", exit_day, px_out * 0.9995)):
                 at = datetime(day.year, day.month, day.day, 5, 0)  # 10:30 IST, naive UTC like the app
                 commission = round(px * qty * 0.0004, 2)
@@ -139,6 +148,9 @@ def main() -> int:
                     o = OrderRepository.create(session, user_id=user_id, symbol=f"{sym}-EQ", side=side, quantity=qty,
                                                deployment_id=dep["deployment_id"], strategy_id=strategy_id,
                                                strategy_version=version, requested_price=px, tag="DEMO")
+                    # The rule's own words ride on the NEW event, exactly as the paper runner writes them.
+                    OrderEventRepository.append(session, order_id=o["order_id"], to_status="NEW", ts=at,
+                                                raw={"reason": reasons[side]}, source="demo")
                     OrderEventRepository.append(session, order_id=o["order_id"], from_status="NEW", to_status="FILLED",
                                                 ts=at, fill_ts=at, filled_qty=float(qty), filled_price=round(px, 2),
                                                 commission=commission, requested_price=px, source="demo")
