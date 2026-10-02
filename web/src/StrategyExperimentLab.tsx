@@ -17,9 +17,13 @@ import {
   getAdaptiveParameters,
 } from "./api";
 import { Select } from "./components/ui/select";
+import { Button } from "./components/ui/button";
+import { Chip } from "./components/ui/chip";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { Tooltip } from "./components/motion/tooltip";
 import {
   CheckCircle2,
+  X,
   XCircle,
   Play,
   History,
@@ -449,14 +453,10 @@ export const StrategyExperimentLab: React.FC = () => {
             }))}
           />
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedStrategyId}
-            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold rounded-md transition"
-          >
-            <PlusCircle className="w-4 h-4" />
-            Create Experiment
-          </button>
+          <Button onClick={() => setShowCreateModal(true)} disabled={!selectedStrategyId}>
+            <PlusCircle className="size-4" />
+            Create experiment
+          </Button>
         </div>
       </div>
 
@@ -486,12 +486,14 @@ export const StrategyExperimentLab: React.FC = () => {
                 Experiment History ({experiments.length})
               </h3>
               <Tooltip content="Refresh list" side="bottom" delay={400}>
-              <button
+              <Button
+                size="icon-sm"
+                variant="plain"
+                aria-label="Refresh experiments"
                 onClick={() => refreshExperimentList()}
-                  className="p-1 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
+                <RefreshCw />
+              </Button>
               </Tooltip>
             </div>
 
@@ -501,12 +503,14 @@ export const StrategyExperimentLab: React.FC = () => {
               <div className="py-10 text-center text-muted-foreground text-sm">
                 No experiments yet.
                 <div className="mt-2">
-                  <button
+                  <Button
+                    size="inline"
+                    variant="link"
+                    className="text-xs"
                     onClick={() => setShowCreateModal(true)}
-                    className="text-gain hover:underline text-xs"
                   >
                     Create an experiment
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -592,14 +596,14 @@ export const StrategyExperimentLab: React.FC = () => {
                   {/* Actions Bar based on Status */}
                   <div className="flex items-center gap-2 flex-wrap">
                     {currentExperiment.status === "CREATED" && (
-                      <button
+                      <Button
+                        size="xs"
                         onClick={() => handleRunExperiment(currentExperiment.experiment_id)}
                         disabled={actionLoading === "run"}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-primary text-foreground text-xs font-semibold rounded-md transition"
                       >
-                        <Play className="w-3.5 h-3.5" />
-                        {actionLoading === "run" ? "Running Evaluation..." : "Run Experiment"}
-                      </button>
+                        <Play className="size-3.5" />
+                        {actionLoading === "run" ? "Running evaluation…" : "Run experiment"}
+                      </Button>
                     )}
 
                     {currentExperiment.status === "RUNNING" && (
@@ -611,34 +615,36 @@ export const StrategyExperimentLab: React.FC = () => {
 
                     {currentExperiment.status === "COMPLETED" && (
                       <>
-                        <button
+                        <Button
+                          size="xs"
                           onClick={() => handleApproveExperiment(currentExperiment.experiment_id)}
                           disabled={actionLoading === "approve"}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold rounded-md transition"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Approve Experiment
-                        </button>
-                        <button
+                          <CheckCircle2 className="size-3.5" />
+                          Approve experiment
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
                           onClick={() => handleRejectExperiment(currentExperiment.experiment_id)}
                           disabled={actionLoading === "reject"}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive/80 hover:bg-destructive text-foreground text-xs font-semibold rounded-md transition"
                         >
-                          <XCircle className="w-3.5 h-3.5" />
+                          <XCircle className="size-3.5" />
                           Reject
-                        </button>
+                        </Button>
                       </>
                     )}
 
                     {currentExperiment.status === "APPROVED" && (
-                      <button
+                      <Button
+                        size="xs"
+                        variant="secondary"
                         onClick={() => handleApplyExperiment(currentExperiment.experiment_id)}
                         disabled={actionLoading === "apply"}
-                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-foreground text-xs font-semibold rounded-md transition"
                       >
-                        <GitBranch className="w-3.5 h-3.5" />
-                        {actionLoading === "apply" ? "Creating V(N+1)..." : "Apply to New Immutable V(N+1)"}
-                      </button>
+                        <GitBranch className="size-3.5" />
+                        {actionLoading === "apply" ? "Creating V(N+1)…" : "Apply to new immutable V(N+1)"}
+                      </Button>
                     )}
 
                     {currentExperiment.status === "REJECTED" && (
@@ -721,10 +727,10 @@ export const StrategyExperimentLab: React.FC = () => {
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
                         <tr className="border-b border-border bg-muted/40 text-muted-foreground font-semibold">
-                          <th className="py-2.5 px-3">Metric</th>
-                          <th className="py-2.5 px-3 text-right">Current (v{currentExperiment.source_version})</th>
-                          <th className="py-2.5 px-3 text-right">Learned Candidate</th>
-                          <th className="py-2.5 px-3 text-right">Difference (Δ)</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Metric</th>
+                          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Current (v{currentExperiment.source_version})</th>
+                          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Learned Candidate</th>
+                          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Difference (Δ)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border font-mono">
@@ -742,13 +748,13 @@ export const StrategyExperimentLab: React.FC = () => {
 
                           return (
                             <tr key={row.metric} className="hover:bg-muted/30 transition">
-                              <td className="py-2.5 px-3 font-sans font-medium text-foreground">
+                              <td className="px-3 py-1.5 font-sans font-medium text-foreground">
                                 {row.label}
                               </td>
-                              <td className="py-2.5 px-3 text-right text-muted-foreground">
+                              <td className="px-3 py-1.5 text-right text-muted-foreground">
                                 {formatVal(row.current)}
                               </td>
-                              <td className="py-2.5 px-3 text-right font-semibold text-foreground">
+                              <td className="px-3 py-1.5 text-right font-semibold text-foreground">
                                 {formatVal(row.candidate)}
                               </td>
                               <td
@@ -792,30 +798,21 @@ export const StrategyExperimentLab: React.FC = () => {
                     </h3>
 
                     {/* Subtabs */}
-                    <div className="flex items-center gap-1 bg-background p-1 rounded-lg border border-border text-xs">
-                      {(
-                        [
+                    <Tabs value={activeVisualTab} onValueChange={(v) => setActiveVisualTab(v as typeof activeVisualTab)} variant="segment">
+                      <TabsList>
+                        {(
+                          [
                           { id: "equity", label: "Equity Curve" },
                           { id: "drawdown", label: "Drawdown" },
                           { id: "monthly", label: "Monthly Matrix" },
                           { id: "distribution", label: "Trade Returns" },
                           { id: "regime", label: "Regime Breakdown" },
-                          { id: "robustness", label: "Walk-Forward & Robustness" },
-                        ] as const
-                      ).map((tab) => (
-                        <button
-                          key={tab.id}
-                          onClick={() => setActiveVisualTab(tab.id)}
-                          className={`px-2.5 py-1 rounded font-medium transition ${
-                            activeVisualTab === tab.id
-                              ? "bg-muted text-foreground "
-                              : "text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
+                          { id: "robustness", label: "Walk-Forward & Robustness" }, ] as const
+                        ).map((tab) => (
+                          <TabsTrigger key={tab.id} value={tab.id}>{tab.label}</TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </Tabs>
                   </div>
 
                   <div className="mt-4">
@@ -832,10 +829,10 @@ export const StrategyExperimentLab: React.FC = () => {
                           <table className="w-full text-left border-collapse text-xs font-mono">
                             <thead>
                               <tr className="border-b border-border text-muted-foreground">
-                                <th className="py-2 px-3 font-sans">Year / Month</th>
-                                <th className="py-2 px-3 text-right">Current Return</th>
-                                <th className="py-2 px-3 text-right">Candidate Return</th>
-                                <th className="py-2 px-3 text-right">Diff (Δ)</th>
+                                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Year / Month</th>
+                                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Current Return</th>
+                                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Candidate Return</th>
+                                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Diff (Δ)</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
@@ -844,13 +841,13 @@ export const StrategyExperimentLab: React.FC = () => {
                                 const diff = candRow.return_pct - (baseRow?.return_pct ?? 0);
                                 return (
                                   <tr key={`${candRow.year}-${candRow.month}`} className="hover:bg-muted/20">
-                                    <td className="py-2 px-3 font-sans text-foreground">
+                                    <td className="px-3 py-1.5 font-sans text-foreground">
                                       {candRow.year}-{String(candRow.month).padStart(2, "0")}
                                     </td>
-                                    <td className="py-2 px-3 text-right text-muted-foreground">
+                                    <td className="px-3 py-1.5 text-right text-muted-foreground">
                                       {baseRow ? `${baseRow.return_pct.toFixed(2)}%` : "—"}
                                     </td>
-                                      <td className="py-2 px-3 text-right font-semibold text-foreground">
+                                      <td className="px-3 py-1.5 text-right font-semibold text-foreground">
                                       {candRow.return_pct.toFixed(2)}%
                                     </td>
                                     <td className={`py-2 px-3 text-right font-semibold ${diff >= 0 ? "text-gain" : "text-loss"}`}>
@@ -1044,12 +1041,14 @@ export const StrategyExperimentLab: React.FC = () => {
                 <FlaskConical className="w-5 h-5 text-gain" />
                 Create Strategy Experiment
               </h3>
-              <button
+              <Button
+                size="icon-sm"
+                variant="plain"
+                aria-label="Close"
                 onClick={() => setShowCreateModal(false)}
-                className="text-muted-foreground hover:text-foreground p-1"
               >
-                ✕
-              </button>
+                <X />
+              </Button>
             </div>
 
             <div className="flex flex-col gap-4 text-xs">
@@ -1057,28 +1056,12 @@ export const StrategyExperimentLab: React.FC = () => {
               <div>
                 <label className="block text-muted-foreground font-semibold mb-1">Experiment Creation Source</label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCreationMode("recommendation")}
-                    className={`py-2 px-3 rounded border text-center font-medium transition ${
-                      creationMode === "recommendation"
-                        ? "border border-gain/30 bg-gain/[0.08] text-gain"
-                        : "bg-background border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    From Optimization Rec
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCreationMode("manual")}
-                    className={`py-2 px-3 rounded border text-center font-medium transition ${
-                      creationMode === "manual"
-                        ? "border border-gain/30 bg-gain/[0.08] text-gain"
-                        : "bg-background border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Manual Adaptive Param
-                  </button>
+                  <Chip selected={creationMode === "recommendation"} onClick={() => setCreationMode("recommendation")}>
+                    From optimization recommendation
+                  </Chip>
+                  <Chip selected={creationMode === "manual"} onClick={() => setCreationMode("manual")}>
+                    Manual adaptive parameter
+                  </Chip>
                 </div>
               </div>
 
@@ -1154,21 +1137,12 @@ export const StrategyExperimentLab: React.FC = () => {
               </div>
 
               <div className="pt-3 border-t border-border flex justify-end gap-3 mt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 bg-muted hover:bg-muted text-foreground rounded-md font-medium"
-                >
+                <Button variant="quiet" onClick={() => setShowCreateModal(false)}>
                   Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCreateExperiment}
-                  disabled={actionLoading === "create"}
-                  className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-md "
-                >
-                  {actionLoading === "create" ? "Creating..." : "Create Experiment"}
-                </button>
+                </Button>
+                <Button onClick={handleCreateExperiment} disabled={actionLoading === "create"}>
+                  {actionLoading === "create" ? "Creating…" : "Create experiment"}
+                </Button>
               </div>
             </div>
           </div>

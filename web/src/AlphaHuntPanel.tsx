@@ -113,17 +113,17 @@ export default function AlphaHuntPanel() {
               </div>
               <div className="overflow-x-auto rounded-lg border border-border/60">
                 <table className="w-full text-body">
-                  <thead className="bg-muted/40 text-caption uppercase tracking-wide text-muted-foreground">
+                  <thead className="bg-muted/40">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium">Candidate</th>
-                      <th className="px-3 py-2 text-right font-medium">Sharpe</th>
-                      <th className="px-3 py-2 text-right font-medium">Calmar</th>
-                      <th className="px-3 py-2 text-right font-medium">Return</th>
-                      <th className="px-3 py-2 text-right font-medium">Buy &amp; hold</th>
-                      <th className="px-3 py-2 text-right font-medium">Control</th>
-                      <th className="px-3 py-2 text-right font-medium">vs control</th>
-                      <th className="px-3 py-2 text-right font-medium">Trades</th>
-                      <th className="px-3 py-2 text-center font-medium">Verdict</th>
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Candidate</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Sharpe</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Calmar</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Return</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Buy &amp; hold</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Control</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">vs control</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
+                      <th className="px-3 py-2 text-center text-micro font-semibold uppercase tracking-wider text-muted-foreground">Verdict</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -235,8 +235,8 @@ function Row({ name, r }: { name: string; r: AlphaHuntHypothesis }) {
   if (r.error || !m) {
     return (
       <tr className="border-t border-border/60">
-        <td className="px-3 py-2 font-medium">{prettyName(name)}</td>
-        <td className="px-3 py-2 text-destructive" colSpan={8}>
+        <td className="px-3 py-1.5 font-medium">{prettyName(name)}</td>
+        <td className="px-3 py-1.5 text-destructive" colSpan={8}>
           {r.error ?? "no metrics"}
         </td>
       </tr>
@@ -245,7 +245,7 @@ function Row({ name, r }: { name: string; r: AlphaHuntHypothesis }) {
   const clears = z !== null && z !== undefined && critical !== null && critical !== undefined && z >= critical;
   return (
     <tr className="border-t border-border/60">
-      <td className="px-3 py-2 whitespace-nowrap font-medium">{prettyName(name)}</td>
+      <td className="px-3 py-1.5 whitespace-nowrap font-medium">{prettyName(name)}</td>
       <td
         className={cn(
           "px-3 py-2 text-right tabular-nums",
@@ -254,12 +254,12 @@ function Row({ name, r }: { name: string; r: AlphaHuntHypothesis }) {
       >
         {fmtNum(m.oos_sharpe)}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums">{fmtNum(m.oos_calmar)}</td>
-      <td className="px-3 py-2 text-right tabular-nums">{fmtPct(m.oos_return_pct, 1)}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(m.oos_calmar)}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums">{fmtPct(m.oos_return_pct, 1)}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {fmtPct(m.bench_return_pct, 1)}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {fmtNum(r.control?.sharpe_mean ?? undefined)}
       </td>
       <td
@@ -270,10 +270,10 @@ function Row({ name, r }: { name: string; r: AlphaHuntHypothesis }) {
       >
         {z === null || z === undefined ? "—" : `${z >= 0 ? "+" : ""}${fmtNum(z)}σ`}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {m.trades.toLocaleString()}
       </td>
-      <td className="px-3 py-2 text-center">
+      <td className="px-3 py-1.5 text-center">
         {r.verdict?.passed ? <Badge tone="good">pass</Badge> : <Badge tone="warn">fail</Badge>}
       </td>
     </tr>

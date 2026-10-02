@@ -148,14 +148,15 @@ function PlainExplainer({ onDismiss }: { onDismiss: () => void }) {
             else on this page is the evidence behind that answer.
           </p>
         </div>
-        <button
-          type="button"
+        <Button
+          size="icon-sm"
+          variant="plain"
+          className="shrink-0"
           onClick={onDismiss}
           aria-label="Hide this explanation"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <X size={13} />
-        </button>
+        </Button>
       </div>
     </Card>
   );
@@ -260,26 +261,21 @@ export default function ResearchPanel({
           switcher — showing a second one here would just be two controls
           fighting over the same state. */}
       {forcedTab === undefined && (
-        <div className="flex rounded-lg border border-border/60 overflow-hidden w-fit text-sm font-semibold">
-          {(["run", "measured"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => {
-                setMode(v);
-                onTabChange?.(v === "measured" ? "measured" : "harness");
-              }}
-              className={cn(
-                "px-4 py-1.5 transition-colors",
-                view === v
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-background text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {v === "run" ? "Run a test" : "Measured results"}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={view}
+          onValueChange={(v) => {
+            setMode(v as "run" | "measured");
+            onTabChange?.(v === "measured" ? "measured" : "harness");
+          }}
+          variant="segment"
+          className="w-fit"
+        >
+          <TabsList>
+            {(["run", "measured"] as const).map((v) => (
+              <TabsTrigger key={v} value={v}>{v === "run" ? "Run a test" : "Measured results"}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       )}
 
       {view === "measured" ? (
@@ -299,16 +295,17 @@ export default function ResearchPanel({
           }}
         />
       ) : (
-        <button
-          type="button"
+        <Button
+          size="inline"
+          variant="link"
+          className="text-muted-foreground hover:text-foreground hover:no-underline text-xs"
           onClick={() => {
             setShowExplainer(true);
             localStorage.removeItem(EXPLAINER_KEY);
           }}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <HelpCircle size={12} /> What is this page for?
-        </button>
+        </Button>
       )}
 
       <Card>
@@ -590,7 +587,7 @@ export default function ResearchPanel({
                         key={c.name}
                         className="border-b border-border/60 last:border-0"
                       >
-                        <td className="w-8 px-3 py-2">
+                        <td className="px-3 py-1.5 w-8">
                           <span
                             className={cn(
                                   "grid h-4.5 w-4.5 place-items-center rounded-full text-micro font-semibold text-white",
@@ -600,8 +597,8 @@ export default function ResearchPanel({
                             {c.ok ? "✓" : "✕"}
                           </span>
                         </td>
-                        <td className="px-3 py-2 font-medium">{c.name}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                        <td className="px-3 py-1.5 font-medium">{c.name}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                           {c.detail}
                         </td>
                       </tr>
@@ -622,19 +619,19 @@ export default function ResearchPanel({
                     <table className="w-full border-collapse text-body">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-left">
-                      <th className="px-3 py-2 font-semibold">Fold</th>
-                      <th className="px-3 py-2 font-semibold">Train</th>
-                      <th className="px-3 py-2 font-semibold">Test</th>
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Fold</th>
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Train</th>
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Test</th>
                       {pKeys.map((k) => (
-                        <th key={k} className="px-3 py-2 font-semibold">
+                        <th key={k} className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">
                           {humanizeSentence(k.replace("param_", ""))}
                         </th>
                       ))}
-                      <th className="px-3 py-2 text-right font-semibold">Train Sharpe</th>
-                      <th className="px-3 py-2 text-right font-semibold">Test Sharpe</th>
-                      <th className="px-3 py-2 text-right font-semibold">Test return</th>
-                      <th className="px-3 py-2 text-right font-semibold">Test DD</th>
-                      <th className="px-3 py-2 text-right font-semibold">Trades</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Train Sharpe</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Test Sharpe</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Test return</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Test DD</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
                     </tr>
                   </thead>
                   <tbody>

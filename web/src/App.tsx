@@ -717,14 +717,15 @@ export default function App() {
               </span>
             </span>
             <Tooltip content="Sign out" side="right" delay={400}>
-            <button
-              type="button"
+            <Button
+              size="icon-sm"
+              variant="plain"
+              className="hover:bg-destructive/10 hover:text-destructive shrink-0 group-data-[state=collapsed]/sidebar:hidden"
               onClick={() => void signOut()}
               aria-label="Sign out"
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-data-[state=collapsed]/sidebar:hidden"
             >
-              <LogOut aria-hidden="true" className="size-4" />
-            </button>
+              <LogOut aria-hidden="true" />
+            </Button>
             </Tooltip>
           </div>
 
@@ -742,14 +743,15 @@ export default function App() {
             </span>
             {health?.session_active && (
               <Tooltip content="Disconnect broker" side="right" delay={400}>
-                <button
-                  type="button"
+                <Button
+                  size="icon-sm"
+                  variant="plain"
+                  className="hover:bg-destructive/10 hover:text-destructive shrink-0 group-data-[state=collapsed]/sidebar:hidden"
                   onClick={() => void disconnectBroker()}
                   aria-label="Disconnect broker"
-                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-data-[state=collapsed]/sidebar:hidden"
                 >
-                  <LogOut aria-hidden="true" className="size-4" />
-                </button>
+                  <LogOut aria-hidden="true" />
+                </Button>
               </Tooltip>
             )}
             <Tooltip content="Collapse sidebar (Ctrl+B)" side="right" delay={400}>
@@ -825,20 +827,26 @@ export default function App() {
               <LiveClock />
 
             {!health?.session_active && (
-              <Button size="sm" variant="outline" onClick={() => setShowLogin(true)} className="h-7 text-xs px-2.5">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setShowLogin(true)}
+              >
                 Log in
               </Button>
             )}
 
               <Tooltip content="Command palette (Ctrl+K)" side="bottom" delay={400}>
-            <button
-              type="button"
+            <Button
+              size="xs"
+              variant="quiet"
+              className="hidden sm:inline-flex"
+              aria-label="Open command palette"
               onClick={() => setPaletteOpen(true)}
-              className="hidden items-center gap-1.5 rounded-full border border-border/80 bg-card/60 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
             >
-              <Search className="h-3 w-3" />
-              <kbd className="rounded-lg border border-border/80 bg-muted/50 px-1 text-micro">⌘K</kbd>
-            </button>
+              <Search className="size-3" />
+              <kbd className="rounded-md border border-border bg-muted/50 px-1 text-micro">⌘K</kbd>
+            </Button>
               </Tooltip>
 
             <ThemeToggle

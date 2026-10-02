@@ -856,13 +856,13 @@ function RunHistory({
           <table className="w-full border-collapse text-[12.5px]">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
-                <th className="px-3 py-2 font-semibold">Run</th>
-                <th className="px-3 py-2 font-semibold">Strategy</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="px-3 py-2 text-right font-semibold">Return</th>
-                <th className="px-3 py-2 text-right font-semibold">Sharpe</th>
-                <th className="px-3 py-2 text-right font-semibold">Trades</th>
-                <th className="px-3 py-2 font-semibold">Created</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Run</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Strategy</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Return</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Sharpe</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -872,16 +872,16 @@ function RunHistory({
                   onClick={() => onOpen(r.run_id)}
                   className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40"
                 >
-                  <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">
+                  <td className="px-3 py-1.5 font-mono text-[11.5px] text-muted-foreground">
                     {r.run_id.slice(0, 8)}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-1.5">
                     {r.strategy ?? "—"}
                     {r.strategy_version !== null && (
                       <span className="ml-1 text-muted-foreground">v{r.strategy_version}</span>
                     )}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-1.5">
                     <StatusBadge status={r.status} />
                   </td>
                   <td
@@ -892,9 +892,9 @@ function RunHistory({
                   >
                     {fmtPct(r.total_return_pct)}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtNum(r.sharpe)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtNum(r.num_trades, 0)}</td>
-                  <td className="px-3 py-2 text-muted-foreground">
+                  <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(r.sharpe)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(r.num_trades, 0)}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
                     <RelativeTime value={r.created_at} />
                   </td>
                 </tr>
@@ -1254,15 +1254,15 @@ function Results({
                     <table className="w-full border-collapse text-[12.5px]">
                       <thead>
                         <tr className="border-b border-border bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
-                          <th className="px-3 py-2 font-semibold">#</th>
-                          <th className="px-3 py-2 font-semibold">Symbol</th>
-                          <th className="px-3 py-2 font-semibold">Side</th>
-                          <th className="px-3 py-2 text-right font-semibold">Qty</th>
-                          <th className="px-3 py-2 font-semibold">Entry</th>
-                          <th className="px-3 py-2 font-semibold">Exit</th>
-                          <th className="px-3 py-2 text-right font-semibold">Net P&L</th>
-                          <th className="px-3 py-2 text-right font-semibold">Return</th>
-                          <th className="px-3 py-2 font-semibold">Exited on</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">#</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Side</th>
+                          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Qty</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Entry</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Exit</th>
+                          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Net P&L</th>
+                          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Return</th>
+                          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Exited on</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1272,9 +1272,9 @@ function Results({
                             onClick={() => void openTrade(t.seq)}
                             className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40"
                           >
-                            <td className="px-3 py-2 text-muted-foreground">{t.seq}</td>
-                            <td className="px-3 py-2 font-medium">{t.symbol}</td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-1.5 text-muted-foreground">{t.seq}</td>
+                            <td className="px-3 py-1.5 font-medium">{t.symbol}</td>
+                            <td className="px-3 py-1.5">
                               <span
                                 className={cn(
                                   "text-caption font-semibold",
@@ -1286,16 +1286,16 @@ function Results({
                                 {t.direction}
                               </span>
                             </td>
-                            <td className="px-3 py-2 text-right tabular-nums">
+                            <td className="px-3 py-1.5 text-right tabular-nums">
                               {fmtNum(t.quantity, 0)}
                             </td>
-                            <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
                               {shortDate(t.entry_ts)}
                               <span className="ml-1.5 tabular-nums">
                                 {fmtNum(t.entry_price, 2)}
                               </span>
                             </td>
-                            <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
                               {shortDate(t.exit_ts)}
                               <span className="ml-1.5 tabular-nums">
                                 {fmtNum(t.exit_price, 2)}
@@ -1317,7 +1317,7 @@ function Results({
                             >
                               {fmtPct(t.return_pct)}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-1.5">
                               <ExitReason
                                 reason={t.exit_reason}
                                 stopPct={run.config?.stops?.stop_loss_pct ?? null}
@@ -1685,21 +1685,21 @@ function MonthlyMatrix({
           <table className="w-full border-collapse text-[11.5px]">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-[10.5px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-2.5 py-2 text-left font-semibold">Year</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Year</th>
                 {months.map((m) => (
-                  <th key={m} className="px-2 py-2 text-right font-semibold">
+                  <th key={m} className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">
                     {m}
                   </th>
                 ))}
-                <th className="px-2.5 py-2 text-right font-semibold">Year</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Year</th>
               </tr>
             </thead>
             <tbody>
               {matrix.map((row) => (
                 <tr key={row.year} className="border-b border-border/60 last:border-0">
-                  <td className="px-2.5 py-2 font-medium tabular-nums">{row.year}</td>
+                  <td className="px-3 py-1.5 font-medium tabular-nums">{row.year}</td>
                   {row.months.map((v, i) => (
-                    <td key={i} className="px-2 py-2 text-right">
+                    <td key={i} className="px-3 py-1.5 text-right">
                       {cell(v)}
                     </td>
                   ))}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getRunnerStatus, listSavedStrategies, monitorPnl, type Deployment, type MonitorPnl } from "./api";
 import { Card } from "./components/ui/card";
 import { cn } from "./lib/utils";
+import { Button } from "./components/ui/button";
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${inr(Math.abs(n))}`;
@@ -61,9 +62,9 @@ function RunCard({ d, name, pnl, runner, onManage }: {
               )}
             />
             {statusOf(d, runner)}
-            <button type="button" onClick={onManage} className="ml-2 text-primary hover:underline">
+            <Button size="inline" variant="link" onClick={onManage}>
               Manage
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -98,13 +99,14 @@ function RunCard({ d, name, pnl, runner, onManage }: {
               </div>
             ))}
             {held.length > 5 && (
-              <button
-                type="button"
+              <Button
+                size="inline"
+                variant="link"
+                className="text-xs"
                 onClick={() => setAll((v) => !v)}
-                className="w-full px-3.5 py-2 text-left text-xs text-primary hover:underline"
               >
                 {all ? "Show fewer" : `Show all ${held.length}`}
-              </button>
+              </Button>
             )}
           </div>
         )}

@@ -71,6 +71,7 @@ import {
   unrecordedMetrics,
   type Tone,
 } from "./lib/learning-view";
+import { Button } from "./components/ui/button";
 
 const TONE_CLASS: Record<Tone, string> = {
   good: "text-gain",
@@ -306,12 +307,12 @@ function ReadinessSection({
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border/60 text-left text-micro uppercase tracking-wider text-muted-foreground">
-                <th className="px-2 py-1.5 font-medium">Strategy</th>
-                <th className="px-2 py-1.5 font-medium">Forward trades</th>
-                <th className="px-2 py-1.5 font-medium">Next gate</th>
-                <th className="px-2 py-1.5 font-medium">Status</th>
-                <th className="px-2 py-1.5 font-medium">Context</th>
-                <th className="px-2 py-1.5 font-medium">Last trade</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Strategy</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Forward trades</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Next gate</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Context</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Last trade</th>
               </tr>
             </thead>
             <tbody>
@@ -319,7 +320,7 @@ function ReadinessSection({
                 const row = readinessRowView(s);
                 return (
                   <tr key={row.id} className="border-b border-border/40 last:border-0">
-                    <td className="px-2 py-1.5">
+                    <td className="px-3 py-1.5">
                       <div className="font-medium text-foreground">{row.name}</div>
                       <div className="text-micro text-muted-foreground">
                         {row.version}
@@ -327,17 +328,17 @@ function ReadinessSection({
                         {s.open_forward_trades > 0 ? ` · ${s.open_forward_trades} open` : ""}
                       </div>
                     </td>
-                    <td className="px-2 py-1.5 tabular-nums">{row.forward}</td>
-                    <td className="px-2 py-1.5">
+                    <td className="px-3 py-1.5 tabular-nums">{row.forward}</td>
+                    <td className="px-3 py-1.5">
                       <span className={TONE_CLASS[row.gateTone]}>{row.gate}</span>
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td className="px-3 py-1.5">
                     <span className={`rounded-full border px-2 py-0.5 text-micro font-medium uppercase tracking-wider ${STATE_BADGE[row.stateTone]}`}>
                         {row.stateLabel}
                       </span>
                     </td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{row.contextCoverage}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{row.lastTrade}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{row.contextCoverage}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{row.lastTrade}</td>
                   </tr>
                 );
               })}
@@ -497,15 +498,10 @@ function Header({
             onChange={(v) => onWindow(Number(v))}
             options={[30, 90, 180, 365].map((d) => ({ value: String(d), label: `${d} days` }))}
           />
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={busy}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs hover:bg-accent disabled:opacity-50"
-          >
+          <Button size="xs" variant="quiet" onClick={onRefresh} disabled={busy}>
             <RefreshCw className={busy ? "size-3.5 animate-spin" : "size-3.5"} />
             Rebuild
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -738,12 +734,12 @@ function PairTable({ pair }: { pair: DriftPair }) {
         <table className="w-full text-xs">
           <thead className="text-left text-muted-foreground">
             <tr className="border-b border-border/60">
-              <th className="py-1.5 pr-3 font-normal">metric</th>
-              <th className="py-1.5 pr-3 text-right font-normal">baseline</th>
-              <th className="py-1.5 pr-3 text-right font-normal">live</th>
-              <th className="py-1.5 pr-3 text-right font-normal">delta</th>
-              <th className="py-1.5 pr-3 text-right font-normal">n</th>
-              <th className="py-1.5 font-normal">verdict</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">metric</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">baseline</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">live</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">delta</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">n</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">verdict</th>
             </tr>
           </thead>
           <tbody>
@@ -751,12 +747,12 @@ function PairTable({ pair }: { pair: DriftPair }) {
               const view = metricView(m);
               return (
                 <tr key={m.metric} className="border-b border-border/30 last:border-0">
-                  <td className="py-1.5 pr-3">{view.label}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{view.baseline}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{view.live}</td>
+                  <td className="px-3 py-1.5">{view.label}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{view.baseline}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{view.live}</td>
                   {/* A withheld delta renders as a dash, never as 0.00. */}
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{view.delta}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                  <td className="px-3 py-1.5 text-right tabular-nums">{view.delta}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                     {view.sample}
                   </td>
                   <td className={`py-1.5 ${TONE_CLASS[view.tone]}`}>
@@ -863,24 +859,24 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
               <table className="w-full text-xs">
                 <thead className="text-left text-muted-foreground">
                   <tr className="border-b border-border/60">
-                    <th className="py-1.5 pr-3 font-normal">bucket</th>
-                    <th className="py-1.5 pr-3 text-right font-normal">n</th>
-                    <th className="py-1.5 pr-3 text-right font-normal">win rate</th>
-                    <th className="py-1.5 pr-3 text-right font-normal">mean</th>
-                    <th className="py-1.5 pr-3 text-right font-normal">median</th>
-                    <th className="py-1.5 pr-3 text-right font-normal">profit factor</th>
-                    <th className="py-1.5 pr-3 text-right font-normal">lift</th>
-                    <th className="py-1.5 pr-3 font-normal">mean 95% CI</th>
-                    <th className="py-1.5 pr-3 font-normal">sample adequacy</th>
-                    <th className="py-1.5 font-normal">verdict</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">bucket</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">n</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">win rate</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">mean</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">median</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">profit factor</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">lift</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">mean 95% CI</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">sample adequacy</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">verdict</th>
                   </tr>
                 </thead>
                 <tbody>
                   {bucketViews(bd.buckets, analysis.metric).map((b) => (
                     <tr key={b.label} className="border-b border-border/30 last:border-0">
-                      <td className="py-1.5 pr-3 font-medium">{b.label}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{b.n}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                      <td className="px-3 py-1.5 font-medium">{b.label}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{b.n}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
                         {b.winRate}
                         {b.winRateCi ? (
                           <span className="ml-1 text-micro text-muted-foreground">
@@ -888,14 +884,14 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
                           </span>
                         ) : null}
                       </td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{b.mean}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{b.median}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{b.profitFactor}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{b.lift}</td>
-                      <td className="py-1.5 pr-3 tabular-nums text-muted-foreground">
+                      <td className="px-3 py-1.5 text-right tabular-nums">{b.mean}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{b.median}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{b.profitFactor}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{b.lift}</td>
+                      <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
                         {b.interval || "—"}
                       </td>
-                      <td className="py-1.5 pr-3">
+                      <td className="px-3 py-1.5">
                         {b.sampleAdequacy === "adequate" ? (
                           <span className="rounded-md border border-gain/20 bg-gain/[0.08] px-1.5 py-0.5 text-micro font-medium text-gain">
                             Adequate
@@ -910,7 +906,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
                           </span>
                         )}
                       </td>
-                      <td className="py-1.5">
+                      <td className="px-3 py-1.5">
                         {b.suppressed ? (
                           <span className="text-muted-foreground" title={b.note}>
                             suppressed
@@ -1017,13 +1013,13 @@ function ObservationHistorySection({
         <table className="w-full text-xs">
           <thead className="text-left text-muted-foreground">
             <tr className="border-b border-border/60">
-              <th className="py-1.5 pr-3 font-normal">date</th>
-              <th className="py-1.5 pr-3 font-normal">strategy</th>
-              <th className="py-1.5 pr-3 font-normal">condition / bucket</th>
-              <th className="py-1.5 pr-3 text-right font-normal">n</th>
-              <th className="py-1.5 pr-3 font-normal">evidence class</th>
-              <th className="py-1.5 pr-3 text-right font-normal">confidence</th>
-              <th className="py-1.5 font-normal">significance</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">date</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">strategy</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">condition / bucket</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">n</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">evidence class</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">confidence</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">significance</th>
             </tr>
           </thead>
           <tbody>
@@ -1033,17 +1029,17 @@ function ObservationHistorySection({
                 obs.confidence != null ? `${(obs.confidence * 100).toFixed(0)}%` : "—";
               return (
                 <tr key={obs.observation_id} className="border-b border-border/30 last:border-0">
-                  <td className="py-1.5 pr-3 tabular-nums">{obs.date}</td>
-                  <td className="py-1.5 pr-3 font-mono text-caption">{obs.strategy_id}</td>
-                  <td className="py-1.5 pr-3 font-medium">{obs.condition_bucket}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{obs.sample_size}</td>
-                  <td className="py-1.5 pr-3">
+                  <td className="px-3 py-1.5 tabular-nums">{obs.date}</td>
+                  <td className="px-3 py-1.5 font-mono text-caption">{obs.strategy_id}</td>
+                  <td className="px-3 py-1.5 font-medium">{obs.condition_bucket}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{obs.sample_size}</td>
+                  <td className="px-3 py-1.5">
                     <span className="rounded-lg border border-border/60 bg-muted/40 px-1.5 py-0.5 text-micro font-mono">
                       {obs.evidence_class}
                     </span>
                   </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{confPct}</td>
-                  <td className="py-1.5 text-muted-foreground">
+                  <td className="px-3 py-1.5 text-right tabular-nums">{confPct}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
                     {res.significance || "insufficient_sample"}
                   </td>
                 </tr>
@@ -1172,15 +1168,10 @@ function DailyLearningCycleSection({
               <div>Last run: <span className="font-medium text-foreground">{new Date(cycle.completed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({cycle.runtime_seconds}s)</span></div>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onRunCycle}
-            disabled={running}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-xs font-medium hover:bg-accent disabled:opacity-50"
-          >
+          <Button size="xs" variant="outline" onClick={onRunCycle} disabled={running}>
             <RefreshCw className={running ? "size-3 animate-spin" : "size-3"} />
-            {running ? "Running Cycle…" : "Run Daily Cycle"}
-          </button>
+            {running ? "Running cycle…" : "Run daily cycle"}
+          </Button>
         </div>
       </div>
 

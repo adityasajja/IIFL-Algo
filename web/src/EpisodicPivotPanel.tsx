@@ -125,17 +125,17 @@ export default function EpisodicPivotPanel() {
               </div>
               <div className="overflow-x-auto rounded-lg border border-border/60">
                 <table className="w-full text-body">
-                  <thead className="bg-muted/40 text-caption uppercase tracking-wide text-muted-foreground">
+                  <thead className="bg-muted/40">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium">Variant</th>
-                      <th className="px-3 py-2 text-right font-medium">OOS Sharpe</th>
-                      <th className="px-3 py-2 text-right font-medium">Buy &amp; hold</th>
-                      <th className="px-3 py-2 text-right font-medium">OOS return</th>
-                      <th className="px-3 py-2 text-right font-medium">vs control</th>
-                      <th className="px-3 py-2 text-right font-medium">Trades</th>
-                      <th className="px-3 py-2 text-right font-medium">Expectancy</th>
-                      <th className="px-3 py-2 text-right font-medium">Hold</th>
-                      <th className="px-3 py-2 text-center font-medium">Verdict</th>
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Variant</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">OOS Sharpe</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Buy &amp; hold</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">OOS return</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">vs control</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Expectancy</th>
+                      <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Hold</th>
+                      <th className="px-3 py-2 text-center text-micro font-semibold uppercase tracking-wider text-muted-foreground">Verdict</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -225,34 +225,34 @@ function PremiseTable({ rows }: { rows: EpisodicPivotPremise[] }) {
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-[12.5px]">
-          <thead className="bg-muted/40 text-caption uppercase tracking-wide text-muted-foreground">
+          <thead className="bg-muted/40">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">Universe</th>
-              <th className="px-3 py-2 text-right font-medium">Gap ≥ 10%</th>
-              <th className="px-3 py-2 text-right font-medium">Gap ≥ 20%</th>
-              <th className="px-3 py-2 text-right font-medium">Catalyst days</th>
-              <th className="px-3 py-2 text-right font-medium">Best 20d move</th>
-              <th className="px-3 py-2 text-right font-medium">20d &gt; +50%</th>
-              <th className="px-3 py-2 text-right font-medium">20d fwd after catalyst</th>
+              <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Universe</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Gap ≥ 10%</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Gap ≥ 20%</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Catalyst days</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Best 20d move</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">20d &gt; +50%</th>
+              <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">20d fwd after catalyst</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.universe} className="border-t border-border/60">
-                <td className="px-3 py-2 capitalize">{pretty(p.universe)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 capitalize">{pretty(p.universe)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {p.gap_days?.["10"] ?? 0}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {p.gap_days?.["20"] ?? 0}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {p.joint_catalyst_days}
                   <span className="ml-1 text-caption text-muted-foreground">
                     ({p.joint_catalyst_pct_of_days?.toFixed(3)}%)
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {p.best_20d_move_pct !== null ? fmtPct(p.best_20d_move_pct, 0) : "—"}
                   {p.best_20d_symbol && (
                     <span className="ml-1 text-caption text-muted-foreground">
@@ -260,7 +260,7 @@ function PremiseTable({ rows }: { rows: EpisodicPivotPremise[] }) {
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {p.windows_20d_over_50pct?.toLocaleString()}
                   <span className="ml-1 text-caption text-muted-foreground">
                     ({p.windows_20d_over_50pct_share?.toFixed(3)}%)
@@ -304,8 +304,8 @@ function VariantRow({ name, r }: { name: string; r: EpisodicPivotVariant }) {
   if (r.error) {
     return (
       <tr className="border-t border-border/60">
-        <td className="px-3 py-2 font-medium">{pretty(name)}</td>
-        <td className="px-3 py-2 text-destructive" colSpan={8}>
+        <td className="px-3 py-1.5 font-medium">{pretty(name)}</td>
+        <td className="px-3 py-1.5 text-destructive" colSpan={8}>
           {r.error}
         </td>
       </tr>
@@ -313,7 +313,7 @@ function VariantRow({ name, r }: { name: string; r: EpisodicPivotVariant }) {
   }
   return (
     <tr className="border-t border-border/60">
-      <td className="px-3 py-2 whitespace-nowrap font-medium">{pretty(name)}</td>
+      <td className="px-3 py-1.5 whitespace-nowrap font-medium">{pretty(name)}</td>
       <td
         className={cn(
           "px-3 py-2 text-right tabular-nums",
@@ -322,7 +322,7 @@ function VariantRow({ name, r }: { name: string; r: EpisodicPivotVariant }) {
       >
         {fmtNum(r.oos_sharpe)}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {fmtNum(r.benchmark_sharpe)}
       </td>
       <td
@@ -335,7 +335,7 @@ function VariantRow({ name, r }: { name: string; r: EpisodicPivotVariant }) {
       >
         {fmtPct(r.oos_return_pct ?? 0, 1)}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums">
+      <td className="px-3 py-1.5 text-right tabular-nums">
         {z === null || z === undefined ? (
           <Minus className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
         ) : (
@@ -349,7 +349,7 @@ function VariantRow({ name, r }: { name: string; r: EpisodicPivotVariant }) {
           </span>
         )}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {m?.trades?.toLocaleString() ?? r.oos_trades?.toLocaleString() ?? "—"}
       </td>
       <td
@@ -364,12 +364,12 @@ function VariantRow({ name, r }: { name: string; r: EpisodicPivotVariant }) {
           ? `${m.expectancy_r >= 0 ? "+" : ""}${fmtNum(m.expectancy_r, 3)}R`
           : "—"}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {m?.median_hold_days !== null && m?.median_hold_days !== undefined
           ? `${m.median_hold_days}d`
           : "—"}
       </td>
-      <td className="px-3 py-2 text-center">
+      <td className="px-3 py-1.5 text-center">
         {r.passed ? <Badge tone="good">pass</Badge> : <Badge tone="warn">fail</Badge>}
       </td>
     </tr>

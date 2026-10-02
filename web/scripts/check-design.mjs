@@ -37,6 +37,15 @@ const RULES = {
     // style={{ a: "x", b: 4 }} with no template, ternary, call or identifier values.
     re: /style=\{\{\s*(?:[A-Za-z]+\s*:\s*(?:"[^"]*"|'[^']*'|-?[\d.]+)\s*,?\s*)+\}\}/g,
   },
+  "raw-button": {
+    why: "Use <Button> (size=xs for toolbars), <Chip> for a filter, <Tabs> for views. A raw <button> is only for a clickable row or tile.",
+    re: /<button\b/g,
+    skip: /components[\\/]/,
+  },
+  "table-cell-padding": {
+    why: "Table cells use px-3 (py-2 header, py-1.5 body). See STYLE_GUIDE.md 3.9.",
+    re: /<t[dh]\b[^>]*className="[^"]*\b(?:p-\d|px-(?!3\b)[\d.]+|pl-\d|pr-\d)\b/g,
+  },
   "font-bold": {
     why: "Weights are 400 / 500 / 600. Use font-semibold, not font-bold.",
     re: /\bfont-bold\b/g,
@@ -62,7 +71,8 @@ for (const file of walk(SRC)) {
   if (ALLOW.some((re) => re.test(file))) continue;
   const text = code(readFileSync(file, "utf8"));
   const rel = relative(SRC, file).replace(/\\/g, "/");
-  for (const [rule, { re }] of Object.entries(RULES)) {
+  for (const [rule, { re, skip }] of Object.entries(RULES)) {
+    if (skip && skip.test(file)) continue;
     const n = (text.match(re) ?? []).length;
     if (n) (counts[rel] ??= {})[rule] = n;
   }

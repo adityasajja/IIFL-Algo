@@ -7,6 +7,7 @@ import { Switch } from "./components/motion/switch";
 import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
+import { Button } from "./components/ui/button";
 
 type SortKey = "score" | "ret_1m" | "vs_high" | "rsi" | "vol_x" | "last";
 type Mode = "watchlist" | "all";
@@ -192,20 +193,20 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
           <table className="w-full border-collapse whitespace-nowrap text-body">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
-                <th className="px-2 py-2 font-semibold">Symbol</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
                     onClick={() => onSort(c.key)}
                     title="sort"
-                    className="cursor-pointer select-none px-2 py-2 text-right font-semibold hover:text-foreground"
+                    className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground"
                   >
                     {c.label}
                     {sortKey === c.key ? (sortDir === -1 ? " ▼" : " ▲") : ""}
                   </th>
                 ))}
-                <th className="px-2 py-2 font-semibold">Trend</th>
-                <th className="px-2 py-2 font-semibold">Signal</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trend</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Signal</th>
               </tr>
             </thead>
             <tbody>
@@ -214,14 +215,22 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                 const ltp = tick?.ltp ?? r.last;
                 return (
                   <tr key={r.symbol} className="border-b border-border/60 transition-colors last:border-0 hover:bg-primary/[0.03]">
-                    <td className="px-2 py-1.5">
+                    <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => openChart(r.symbol)} title="Open chart" className="font-semibold hover:underline">{r.symbol.replace("-EQ", "")}</button>
+                        <Button
+                          size="inline"
+                          variant="link"
+                          className="font-semibold text-foreground"
+                          onClick={() => openChart(r.symbol)}
+                          title="Open chart"
+                        >
+                          {r.symbol.replace("-EQ", "")}
+                        </Button>
                         {tick && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" />}
                       </div>
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
+                    <td className="px-3 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
                       <span
                         className={cn(
                           "transition-colors duration-300 font-medium",
@@ -241,11 +250,11 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                   <td className={cn("px-2 py-1.5 text-right tabular-nums", r.rsi < 30 ? "text-gain" : r.rsi > 70 ? "text-destructive" : "")}>
                     {r.rsi.toFixed(0)}
                   </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{r.vol_x.toFixed(1)}</td>
-                  <td className="px-2 py-1.5">
+                  <td className="px-3 py-1.5 text-right tabular-nums">{r.vol_x.toFixed(1)}</td>
+                  <td className="px-3 py-1.5">
                     <Pill tone={r.trend === "UP" ? "up" : r.trend === "DOWN" ? "down" : "flat"}>{r.trend === "UP" ? "Up" : r.trend === "DOWN" ? "Down" : "Flat"}</Pill>
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className="px-3 py-1.5">
                     <span className="inline-flex flex-wrap gap-1">
                       {r.breakout && <Pill tone="up">Breakout</Pill>}
                       {r.gold_cross_5d && <Pill tone="gold">Golden cross</Pill>}

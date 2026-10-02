@@ -220,15 +220,33 @@ headline figure so they all align and read alike.
 - `EmptyState`: nothing here yet. Say what is missing and what to do next ("No signals yet. They
   appear when a paper bar fires.").
 
-### 3.6 Button (`button.tsx`) and toolbar buttons
+### 3.6 Button (`button.tsx`) and Chip (`chip.tsx`)
 
-- `<Button>`: the call to action. Variants `primary`, `secondary`, `outline`, `ghost`. One `primary`
-  per view.
-- `toolbarButton` (`form-styles.ts`): the compact action that sits in a card's toolbar (Refresh,
-  Run, Close).
+`<Button>` is the one button. Pick a **variant** for how loud it is and a **size** for where it sits.
 
-Raw `<button>` with hand-written colours is not allowed. Destructive actions use `outline` plus a
-confirmation, not a red button.
+| Variant | Use |
+|---|---|
+| `primary` | The call to action. One per view. |
+| `secondary` / `outline` | Alternatives next to it; destructive actions use `outline` plus a confirmation, never red fill. |
+| `quiet` | Neutral and low-key: Close, Cancel, Refresh, filters. |
+| `ghost` | Text action in the brand colour. |
+| `plain` | Borderless and muted: icon-only controls (remove, move, collapse). |
+| `link` | Reads as a link, acts as a button (Retry, Show all, a symbol that opens a chart). |
+
+| Size | Height | Use |
+|---|---|---|
+| `md` / `sm` / `lg` | 40 / 40 / 44 | A page's or a dialog's main actions. |
+| `xs` | 32 | **Toolbars and dense panels**: a card's Refresh / Run / Close, table-adjacent actions. |
+| `icon-sm` | 32 square | Icon-only. Needs an `aria-label`; the icon is sized for you, so pass no size. |
+| `inline` | text height | `link` variant inside a sentence or a table cell. |
+
+`<Chip selected>` is a toggle: a filter, a sort key, one option of a small set in a toolbar. It sets
+`aria-pressed`. If the choice switches a whole view, use `Tabs` (3.8), not chips.
+
+Do not size or colour a `Button` with a `className` (`h-7 text-xs bg-...`): that is what `size` and
+`variant` are for. A className may add layout (`ml-auto`, `w-full`) or a tone hover (`hover:text-loss`).
+A raw `<button>` is only for a row or a tile that is clickable as a whole (a list row, a disclosure
+header, a heatmap cell), and then it uses tokens.
 
 ### 3.7 Form fields (`form-styles.ts`, `select.tsx`, `motion/input.tsx`, `motion/switch.tsx`)
 
@@ -247,14 +265,16 @@ One component, three variants, each with one job:
 | `segment` | Switching a **view within a section**, or a small option set. Second level. | Overview / Sectors / Stocks; Today / Week / Month. |
 | `underline` | Switching inside a **panel or dialog**. | Detail tabs in a drawer. |
 
-The track (border and fill) belongs to the variant, so do not restyle `TabsList`. Never write tabs from buttons. A page has at most two tab levels.
+The track (border and fill) belongs to the variant, so do not restyle `TabsList`. Never write tabs from buttons, including a two-option AND/OR switch or a timeframe row. A page has at most two tab levels.
 
 ### 3.9 Tables
 
 Hand-built tables use the same classes so they look identical:
 
 - Header cell: `px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground`
-- Body cell: `px-3 py-1.5 text-body`
+- Body cell: `px-3 py-1.5 text-body` (keep it even when the table sets its own text size; an empty or
+  expanded-detail row may use more padding)
+- No other cell padding (`p-3`, `px-2`, `pr-3`): the columns of two tables should line up.
 - **Right-align numbers**; left-align text. All numbers `tabular-nums`.
 - Row: `border-b border-border/50`; stripe alternate rows with `bg-muted/20`; a muted/suppressed row is
   `opacity-60`.
@@ -318,7 +338,7 @@ is open and `Market closed` (muted) otherwise. Anything computed from end-of-day
 ### 4.4 Filters and toolbars
 
 A row of `fieldLabel` + control pairs, wrapping, aligned to the bottom (`items-end`), with the action
-(`toolbarButton`) last. Changing a filter re-runs the view; if it is expensive, the action is explicit.
+(`<Button size="xs">`) last. Changing a filter re-runs the view; if it is expensive, the action is explicit.
 
 ### 4.5 Lists with status
 
@@ -397,8 +417,8 @@ a gauge angle.
 ## 9. Enforcement
 
 `bun run check:design` (also run by `bun run build`) fails when a file adds any of: a hex colour, a raw
-palette colour (`text-emerald-500`), a pixel text size (`text-[13px]`), a static inline `style`, or
-`font-bold`.
+palette colour (`text-emerald-500`), a pixel text size (`text-[13px]`), a static inline `style`,
+`font-bold`, a raw `<button>` (outside the shared components), or non-standard table-cell padding.
 
 It is a **ratchet**: `scripts/design-baseline.json` records the handful of known exceptions (canvas
 drawing code and the like). A file may not exceed its baseline, so the system only gets stricter. If a

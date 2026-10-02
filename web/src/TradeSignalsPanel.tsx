@@ -44,6 +44,7 @@ import { Select } from "./components/ui/select";
 import { humanizeSentence } from "./lib/format";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
+import { Chip } from "./components/ui/chip";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -175,13 +176,14 @@ function PendingRow({
               {isBuy ? "Buy" : "Sell"}
             </span>
             <Tooltip content="Open chart" side="top" delay={400}>
-            <button
-              type="button"
+            <Button
+              size="inline"
+              variant="link"
               onClick={() => onOpenChart?.(sig.symbol)}
-              className="text-base font-semibold hover:underline"
+              className="text-base font-semibold text-foreground"
             >
               {sig.symbol.replace("-EQ", "")}
-            </button>
+            </Button>
             </Tooltip>
             <span className="text-xs text-muted-foreground">{sig.setup}</span>
           </div>
@@ -191,7 +193,14 @@ function PendingRow({
         </div>
 
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => void handleSkip()} disabled={executing || skipping} className="text-muted-foreground">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void handleSkip()}
+            disabled={executing || skipping}
+            className="text-muted-foreground"
+          >
+
             {skipping ? <ButtonLoader /> : null}
             Skip
           </Button>
@@ -240,15 +249,15 @@ function PendingRow({
           <span>{timeAgo(sig.created_at)}</span>
           {sig.expires_at ? <span className="text-warning">{timeLeft(sig.expires_at)}</span> : null}
           {hasDetails ? (
-            <button
-              type="button"
+            <Button
+              size="icon-sm"
+              variant="plain"
               onClick={() => setOpen((o) => !o)}
               aria-expanded={open}
               aria-label={open ? "Hide details" : "Show details"}
-              className="grid size-6 place-items-center rounded-full hover:bg-muted hover:text-foreground"
             >
               <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
-            </button>
+            </Button>
           ) : null}
         </span>
       </div>
@@ -537,13 +546,14 @@ export default function TradeSignalsPanel({
       <div className="flex flex-wrap items-center gap-3">
         {settings && (
           <Tooltip content="Change position sizing and risk" side="top" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="inline"
+            variant="link"
+            className="text-muted-foreground hover:text-foreground hover:no-underline text-sm"
             onClick={() => setShowSettings((v) => !v)}
-            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             ₹{(settings.capital / 1e5).toFixed(1)}L capital · risking ₹{fmt(maxRisk, 0)} a trade
-          </button>
+          </Button>
           </Tooltip>
         )}
         <div className="ml-auto flex items-center gap-2">
@@ -560,7 +570,13 @@ export default function TradeSignalsPanel({
             {scanning ? <ButtonLoader size={16} /> : <RefreshCw className="h-4 w-4" />}
             {scanning ? "Scanning…" : "Scan now"}
           </Button>
-          <Button variant="outline" onClick={() => setShowSettings((v) => !v)} className="gap-1.5" aria-label="Settings">
+          <Button
+            variant="outline"
+            onClick={() => setShowSettings((v) => !v)}
+            className="gap-1.5"
+            aria-label="Settings"
+          >
+
             <Settings className="h-4 w-4" />
             Settings
           </Button>
@@ -627,20 +643,9 @@ export default function TradeSignalsPanel({
                 ["BUY", `Buy ${buyCount}`],
                 ["SELL", `Sell ${sellCount}`],
               ] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setSideFilter(key)}
-                  aria-pressed={sideFilter === key}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-xs transition-colors",
-                    sideFilter === key
-                      ? "border-primary/40 bg-primary/10 text-foreground"
-                      : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
-                  )}
-                >
+                <Chip key={key} selected={sideFilter === key} onClick={() => setSideFilter(key)}>
                   {label}
-                </button>
+                </Chip>
               ))}
             </div>
           ) : null}
@@ -661,13 +666,14 @@ export default function TradeSignalsPanel({
               ))}
             </div>
             {filteredPending.length > 8 ? (
-              <button
-                type="button"
+              <Button
+                size="xs"
+                variant="quiet"
+                className="mx-auto flex"
                 onClick={() => setShowAllPending((v) => !v)}
-                className="mx-auto block rounded-full border border-border px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 {showAllPending ? "Show fewer" : `Show ${filteredPending.length - 8} more`}
-              </button>
+              </Button>
             ) : null}
           </>
         )}

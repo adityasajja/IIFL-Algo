@@ -16,8 +16,12 @@ import { EASE_OUT, SPRING_PRESS } from "../../lib/ease";
 import { useHoverCapable } from "../../lib/hooks/use-hover-capable";
 import { cn } from "../../lib/utils";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "outline";
-export type ButtonSize = "sm" | "md" | "lg" | "icon";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "outline" | "quiet" | "plain" | "link";
+/**
+ * `xs` is the compact 32px size for toolbars and dense panels; `icon-sm` is its square twin;
+ * `inline` has no box at all, for a text link that has to behave like a button.
+ */
+export type ButtonSize = "xs" | "sm" | "md" | "lg" | "icon" | "icon-sm" | "inline";
 
 export interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children"> {
   variant?: ButtonVariant;
@@ -35,6 +39,12 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
   secondary: "border border-primary bg-card text-primary hover:bg-primary/[0.06] active:bg-primary/10",
   ghost: "bg-transparent text-primary hover:bg-primary/[0.06]",
   outline: "border border-primary-subdued bg-transparent text-primary hover:border-primary hover:bg-primary/[0.06]",
+  /** Neutral and low-key: Close, Cancel, icon-only controls. */
+  quiet: "border border-border bg-transparent text-muted-foreground hover:border-primary-subdued hover:text-foreground",
+  /** Borderless and muted: icon-only controls (remove, move, collapse). */
+  plain: "bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+  /** Reads as a link, acts as a button. */
+  link: "bg-transparent text-primary hover:underline",
 };
 
 const SIZE_CLASS: Record<ButtonSize, string> = {
@@ -42,6 +52,9 @@ const SIZE_CLASS: Record<ButtonSize, string> = {
   md: "h-10 min-h-[40px] px-4 text-base gap-2 rounded-full",
   lg: "h-11 min-h-[44px] px-4 text-base gap-2 rounded-full",
   icon: "h-10 w-10 min-h-[40px] rounded-full",
+  xs: "h-8 min-h-[32px] px-3 text-xs gap-1.5 rounded-full",
+  "icon-sm": "size-8 min-h-[32px] rounded-full [&>svg]:size-3.5",
+  inline: "gap-1 rounded-md",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -88,8 +101,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <motion.button
         ref={ref}
         type="button"
-        whileTap={reduce ? undefined : { scale: pressScale }}
-        whileHover={reduce || !canHover ? undefined : { scale: 1.02 }}
+        whileTap={reduce || size === "inline" ? undefined : { scale: pressScale }}
+        whileHover={reduce || !canHover || size === "inline" ? undefined : { scale: 1.02 }}
         transition={SPRING_PRESS}
         onPointerDown={handlePointerDown}
         className={cn(

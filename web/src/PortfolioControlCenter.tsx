@@ -575,17 +575,17 @@ export function PortfolioControlCenter() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-border/60 text-caption text-muted-foreground uppercase font-semibold">
-                <th className="p-3">Strategy / Deployment</th>
-                <th className="p-3">Status</th>
-                <th className="p-3 text-right">Allocated</th>
-                <th className="p-3 text-right">Used</th>
-                <th className="p-3 text-right">Available</th>
-                <th className="p-3 text-right">Exposure</th>
-                <th className="p-3 text-right">Realized P&L</th>
-                <th className="p-3 text-right">Total P&L</th>
-                <th className="p-3 text-right">Return %</th>
-                <th className="p-3 text-right">Trades</th>
-                <th className="p-3 text-right">P&L Share</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Strategy / Deployment</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Allocated</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Used</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Available</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Exposure</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Realized P&L</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Total P&L</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Return %</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">P&L Share</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
@@ -610,7 +610,7 @@ export function PortfolioControlCenter() {
                   const pnlPos = strat.total_pnl >= 0;
                   return (
                     <tr key={strat.deployment_id} className="hover:bg-muted/20 transition-colors">
-                      <td className="p-3 font-semibold text-foreground">
+                      <td className="px-3 py-1.5 font-semibold text-foreground">
                         <div className="flex items-center gap-1.5">
                           <span>{strat.strategy_name}</span>
                             <span className="text-micro text-muted-foreground font-mono">
@@ -618,7 +618,7 @@ export function PortfolioControlCenter() {
                           </span>
                         </div>
                       </td>
-                      <td className="p-3">
+                      <td className="px-3 py-1.5">
                           <AnimatedBadge
                             status={
                             strat.deployment_status === "RUNNING"
@@ -633,23 +633,23 @@ export function PortfolioControlCenter() {
                           {strat.deployment_status}
                           </AnimatedBadge>
                       </td>
-                      <td className="p-3 text-right font-medium tabular-nums">{INR(strat.allocated)}</td>
-                      <td className="p-3 text-right tabular-nums text-muted-foreground">{INR(strat.used)}</td>
-                        <td className="p-3 text-right tabular-nums text-gain font-medium">
+                      <td className="px-3 py-1.5 text-right font-medium tabular-nums">{INR(strat.allocated)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{INR(strat.used)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-gain font-medium">
                         {INR(strat.available)}
                       </td>
-                      <td className="p-3 text-right tabular-nums">{INR(strat.exposure)}</td>
-                      <td className="p-3 text-right tabular-nums">{INR(strat.realized)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{INR(strat.exposure)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{INR(strat.realized)}</td>
                       <td className={cn("p-3 text-right font-semibold tabular-nums", pnlPos ? "text-gain" : "text-destructive")}>
                         {pnlPos ? "+" : ""}{INR(strat.total_pnl)}
                       </td>
                       <td className={cn("p-3 text-right font-medium tabular-nums", (strat.return_pct ?? 0) >= 0 ? "text-gain" : "text-destructive")}>
                         {strat.return_pct !== null ? `${strat.return_pct > 0 ? "+" : ""}${strat.return_pct}%` : "—"}
                       </td>
-                      <td className="p-3 text-right tabular-nums text-muted-foreground">
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                         {strat.trades_closed} closed {strat.trades_open > 0 ? `(${strat.trades_open} open)` : ""}
                       </td>
-                      <td className="p-3 text-right tabular-nums text-muted-foreground font-medium">
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground font-medium">
                         {PCT(strat.contribution)}
                       </td>
                     </tr>
@@ -826,12 +826,12 @@ export function PortfolioControlCenter() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-border/60 text-caption text-muted-foreground uppercase font-semibold">
-                <th className="p-3">Symbol</th>
-                <th className="p-3">Sector</th>
-                <th className="p-3 text-right">Net Quantity</th>
-                <th className="p-3 text-right">Value (₹)</th>
-                <th className="p-3 text-right">% of Capital</th>
-                <th className="p-3">Active Deployments</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Sector</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Net Quantity</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Value (₹)</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">% of Capital</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Active Deployments</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
@@ -844,14 +844,14 @@ export function PortfolioControlCenter() {
               ) : (
                 open_positions.map((p) => (
                   <tr key={p.symbol} className="hover:bg-muted/20 transition-colors">
-                    <td className="p-3 font-semibold text-foreground">{p.symbol}</td>
-                    <td className="p-3 text-muted-foreground">{p.sector}</td>
-                    <td className="p-3 text-right font-medium tabular-nums">
+                    <td className="px-3 py-1.5 font-semibold text-foreground">{p.symbol}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{p.sector}</td>
+                    <td className="px-3 py-1.5 text-right font-medium tabular-nums">
                       {p.qty > 0 ? `+${p.qty}` : p.qty}
                     </td>
-                    <td className="p-3 text-right font-medium tabular-nums">{INR(p.value)}</td>
-                    <td className="p-3 text-right text-muted-foreground tabular-nums">{PCT(p.pct_of_capital)}</td>
-                    <td className="p-3">
+                    <td className="px-3 py-1.5 text-right font-medium tabular-nums">{INR(p.value)}</td>
+                    <td className="px-3 py-1.5 text-right text-muted-foreground tabular-nums">{PCT(p.pct_of_capital)}</td>
+                    <td className="px-3 py-1.5">
                       <div className="flex flex-wrap gap-1">
                         {p.deployments.map((d) => (
                           <span key={d} className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-mono text-muted-foreground">

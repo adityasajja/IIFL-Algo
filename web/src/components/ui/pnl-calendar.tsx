@@ -306,7 +306,7 @@ function DayDetail({
         </div>
         <div className="flex items-center gap-3">
         {detail && <span className={cn("text-sm font-semibold tabular-nums", detail.total >= 0 ? "text-gain" : "text-loss")}>{inr(detail.total)}</span>}
-          <Button variant="ghost" size="sm" onClick={onClose} className="h-7 px-2 text-xs">
+          <Button variant="ghost" size="xs" onClick={onClose}>
             Close
           </Button>
         </div>
@@ -427,21 +427,19 @@ function TradingProfit({
         />
         </div>
         <Button
-          size="sm"
+          size="xs"
           variant="primary"
           disabled={!valid || busy}
           onClick={() => void run(() => saveTradingProfit(date, parsed, note))}
-          className="h-8 text-xs"
         >
           {current ? "Update" : "Save"}
         </Button>
         {current && (
           <Button
-            size="sm"
+            size="xs"
             variant="outline"
             disabled={busy}
             onClick={() => void run(() => removeTradingProfit(date))}
-            className="h-8 text-xs"
           >
             Remove
           </Button>

@@ -18,6 +18,7 @@ import {
   type StrategyVersion,
 } from "./api";
 import { Button } from "./components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { Tooltip } from "./components/motion/tooltip";
 import { BouncyAccordion } from "./components/motion/bouncy-accordion";
 import { Card, CardHeader, ErrorBox } from "./components/ui/card";
@@ -577,14 +578,16 @@ function ConditionRow({
         />
       ) : null}
       <Tooltip content="Remove condition" side="left" delay={400}>
-        <button
-          type="button"
+        <Button
+          size="icon-sm"
+          variant="plain"
+          aria-label="Remove condition"
           onClick={onRemove}
           disabled={!removable}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-30"
+          className="shrink-0 hover:bg-destructive/10 hover:text-destructive"
         >
-          <Trash2 className="size-3.5" />
-        </button>
+          <Trash2 />
+        </Button>
       </Tooltip>
     </div>
   );
@@ -612,21 +615,13 @@ function ConditionGroup({
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-medium text-foreground">{title}</div>
         {conditions.length > 1 && (
-          <div className="flex items-center gap-1 rounded-full bg-muted p-0.5 text-xs">
-            {(["and", "or"] as const).map((j) => (
-              <button
-                key={j}
-                type="button"
-                onClick={() => onJoinChange(j)}
-                className={cn(
-                  "rounded-full px-2.5 py-1 font-medium transition-colors",
-                  join === j ? "bg-card text-foreground " : "text-muted-foreground",
-                )}
-              >
-                {j === "and" ? "all must be true" : "any can be true"}
-              </button>
-            ))}
-          </div>
+          <Tabs value={join} onValueChange={(v) => onJoinChange(v as "and" | "or")} variant="segment">
+            <TabsList>
+              {(["and", "or"] as const).map((j) => (
+                <TabsTrigger key={j} value={j}>{j === "and" ? "all must be true" : "any can be true"}</TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         )}
       </div>
       <p className="text-xs text-muted-foreground">{hint}</p>
@@ -764,9 +759,6 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
     });
   };
 
-  const ghost =
-    "inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-xs transition-colors hover:bg-muted disabled:opacity-50";
-
   /** Versions, deploy-to-paper, and the rule editor for whichever strategy is
    * selected. Shared by the single-strategy layout and by each expanded
    * accordion row — defined once, as a closure over this component's own
@@ -796,22 +788,28 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                           <RelativeTime value={v.created_at} absolute={false} className="text-muted-foreground" />
                         </span>
                         {v.deployable && (
-                          <button type="button" onClick={() => setRunFor(v.version)} className={ghost}>
+                          <Button size="xs" variant="quiet" onClick={() => setRunFor(v.version)}>
                             <Play className="h-3 w-3" />
                             Run on paper
-                          </button>
+                          </Button>
                         )}
-                        <button type="button" disabled={busy !== null} onClick={() => void editVersion(v.version)} className={ghost}>
+                        <Button
+                          size="xs"
+                          variant="quiet"
+                          disabled={busy !== null}
+                          onClick={() => void editVersion(v.version)}
+                        >
                           Edit
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="quiet"
+                          className="hover:text-loss"
                           disabled={busy !== null}
                           onClick={() => void removeVersion(v.version)}
-                className={cn(ghost, "text-muted-foreground hover:text-loss")}
                         >
                           Delete
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -823,16 +821,16 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                 {runFor !== null && (
                   <div className="space-y-2 border-t border-border p-4">
                     <div className="flex justify-end">
-                      <button
-                        type="button"
+                      <Button
+                        size="xs"
+                        variant="quiet"
                         disabled={busy !== null}
                         onClick={() =>
                           run("stocks", async () => setStocks((await getResearchedStocks()).symbols.join(", ")))
                         }
-                        className={cn(ghost, "text-muted-foreground")}
                       >
                         {busy === "stocks" ? "Loading…" : "Use the researched stocks"}
-                      </button>
+                      </Button>
                     </div>
                     <input
                       autoFocus
@@ -851,8 +849,9 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                 className="w-28 rounded-xl border border-border bg-transparent px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary/50"
                         />
                       </label>
-                      <button
-                        type="button"
+                      <Button
+                        size="xs"
+                        variant="outline"
                         disabled={busy !== null || !stocks.trim() || !Number(capital)}
                         onClick={() =>
                           run("paper", async () => {
@@ -869,13 +868,12 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                             onOpenPaper();
                           })
                         }
-                        className={ghost}
                       >
                         {busy === "paper" ? "Starting…" : "Start"}
-                      </button>
-                      <button type="button" onClick={() => setRunFor(null)} className={cn(ghost, "text-muted-foreground")}>
+                      </Button>
+                      <Button size="xs" variant="quiet" onClick={() => setRunFor(null)}>
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -928,8 +926,9 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
           {rules.kind === "custom" ? (
             <div className="space-y-4">
               <div className="flex items-center justify-end">
-                <button
-                  type="button"
+                <Button
+                  size="xs"
+                  variant="quiet"
                   onClick={() =>
                     setRules(
                       rules.customAdvanced
@@ -945,11 +944,10 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                           },
                     )
                   }
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                 >
                 {rules.customAdvanced ? <ListChecks className="size-3.5" /> : <Code2 className="size-3.5" />}
                   {rules.customAdvanced ? "Switch to builder" : "Edit formula as text"}
-                </button>
+                </Button>
               </div>
 
               {rules.customAdvanced ? (
@@ -1371,17 +1369,18 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                   s.strategy_id === selected ? (
                     <div className="-mx-5 -mt-2 border-t border-border">
                       <div className="flex items-center justify-end gap-2 px-5 py-2.5">
-                      <button type="button" onClick={() => setEditing((v) => !v)} className={ghost}>
+                      <Button size="xs" variant="quiet" onClick={() => setEditing((v) => !v)}>
                           {editing ? "Close" : "Set rules"}
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="quiet"
+                          className="hover:text-loss"
                           disabled={busy !== null}
                           onClick={() => void remove(s)}
-                          className={cn(ghost, "text-muted-foreground hover:text-loss")}
                         >
                           Remove
-                    </button>
+                        </Button>
                   </div>
                       {renderVersionsBody()}
               </div>
@@ -1394,10 +1393,10 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
 
         {!creating ? (
           <div>
-            <button type="button" onClick={() => setCreating(true)} className={ghost}>
+            <Button size="xs" variant="quiet" onClick={() => setCreating(true)}>
               <Plus className="h-3 w-3" />
               New strategy
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="space-y-2">
@@ -1415,8 +1414,9 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
               className="w-full rounded-xl border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-primary/50"
             />
             <div className="flex items-center gap-2">
-              <button
-                type="button"
+              <Button
+                size="xs"
+                variant="outline"
                 disabled={busy !== null || !name.trim()}
                 onClick={() =>
                   run("create", async () => {
@@ -1433,21 +1433,20 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                     setEditing(true);
                   })
                 }
-                className={ghost}
               >
                 {busy === "create" ? "Creating…" : "Create"}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="xs"
+                variant="quiet"
                 onClick={() => {
                   setCreating(false);
                   setName("");
                   setAbout("");
                 }}
-                className={cn(ghost, "text-muted-foreground")}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         )}

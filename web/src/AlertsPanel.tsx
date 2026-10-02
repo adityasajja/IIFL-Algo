@@ -38,6 +38,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { Chip } from "./components/ui/chip";
 
 const KINDS = [
   { v: "price_below", label: "Price falls to/below ₹", needs: true, hint: "exit / falling-stock alert" },
@@ -269,19 +270,17 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              variant="secondary"
-              size="sm"
+              variant="quiet"
+              size="xs"
               onClick={() => void testTelegram()}
-              className="border border-border bg-card text-xs hover:bg-muted"
             >
               <Send size={13} className="mr-1.5 text-blue-400" />
               Send test message
             </Button>
             <Button
-              size="sm"
+              size="xs"
               disabled={evaluating}
               onClick={() => void handleEvaluateNow()}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium text-xs h-9 px-3.5"
             >
               {evaluating ? (
                 <>
@@ -322,19 +321,14 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               </div>
               <div className="flex gap-1 pt-1">
                 {(["both", "holdings", "watchlist"] as const).map((u) => (
-                  <button
+                  <Chip
                     key={u}
-                    type="button"
+                    selected={intelConfig.universe === u}
                     onClick={() => void updateConfigField("universe", u)}
-                    className={cn(
-                      "flex-1 rounded-md py-1 text-caption font-semibold capitalize transition-colors",
-                      intelConfig.universe === u
-                        ? "bg-primary text-primary-foreground "
-                        : "bg-background text-muted-foreground hover:text-foreground"
-                    )}
+                    className="flex-1 capitalize"
                   >
                     {u === "both" ? "Both" : u}
-                  </button>
+                  </Chip>
                 ))}
               </div>
             </div>
@@ -349,19 +343,14 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               </div>
               <div className="flex gap-1 pt-1">
                 {[1, 3, 5, 15].map((m) => (
-                  <button
+                  <Chip
                     key={m}
-                    type="button"
+                    selected={intelConfig.interval_min === m}
                     onClick={() => void updateConfigField("interval_min", m)}
-                    className={cn(
-                      "flex-1 rounded-md py-1 text-caption font-semibold transition-colors",
-                      intelConfig.interval_min === m
-                        ? "bg-gain text-foreground "
-                        : "bg-background text-muted-foreground hover:text-foreground"
-                    )}
+                    className="flex-1"
                   >
                     {m}m
-                  </button>
+                  </Chip>
                 ))}
               </div>
             </div>
@@ -664,10 +653,9 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
 
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
-                      size="sm"
+                      size="xs"
                       variant="ghost"
                       onClick={() => openChart(sig.symbol)}
-                        className="h-7 text-xs text-primary hover:bg-card"
                     >
                       Chart
                     </Button>
@@ -726,7 +714,10 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             onChange={setThreshold}
           />
           <div className="flex items-end">
-            <Button onClick={() => void createManual()} className="h-10 w-full text-xs font-semibold">
+            <Button
+              onClick={() => void createManual()}
+              className="h-10 w-full text-xs font-semibold"
+            >
               Add Alert
             </Button>
           </div>
@@ -749,10 +740,15 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                 </div>
                 <div className="flex items-center gap-2">
                   <Switch checked={r.armed} onCheckedChange={() => void toggle(r)} />
-                  <Button size="sm" variant="ghost" onClick={() => openChart(r.symbol)} className="h-7 text-xs">
+                  <Button size="xs" variant="ghost" onClick={() => openChart(r.symbol)}>
                     Chart
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void remove(r.id)} className="h-7 text-xs text-loss hover:text-loss">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => void remove(r.id)}
+                    className="text-loss hover:text-loss"
+                  >
                     Delete
                   </Button>
                 </div>

@@ -34,6 +34,8 @@ import {
 import { API_URL, getCandles, getTickCandles, placeOrder, type Candle } from "./api";
 import { Tooltip } from "./components/motion/tooltip";
 import { Button } from "./components/ui/button";
+import { Chip } from "./components/ui/chip";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { useToast } from "./components/ui/toast-context";
@@ -981,16 +983,18 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         <div className="flex items-center gap-2">
           {/* Symbol Search Picker */}
           <div className="relative">
-            <button
-              type="button"
+            <Button
+              size="xs"
+              variant="quiet"
+              aria-expanded={searchOpen}
               onClick={() => setSearchOpen(!searchOpen)}
-              className="flex items-center gap-1.5 rounded-md bg-border/60 px-2.5 py-1 font-semibold text-white transition-colors hover:bg-border"
             >
-              <Search size={13} className="text-muted-foreground" />
-              <span>{symbol.replace("-EQ", "")}</span>
-              <span className="text-micro text-muted-foreground">NSE</span>
-              <ChevronDown size={12} className="text-muted-foreground" />
-            </button>
+
+              <Search size={13} />
+              <span className="font-semibold text-foreground">{symbol.replace("-EQ", "")}</span>
+              <span className="text-micro">NSE</span>
+              <ChevronDown size={12} />
+            </Button>
 
             {searchOpen && (
               <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-md border border-border bg-muted p-2 ">
@@ -1030,66 +1034,59 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           <div className="h-4 w-px bg-border" />
 
           {/* Quick Buy / Sell Execution Pills (Like TV Pro) */}
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            <button
-              type="button"
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="xs"
+              variant="outline"
+              className="border-loss/40 text-loss hover:border-loss hover:bg-loss/10"
               onClick={() => void handleQuickOrder(false)}
-              className="flex items-center gap-1.5 bg-loss/15 px-2.5 py-1 text-xs font-semibold text-loss hover:bg-loss/25 transition-colors"
             >
-              <span>SELL</span>
+              <span>Sell</span>
               <span className="tabular-nums font-mono">{currentPrice.toFixed(2)}</span>
-            </button>
-            <div className="w-px bg-border self-stretch" />
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              className="border-gain/40 text-gain hover:border-gain hover:bg-gain/10"
               onClick={() => void handleQuickOrder(true)}
-              className="flex items-center gap-1.5 bg-gain/15 px-2.5 py-1 text-xs font-semibold text-gain hover:bg-gain/25 transition-colors"
             >
-              <span>BUY</span>
+              <span>Buy</span>
               <span className="tabular-nums font-mono">{currentPrice.toFixed(2)}</span>
-            </button>
+            </Button>
           </div>
 
           <div className="h-4 w-px bg-border" />
 
           {/* Timeframe selector (5m, 15m, 1h, D, W, M) */}
-          <div className="flex items-center gap-0.5">
-            {TIMEFRAMES.map((tf) => (
-              <button
-                key={tf.v}
-                type="button"
-                onClick={() => {
-                  setTimeframe(tf.v);
-                  void loadCandles(symbol, tf.v);
-                }}
-                className={cn(
-                  "rounded-md px-2 py-1 font-medium transition-colors",
-                  timeframe === tf.v
-                    ? "bg-primary text-white font-semibold"
-                    : "text-muted-foreground hover:bg-border hover:text-white"
-                )}
-              >
-                {tf.label}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            value={timeframe}
+            onValueChange={(v) => {
+              setTimeframe(v);
+              void loadCandles(symbol, v);
+            }}
+            variant="segment"
+          >
+            <TabsList>
+              {TIMEFRAMES.map((tf) => (
+                <TabsTrigger key={tf.v} value={tf.v}>{tf.label}</TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
 
           <div className="h-4 w-px bg-border" />
 
           {/* Indicators Dropdown */}
           <div className="relative">
-            <button
-              type="button"
+            <Button
+              size="xs"
+              variant={showIndicatorsMenu ? "outline" : "quiet"}
+              aria-expanded={showIndicatorsMenu}
               onClick={() => setShowIndicatorsMenu(!showIndicatorsMenu)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                showIndicatorsMenu ? "bg-border text-white" : "text-foreground hover:bg-border"
-              )}
             >
-              <SlidersHorizontal size={13} className="text-primary" />
+              <SlidersHorizontal size={13} />
               <span>Indicators</span>
-              <ChevronDown size={11} className="text-muted-foreground" />
-            </button>
+              <ChevronDown size={11} />
+            </Button>
 
             {showIndicatorsMenu && (
               <div className="absolute left-0 top-full z-50 mt-1.5 w-60 rounded-md border border-border bg-muted p-2.5 space-y-2">
@@ -1164,40 +1161,40 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
           {/* Pine Script Editor Toggle */}
           <Tooltip content="Pine Script Indicator Editor" side="bottom" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="xs"
+            variant={pineEditorOpen ? "primary" : "quiet"}
+            aria-pressed={pineEditorOpen}
             onClick={() => setPineEditorOpen(!pineEditorOpen)}
-            className={cn(
-                "flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors text-xs font-medium",
-                pineEditorOpen ? "bg-primary text-white" : "text-foreground hover:bg-border"
-            )}
           >
-              <Code size={13} className={pineEditorOpen ? "text-white" : "text-muted-foreground"} />
+            <Code size={13} />
             <span>Pine Editor</span>
-          </button>
+          </Button>
           </Tooltip>
         </div>
 
         {/* Right Toolbar: Refresh, Fullscreen */}
         <div className="flex items-center gap-2">
           <Tooltip content="Reload candles" side="bottom" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant="plain"
             onClick={() => void loadCandles()}
             disabled={loading}
-              className="rounded-md p-1 text-muted-foreground hover:bg-border hover:text-white transition-colors"
+            aria-label="Reload candles"
           >
-              <RefreshCw size={13} className={cn(loading && "animate-spin text-primary")} />
-          </button>
+            <RefreshCw size={13} className={cn(loading && "animate-spin text-primary")} />
+          </Button>
           </Tooltip>
           <Tooltip content={isFullscreen ? "Exit Fullscreen" : "Fullscreen Chart"} side="bottom" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant="plain"
+            aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen chart"}
             onClick={() => setIsFullscreen(!isFullscreen)}
-              className="rounded-md p-1 text-muted-foreground hover:bg-border hover:text-white transition-colors"
           >
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
+          </Button>
           </Tooltip>
         </div>
       </div>
@@ -1209,78 +1206,75 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         {/* TradingView Left Drawing Tools Rail */}
         <div className="flex flex-col items-center gap-1 border-r border-border bg-card py-2 px-1 text-muted-foreground shrink-0 z-30 select-none">
           <Tooltip content="Crosshair / Normal Cursor" side="right" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant={activeTool === "cursor" ? "primary" : "plain"}
+            aria-pressed={activeTool === "cursor"}
+            aria-label="cursor"
             onClick={() => setActiveTool("cursor")}
-            className={cn(
-                "rounded-md p-1.5 transition-colors",
-                activeTool === "cursor" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
-            )}
           >
             <MousePointer size={15} />
-          </button>
+          </Button>
           </Tooltip>
           <Tooltip content="Trendline (Click start & end points)" side="right" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant={activeTool === "trendline" ? "primary" : "plain"}
+            aria-pressed={activeTool === "trendline"}
+            aria-label="trendline"
             onClick={() => setActiveTool("trendline")}
-            className={cn(
-                "rounded-md p-1.5 transition-colors",
-                activeTool === "trendline" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
-            )}
           >
             <TrendingUp size={15} />
-          </button>
+          </Button>
           </Tooltip>
           <Tooltip content="Extended Ray" side="right" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant={activeTool === "ray" ? "primary" : "plain"}
+            aria-pressed={activeTool === "ray"}
+            aria-label="ray"
             onClick={() => setActiveTool("ray")}
-            className={cn(
-                "rounded-md p-1.5 transition-colors",
-                activeTool === "ray" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
-            )}
           >
             <Pencil size={15} />
-          </button>
+          </Button>
           </Tooltip>
           <Tooltip content="Horizontal Price Level" side="right" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant={activeTool === "hline" ? "primary" : "plain"}
+            aria-pressed={activeTool === "hline"}
+            aria-label="hline"
             onClick={() => setActiveTool("hline")}
-            className={cn(
-                "rounded-md p-1.5 transition-colors",
-                activeTool === "hline" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
-            )}
           >
             <Minus size={15} />
-          </button>
+          </Button>
           </Tooltip>
           <Tooltip content="Rectangle / Supply & Demand Zone" side="right" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant={activeTool === "rect" ? "primary" : "plain"}
+            aria-pressed={activeTool === "rect"}
+            aria-label="rect"
             onClick={() => setActiveTool("rect")}
-            className={cn(
-                "rounded-md p-1.5 transition-colors",
-                activeTool === "rect" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
-            )}
           >
             <Square size={15} />
-          </button>
+          </Button>
           </Tooltip>
           <div className="my-1 h-px w-4 bg-border" />
           <Tooltip content="Clear All Drawings" side="right" delay={400}>
-          <button
-            type="button"
+          <Button
+            size="icon-sm"
+            variant="plain"
+            className="hover:bg-destructive/10 hover:text-destructive"
             onClick={() => {
               localStorage.removeItem("atr.chart.drawings");
               window.dispatchEvent(new Event("storage"));
               setActiveTool("cursor");
             }}
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-loss/20 hover:text-loss transition-colors"
+            aria-label="Clear drawings"
           >
             <Trash2 size={15} />
-          </button>
+          </Button>
           </Tooltip>
         </div>
 
@@ -1323,7 +1317,12 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               <div className="m-auto text-center">
                 <div className="text-sm font-semibold text-loss">Failed to load candles</div>
                 <div className="text-xs text-muted-foreground mt-1">{error}</div>
-                <Button size="sm" variant="secondary" onClick={() => void loadCandles()} className="mt-3">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void loadCandles()}
+                  className="mt-3"
+                >
                   Retry
                 </Button>
               </div>
@@ -1361,25 +1360,28 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                         {/* Interactive Action Icons (Hover visible or subtle) */}
                         <div className="flex items-center gap-1 opacity-70 group-hover/pane:opacity-100 transition-opacity">
                           <Tooltip content="Indicator Settings" side="bottom" delay={400}>
-                          <button
-                            type="button"
+                          <Button
+                            size="icon-sm"
+                            variant="plain"
                             onClick={() => setPineSettingsModalOpen(true)}
-                              className="p-1 rounded-md hover:bg-border text-muted-foreground hover:text-white transition-colors"
+                            aria-label="Indicator settings"
                           >
                             <SlidersHorizontal size={12} />
-                          </button>
+                          </Button>
                           </Tooltip>
                           <Tooltip content="Remove Indicator" side="bottom" delay={400}>
-                          <button
-                            type="button"
+                          <Button
+                            size="icon-sm"
+                            variant="plain"
+                            className="hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               setPineScript("// No custom indicator");
                               localStorage.removeItem("atr.chart.pinescript");
                             }}
-                              className="p-1 rounded-md hover:bg-border text-muted-foreground hover:text-loss transition-colors"
+                            aria-label="Remove custom indicator"
                           >
                             <X size={12} />
-                          </button>
+                          </Button>
                           </Tooltip>
                         </div>
 
@@ -1428,17 +1430,16 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   <div className="flex items-center gap-1">
                     {PINE_PRESETS.map((p) => (
                       <Tooltip content={p.desc} side="top" delay={400}>
-                      <button
+                      <Chip
                         key={p.name}
-                        type="button"
+                        className="min-h-0 px-2 py-0.5 text-caption"
                         onClick={() => {
                           setPineDraft(p.code);
                           setPineError(null);
                         }}
-                          className="rounded-md px-2 py-0.5 text-[10.5px] bg-border/80 hover:bg-border text-muted-foreground hover:text-white transition-colors"
                       >
                         {p.name.replace(/ \(.*\)/, "")}
-                      </button>
+                      </Chip>
                       </Tooltip>
                     ))}
                   </div>
@@ -1467,13 +1468,14 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     <span>{pineAppliedMsg ? "Applied!" : "Apply to Chart"}</span>
                   </Button>
 
-                  <button
-                    type="button"
+                  <Button
+                    size="icon-sm"
+                    variant="plain"
                     onClick={() => setPineEditorOpen(false)}
-                    className="p-1 rounded-md text-muted-foreground hover:bg-border hover:text-white"
+                    aria-label="Close editor"
                   >
                     <X size={14} />
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -1554,22 +1556,17 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           <div className="flex h-8 shrink-0 items-center justify-between border-t border-border bg-card px-3 text-caption">
             <div className="flex items-center gap-1">
               {RANGES.map((r) => (
-                <button
+                <Chip
                   key={r.label}
-                  type="button"
+                  selected={activeRange === r.label}
+                  className="min-h-0 px-2 py-0.5 text-caption"
                   onClick={() => {
                     setActiveRange(r.label);
                     void loadCandles(symbol, timeframe, r.label);
                   }}
-                  className={cn(
-                    "rounded-md px-2 py-0.5 font-medium transition-colors",
-                    activeRange === r.label
-                      ? "bg-border text-white font-semibold"
-                      : "text-muted-foreground hover:bg-border/60 hover:text-white"
-                  )}
                 >
                   {r.label}
-                </button>
+                </Chip>
               ))}
             </div>
             <div className="text-micro text-muted-foreground">
@@ -1586,19 +1583,17 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           <div className="relative flex h-9 items-center justify-between border-b border-border px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span>Watchlist</span>
             <Tooltip content="Add symbol to watchlist" side="left" delay={400}>
-            <button
-              type="button"
+            <Button
+              size="icon-sm"
+              variant="plain"
               onClick={() => {
                 setAddSymbolOpen((prev) => !prev);
                 setAddSymbolQuery("");
               }}
-              className={cn(
-                  "rounded-md p-1 transition-colors",
-                  addSymbolOpen ? "bg-primary text-white" : "hover:bg-border hover:text-white"
-              )}
+              aria-label="Add symbol"
             >
               <Plus size={14} />
-            </button>
+            </Button>
             </Tooltip>
 
             {/* Add Symbol Dropdown / Search Modal */}
@@ -1606,13 +1601,14 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               <div className="absolute right-2 top-9 z-50 w-72 rounded-md border border-border bg-muted p-2.5 normal-case">
                 <div className="flex items-center justify-between border-b border-border pb-2 text-xs font-semibold text-white">
                   <span>Add Symbol</span>
-                  <button
-                    type="button"
+                  <Button
+                    size="icon-sm"
+                    variant="plain"
                     onClick={() => setAddSymbolOpen(false)}
-                    className="rounded-md p-0.5 text-muted-foreground hover:bg-border hover:text-white"
+                    aria-label="Close search"
                   >
                     <X size={13} />
-                  </button>
+                  </Button>
                 </div>
                 <div className="relative mt-2">
                   <input
@@ -1706,16 +1702,18 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                       </div>
                     </div>
                     <Tooltip content="Remove from watchlist" side="left" delay={400}>
-                    <button
-                      type="button"
+                    <Button
+                      size="icon-sm"
+                      variant="plain"
+                      className="hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation();
                         setWatchlist((prev) => prev.filter((w) => w.symbol !== item.symbol));
                       }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-muted-foreground hover:text-loss transition-opacity"
+                      aria-label="Remove from watchlist"
                     >
                       <Trash2 size={12} />
-                    </button>
+                    </Button>
                     </Tooltip>
                   </div>
                 </div>
@@ -1762,16 +1760,18 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
             {/* Direct Order Actions */}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Button
-                size="sm"
+                size="xs"
+                variant="outline"
                 onClick={() => void handleQuickOrder(true)}
-                className="bg-gain hover:bg-gain/90 text-white font-semibold h-7 text-xs"
+                className="border-gain/40 text-gain hover:border-gain hover:bg-gain/10"
               >
                 Buy
               </Button>
               <Button
-                size="sm"
+                size="xs"
+                variant="outline"
                 onClick={() => void handleQuickOrder(false)}
-                className="bg-loss hover:bg-loss/90 text-white font-semibold h-7 text-xs"
+                className="border-loss/40 text-loss hover:border-loss hover:bg-loss/10"
               >
                 Sell
               </Button>
@@ -1807,42 +1807,29 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     {indicatorTitle}
                   </span>
                 </div>
-                <button
-                  type="button"
+                <Button
+                  size="icon-sm"
+                  variant="plain"
                   onClick={() => setPineSettingsModalOpen(false)}
-                    className="p-1 rounded-md text-muted-foreground hover:bg-border hover:text-white transition-colors"
+                  aria-label="Close settings"
                 >
                   <X size={16} />
-                </button>
+                </Button>
               </div>
 
               {/* Tabs Bar (TradingView style: Inputs | Style | Visibility) */}
-                <div className="flex items-center gap-6 px-5 border-b border-border bg-muted text-xs font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setPineSettingsActiveTab("inputs")}
-                  className={cn(
-                    "py-2.5 transition-colors border-b-2 font-medium tracking-wide",
-                    pineSettingsActiveTab === "inputs"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-white"
-                  )}
-                >
-                  Inputs
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPineSettingsActiveTab("style")}
-                  className={cn(
-                    "py-2.5 transition-colors border-b-2 font-medium tracking-wide",
-                    pineSettingsActiveTab === "style"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-white"
-                  )}
-                >
-                  Style
-                </button>
-              </div>
+                <div className="border-b border-border bg-muted px-5">
+                  <Tabs
+                    value={pineSettingsActiveTab}
+                    onValueChange={(v) => setPineSettingsActiveTab(v as typeof pineSettingsActiveTab)}
+                    variant="underline"
+                  >
+                    <TabsList>
+                      <TabsTrigger value="inputs">Inputs</TabsTrigger>
+                      <TabsTrigger value="style">Style</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
 
               {/* Tab Contents Body */}
               <div data-lenis-prevent className="p-5 max-h-[360px] overflow-y-auto space-y-4 text-xs">
@@ -2000,34 +1987,29 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
               {/* Modal Footer */}
                 <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-card text-xs">
-                <button
-                  type="button"
+                <Button
+                  size="inline"
+                  variant="link"
                   onClick={() => {
                     setPineInputs({});
                     setPineStyles({});
                     localStorage.removeItem("atr.chart.pineinputs");
                     localStorage.removeItem("atr.chart.pinestyles");
                   }}
-                    className="text-muted-foreground hover:text-white transition-colors"
                 >
-                  Reset to Defaults
-                </button>
+                  Reset to defaults
+                </Button>
 
                 <div className="flex items-center gap-2">
                   <Button
-                    size="sm"
-                    variant="secondary"
+                    size="xs"
+                    variant="quiet"
                     onClick={() => setPineSettingsModalOpen(false)}
-                      className="h-7 px-3 text-xs bg-border text-white hover:bg-border/80"
                   >
                     Close
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => setPineSettingsModalOpen(false)}
-                      className="h-7 px-3 text-xs bg-primary text-white hover:bg-primary/90"
-                  >
-                    Ok
+                  <Button size="xs" onClick={() => setPineSettingsModalOpen(false)}>
+                    OK
                   </Button>
                 </div>
               </div>

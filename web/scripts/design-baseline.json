@@ -1,17 +1,55 @@
 {
+  "App.tsx": {
+    "raw-button": 2
+  },
+  "BacktestWorkflowPanel.tsx": {
+    "raw-button": 2
+  },
+  "BriefingPanel.tsx": {
+    "raw-button": 1
+  },
+  "ChartsPanel.tsx": {
+    "raw-button": 2
+  },
+  "MarketMood.tsx": {
+    "static-inline-style": 1,
+    "raw-button": 2
+  },
+  "PaperDeploymentPanel.tsx": {
+    "raw-palette": 3,
+    "raw-button": 2
+  },
+  "PortfolioControlCenter.tsx": {
+    "table-cell-padding": 2
+  },
+  "PortfolioPanel.tsx": {
+    "raw-button": 1
+  },
+  "StrategiesPanel.tsx": {
+    "raw-button": 2
+  },
+  "StrategyTiles.tsx": {
+    "raw-button": 1
+  },
+  "TradeSignalsPanel.tsx": {
+    "raw-button": 1
+  },
+  "WatchlistPanel.tsx": {
+    "raw-button": 6
+  },
   "components/chart/DrawingCanvas.tsx": {
     "hex-colour": 5
+  },
+  "components/motion/table/index.tsx": {
+    "table-cell-padding": 1
+  },
+  "components/motion/table/table-header.tsx": {
+    "table-cell-padding": 1
   },
   "components/motion/tooltip/positioner.tsx": {
     "static-inline-style": 1
   },
   "components/ui/action-swap.tsx": {
     "static-inline-style": 1
-  },
-  "MarketMood.tsx": {
-    "static-inline-style": 1
-  },
-  "PaperDeploymentPanel.tsx": {
-    "raw-palette": 3
   }
 }

@@ -94,6 +94,7 @@ import {
   scopeNote,
   tradeRowViews,
 } from "./lib/analytics-view";
+import { Button } from "./components/ui/button";
 
 // ─── shared bits ──────────────────────────────────────────────────────────────
 
@@ -539,13 +540,9 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
           title="Favourable excursion vs outcome"
           sub="Each point is one trade. Hollow red points were stopped out — their adverse excursion reached the risk the position was sized for."
           action={
-            <button
-              type="button"
-              onClick={() => setIncludePoints((v) => !v)}
-              className="rounded-lg border border-border px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition hover:text-foreground"
-            >
+            <Button size="xs" variant="quiet" onClick={() => setIncludePoints((v) => !v)}>
               {includePoints ? "Summarise only" : "Show trades"}
-            </button>
+            </Button>
           }
         />
         <div className="mt-3">
@@ -824,13 +821,9 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
         title={`${detail.symbol} \u00b7 ${String(detail.side).toUpperCase()}`}
         sub={`Trade ${detail.trade_id} \u00b7 ${detail.source}`}
         action={
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-border px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition hover:text-foreground"
-          >
+          <Button size="xs" variant="quiet" onClick={onClose}>
             Close
-          </button>
+          </Button>
         }
       />
 
@@ -943,17 +936,17 @@ function TradesTab({
           <table className="w-full text-[12.5px]">
             <thead>
               <tr className="border-b border-border text-left text-caption uppercase tracking-[0.05em] text-muted-foreground">
-                <th className="px-3 pb-2 font-medium">Symbol</th>
-                <th className="px-3 pb-2 font-medium">Side</th>
-                <th className="px-3 pb-2 text-right font-medium">Net P&amp;L</th>
-                <th className="px-3 pb-2 text-right font-medium">Return</th>
-                <th className="px-3 pb-2 text-right font-medium">MFE</th>
-                <th className="px-3 pb-2 text-right font-medium">MAE</th>
-                <th className="px-3 pb-2 text-right font-medium">Captured</th>
-                <th className="px-3 pb-2 text-right font-medium">Slippage</th>
-                <th className="px-3 pb-2 font-medium">Held</th>
-                <th className="px-3 pb-2 font-medium">Exit</th>
-                <th className="px-3 pb-2 font-medium">Evidence</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Side</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Net P&amp;L</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Return</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">MFE</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">MAE</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Captured</th>
+                <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Slippage</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Held</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Exit</th>
+                <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Evidence</th>
               </tr>
             </thead>
             <tbody>
@@ -965,31 +958,31 @@ function TradesTab({
                     onClick={() => setSelected(r.tradeId)}
                     className="cursor-pointer border-b border-border/60 transition hover:bg-muted/40 last:border-b-0"
                   >
-                    <td className="px-3 py-2 font-medium">{r.symbol}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{r.side}</td>
+                    <td className="px-3 py-1.5 font-medium">{r.symbol}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{r.side}</td>
                     <td className={`px-3 py-2 text-right font-semibold tabular-nums ${TONE_TEXT[r.pnlTone]}`}>
                       {money(r.netPnl)}
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${TONE_TEXT[r.pnlTone]}`}>
                       {pct(r.netReturnPct)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gain">
+                    <td className="px-3 py-1.5 text-right tabular-nums text-gain">
                       {r.mfePct == null ? EM_DASH : `${r.mfePct.toFixed(2)}%`}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-destructive">
+                    <td className="px-3 py-1.5 text-right tabular-nums text-destructive">
                       {r.maePct == null ? EM_DASH : `${r.maePct.toFixed(2)}%`}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
+                    <td className="px-3 py-1.5 text-right tabular-nums">
                       {r.capture == null ? EM_DASH : `${r.capture.toFixed(0)}%`}
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.slippageBps == null ? "" : r.slippageBps > 15 ? TONE_TEXT.warn : ""}`}>
                       {bps(r.slippageBps)}
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{duration(r.holdingSec)}</td>
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <td className="px-3 py-1.5 text-muted-foreground">{duration(r.holdingSec)}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
                       {r.exitReason ? r.exitReason.replace(/_/g, " ").toLowerCase() : EM_DASH}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-1.5">
                       <Badge tone={g.tone === "flat" ? "flat" : g.tone}>{g.label}</Badge>
                     </td>
                   </tr>
@@ -1134,24 +1127,15 @@ export default function AnalyticsPanel() {
           title="Post-trade attribution"
           action={
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowFilters((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground"
-              >
+              <Button size="xs" variant="quiet" onClick={() => setShowFilters((v) => !v)}>
                 <Filter size={13} />
                 Filters
                 {chips.length > 0 ? <Badge tone="info">{chips.length}</Badge> : null}
-              </button>
-              <button
-                type="button"
-                onClick={() => void load()}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-              >
+              </Button>
+              <Button size="xs" variant="quiet" onClick={() => void load()} disabled={busy}>
                 <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
                 Refresh
-              </button>
+              </Button>
             </div>
           }
         />

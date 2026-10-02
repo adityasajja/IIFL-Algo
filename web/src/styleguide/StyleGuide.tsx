@@ -6,10 +6,12 @@
  * proof. It needs no login and no backend.
  */
 
+import { X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Card, CardHeader, EmptyState, ErrorBox, Hint } from "../components/ui/card";
 import { Button } from "../components/ui/button";
-import { fieldInput, fieldLabel, toolbarButton } from "../components/ui/form-styles";
+import { Chip } from "../components/ui/chip";
+import { fieldInput, fieldLabel } from "../components/ui/form-styles";
 import { Badge, Callout, Stat, VerdictPill } from "../components/ui/stat";
 import { surface, surfaceInset, surfaceMuted } from "../components/ui/surface";
 import { Tabs, TabsList, TabsTrigger } from "../components/motion/tabs";
@@ -146,9 +148,9 @@ export default function StyleGuide() {
               <a key={n} href={`#${n}`} className="capitalize hover:text-foreground">{n}</a>
             ))}
           </nav>
-          <button className={toolbarButton} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          <Button size="xs" variant="outline" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "Light" : "Dark"} mode
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -256,7 +258,7 @@ export default function StyleGuide() {
             <Card padding="md">
               <Sub title="Card + CardHeader">
                 <Card>
-                  <CardHeader title="Sector strength" sub="Return over the last month" action={<button className={toolbarButton}>Refresh</button>} />
+                  <CardHeader title="Sector strength" sub="Return over the last month" action={<Button size="xs" variant="outline">Refresh</Button>} />
                   <div className="p-5 pt-3 text-body text-muted-foreground">Card padding is p-5. The header names the card in one line.</div>
                 </Card>
               </Sub>
@@ -302,9 +304,14 @@ export default function StyleGuide() {
                   <Button variant="outline">Reject</Button>
                   <Button variant="ghost">Cancel</Button>
                 </div>
-                <div className="flex items-center gap-3 pt-1">
-                  <button className={toolbarButton}>Toolbar action</button>
-                  <span className="text-caption text-muted-foreground">compact, lives in a card toolbar</span>
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <Button size="xs" variant="outline">Refresh</Button>
+                  <Button size="xs" variant="quiet">Close</Button>
+                  <Button size="icon-sm" variant="plain" aria-label="Remove"><X /></Button>
+                  <Button size="inline" variant="link">Show all</Button>
+                  <Chip selected>Selected</Chip>
+                  <Chip>Option</Chip>
+                  <span className="text-caption text-muted-foreground">xs (32px), icon-sm, link and chip: for toolbars and dense panels</span>
                 </div>
               </Sub>
             </Card>
@@ -315,7 +322,7 @@ export default function StyleGuide() {
                     <label className={fieldLabel}>Strategy</label>
                     <input className={cn(fieldInput, "w-[200px]")} placeholder="e.g. MOMENTUM_BREAKOUT" />
                   </div>
-                  <button className={toolbarButton}>Analyze</button>
+                  <Button size="xs">Analyze</Button>
                 </div>
               </Sub>
             </Card>

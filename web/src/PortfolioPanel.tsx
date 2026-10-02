@@ -704,25 +704,25 @@ function OrdersView({ rows }: { rows: Row[] }) {
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-body">
         <thead><tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
-          <th className="px-3 py-2 text-left font-semibold">Time</th>
-          <th className="px-3 py-2 text-left font-semibold">Symbol</th>
-          <th className="px-3 py-2 text-left font-semibold">Side</th>
-          <th className="px-3 py-2 text-right font-semibold">Qty</th>
-          <th className="px-3 py-2 text-right font-semibold">Price</th>
-          <th className="px-3 py-2 text-left font-semibold">Type</th>
-          <th className="px-3 py-2 text-left font-semibold">Status</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Time</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Side</th>
+          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Qty</th>
+          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Price</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Type</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
         </tr></thead>
         <tbody>{rows.map((r, i) => {
           const side = pickString(r, "transactionType", "TransactionType", "side", "Side").toUpperCase();
           return (
             <tr key={i} className="border-t border-border/60 transition-colors hover:bg-primary/[0.03]">
-              <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{pickString(r, "orderDateTime", "exchangeTimestamp", "ExchangeTimestamp", "updatedAt", "CreatedAt")}</td>
-              <td className="whitespace-nowrap px-3 py-2 font-semibold">{pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}</td>
-              <td className="whitespace-nowrap px-3 py-2"><Badge tone={side.startsWith("B") ? "good" : "bad"}>{side || "BUY"}</Badge></td>
-              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtNum(r.quantity ?? r.Quantity)}</td>
-              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtNum(r.price ?? r.Price)}</td>
-              <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{pickString(r, "orderComplexity", "OrderComplexity", "product", "Product")}</td>
-              <td className="whitespace-nowrap px-3 py-2"><StatusPill status={pickString(r, "orderStatus", "OrderStatus", "status", "Status")} /></td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">{pickString(r, "orderDateTime", "exchangeTimestamp", "ExchangeTimestamp", "updatedAt", "CreatedAt")}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-semibold">{pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap"><Badge tone={side.startsWith("B") ? "good" : "bad"}>{side || "BUY"}</Badge></td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right tabular-nums">{fmtNum(r.quantity ?? r.Quantity)}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right tabular-nums">{fmtNum(r.price ?? r.Price)}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{pickString(r, "orderComplexity", "OrderComplexity", "product", "Product")}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap"><StatusPill status={pickString(r, "orderStatus", "OrderStatus", "status", "Status")} /></td>
             </tr>
           );
         })}</tbody>
@@ -737,12 +737,12 @@ function TradesView({ rows }: { rows: Row[] }) {
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-body">
         <thead><tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
-          <th className="px-3 py-2 text-left font-semibold">Time</th>
-          <th className="px-3 py-2 text-left font-semibold">Symbol</th>
-          <th className="px-3 py-2 text-left font-semibold">Side</th>
-          <th className="px-3 py-2 text-right font-semibold">Qty</th>
-          <th className="px-3 py-2 text-right font-semibold">Price</th>
-          <th className="px-3 py-2 text-right font-semibold">Value</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Time</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
+          <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Side</th>
+          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Qty</th>
+          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Price</th>
+          <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Value</th>
         </tr></thead>
         <tbody>{rows.map((r, i) => {
           const side = pickString(r, "transactionType", "TransactionType", "side", "Side").toUpperCase();
@@ -750,12 +750,12 @@ function TradesView({ rows }: { rows: Row[] }) {
           const price = num(r.tradePrice ?? r.TradePrice ?? r.price ?? r.Price);
           return (
             <tr key={i} className="border-t border-border/60 transition-colors hover:bg-primary/[0.03]">
-              <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{pickString(r, "exchangeTimestamp", "ExchangeTimestamp", "tradeTime", "TradeTime", "orderDateTime")}</td>
-              <td className="whitespace-nowrap px-3 py-2 font-semibold">{pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}</td>
-              <td className="whitespace-nowrap px-3 py-2"><Badge tone={side.startsWith("B") ? "good" : "bad"}>{side || "BUY"}</Badge></td>
-              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{qty.toLocaleString("en-IN")}</td>
-              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{INR(price, 2)}</td>
-              <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums">{INR(qty * price)}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">{pickString(r, "exchangeTimestamp", "ExchangeTimestamp", "tradeTime", "TradeTime", "orderDateTime")}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-semibold">{pickString(r, "tradingSymbol", "TradingSymbol", "symbol")}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap"><Badge tone={side.startsWith("B") ? "good" : "bad"}>{side || "BUY"}</Badge></td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right tabular-nums">{qty.toLocaleString("en-IN")}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right tabular-nums">{INR(price, 2)}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right font-semibold tabular-nums">{INR(qty * price)}</td>
             </tr>
           );
         })}</tbody>
@@ -1176,12 +1176,17 @@ export default function PortfolioPanel() {
 
           <div className="flex items-center gap-2.5">
           <Tooltip content={killEngaged ? "Orders are blocked. Click to allow orders again." : "Block all new orders."} side="bottom" delay={400}>
-            <button type="button" onClick={() => void handleToggleKillSwitch()} disabled={killLoading}
-            className={cn("inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors",
-            killEngaged ? "border border-destructive/30 bg-destructive/[0.08] text-destructive hover:bg-loss/20" : "border-border/70 text-muted-foreground hover:border-border hover:text-foreground")}>
+            <Button
+              size="xs"
+              variant="quiet"
+              className={cn(killEngaged && "border-destructive/40 bg-destructive/10 text-destructive hover:border-destructive hover:text-destructive")}
+              disabled={killLoading}
+              aria-pressed={killEngaged}
+              onClick={() => void handleToggleKillSwitch()}
+            >
               {killEngaged ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
               {killEngaged ? "Allow orders" : "Stop orders"}
-            </button>
+            </Button>
             </Tooltip>
 
             <Tooltip content={connected ? (bridgeActive ? "Live prices" : "Connecting to prices") : "Prices offline"} side="top" delay={400}>

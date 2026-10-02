@@ -4,9 +4,9 @@
  *
  *   fieldLabel    the small uppercase caption above a control
  *   fieldInput    a single-line text box
- *   toolbarButton the compact action button that sits in a card's toolbar
  *
- * For a page's main call to action use <Button> (components/ui/button.tsx).
+ * Buttons live in components/ui/button.tsx: <Button size="xs"> is the compact action for a
+ * card's toolbar; <Chip> (components/ui/chip.tsx) is a toggle or filter.
  */
 export const fieldLabel = "text-micro font-semibold uppercase tracking-wider text-muted-foreground";
 
@@ -14,6 +14,3 @@ export const fieldInput =
   "rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-xs text-foreground " +
   "placeholder:text-muted-foreground focus:border-primary focus:outline-none";
 
-export const toolbarButton =
-  "cursor-pointer rounded-lg border border-primary/40 bg-primary/15 px-3.5 py-1.5 text-xs font-semibold " +
-  "text-primary-soft transition-colors hover:bg-primary/25 disabled:cursor-wait disabled:opacity-60";

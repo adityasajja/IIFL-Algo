@@ -36,11 +36,13 @@ import { Tooltip } from "./components/motion/tooltip";
 import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { cn } from "./lib/utils";
 import { Card } from "./components/ui/card";
-import { fieldInput, fieldLabel, toolbarButton } from "./components/ui/form-styles";
+import { Button } from "./components/ui/button";
+import { fieldInput, fieldLabel } from "./components/ui/form-styles";
 import { Badge } from "./components/ui/stat";
 import { toneText, toneOf, type Tone } from "./lib/tone";
 import { MoodGauge, WhatChanged, ScreenerJumps, SectorHeatmap, VixCard, LiveTag, useLiveIndices, type ScreenPreset } from "./MarketMood";
 import { RefreshCw } from "lucide-react";
+import { Chip } from "./components/ui/chip";
 
 // ─── Colour / theme helpers ───────────────────────────────────────────────────
 
@@ -83,9 +85,14 @@ function CompactErrorNotice({
           : `Service notice: ${msg.slice(0, 45)}`}
       </span>
       {onRetry && (
-        <button onClick={onRetry} className="ml-0.5 text-caption font-semibold text-primary-soft underline underline-offset-2 hover:text-primary">
+        <Button
+          size="inline"
+          variant="link"
+          onClick={onRetry}
+          className="ml-0.5 text-caption font-semibold"
+        >
           Retry
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -268,15 +275,16 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
           <div className="flex flex-col items-end gap-1.5">
             {error && <CompactErrorNotice msg={error} lastUpdated={lastUpdated ?? undefined} onRetry={() => load(true)} />}
             <Tooltip content={lastUpdated ? `Updated ${lastUpdated}` : "Refresh"} side="bottom" delay={400}>
-            <button
+            <Button
               id="market-intel-refresh"
+              size="icon-sm"
+              variant="quiet"
               onClick={() => load(true)}
               disabled={refreshing}
               aria-label="Refresh"
-              className="grid size-8 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground"
             >
-              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-            </button>
+              <RefreshCw className={cn(refreshing && "animate-spin")} />
+            </Button>
             </Tooltip>
           </div>
         </div>
@@ -802,21 +810,14 @@ function StockLeadersPanel() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {STOCK_SORT_OPTIONS.map((opt) => (
-            <button
+            <Chip
               key={opt.key}
               id={`stock-sort-${opt.key}`}
-              type="button"
+              selected={sortKey === opt.key}
               onClick={() => setSortKey(opt.key)}
-              aria-pressed={sortKey === opt.key}
-              className={cn(
-                "rounded-full border px-3 py-1 text-xs transition-colors",
-                sortKey === opt.key
-                  ? "border-primary/40 bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
-              )}
             >
               {opt.label}
-            </button>
+            </Chip>
           ))}
         </div>
         <div className="flex items-center gap-3">
@@ -970,14 +971,9 @@ function StrategyContextPanel() {
             />
           </div>
 
-          <button
-            id="strategy-context-run"
-            onClick={run}
-            disabled={loading}
-            className={toolbarButton}
-          >
+          <Button id="strategy-context-run" size="xs" onClick={run} disabled={loading}>
             {loading ? "Analyzing…" : "Analyze"}
-          </button>
+          </Button>
         </div>
         <div className="mt-1.5 text-caption text-muted-foreground">{axisDesc}</div>
       </Card>
@@ -1034,7 +1030,7 @@ function StrategyContextPanel() {
                     (h) => (
                       <th
                         key={h}
-                      className="py-1.5 px-3 text-left font-semibold text-muted-foreground text-micro uppercase tracking-wider whitespace-nowrap"
+                      className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap"
                       >
                         {h}
                       </th>
@@ -1051,17 +1047,17 @@ function StrategyContextPanel() {
                       b.suppressed ? "bg-muted/30 opacity-50" : i % 2 === 1 && "bg-muted/20",
                     )}
                   >
-                    <td className="py-1.5 px-3 font-semibold text-foreground">
+                    <td className="px-3 py-1.5 font-semibold text-foreground">
                       {b.label.replace(/_/g, " ")}
                       {b.suppressed && (
                         <span className="ml-1.5 text-micro text-muted-foreground">(too few)</span>
                       )}
                     </td>
-                    <td className="py-1.5 px-3">
+                    <td className="px-3 py-1.5">
                       <EvidencePip note={b.evidence_note} />
                     </td>
-                    <td className="py-1.5 px-3 text-muted-foreground">{b.n}</td>
-                    <td className="py-1.5 px-3 text-muted-foreground">{b.n_forward}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{b.n}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{b.n_forward}</td>
                     <td className={cn("px-3 py-1.5 font-semibold", toneText[toneOf(b.mean)])}>
                       {b.mean != null ? b.mean.toFixed(2) : "—"}
                     </td>
@@ -1074,7 +1070,7 @@ function StrategyContextPanel() {
                     <td className={cn("px-3 py-1.5", toneText[b.profit_factor != null && b.profit_factor > 1 ? "good" : "bad"])}>
                       {b.profit_factor != null ? b.profit_factor.toFixed(2) : "—"}
                     </td>
-                    <td className="py-1.5 px-3 text-muted-foreground text-caption">
+                    <td className="px-3 py-1.5 text-muted-foreground text-caption">
                       {b.ci_low != null && b.ci_high != null
                         ? `[${b.ci_low.toFixed(2)}, ${b.ci_high.toFixed(2)}]`
                         : "—"}

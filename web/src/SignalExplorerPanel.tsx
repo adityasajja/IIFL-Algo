@@ -59,7 +59,8 @@ import {
 import { Select } from "./components/ui/select";
 import { PageLoader } from "./components/ui/loading";
 import { Card, ErrorBox } from "./components/ui/card";
-import { fieldLabel, toolbarButton } from "./components/ui/form-styles";
+import { Button } from "./components/ui/button";
+import { fieldLabel } from "./components/ui/form-styles";
 import { Badge } from "./components/ui/stat";
 import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { cn } from "./lib/utils";
@@ -100,7 +101,7 @@ function TonePill({ label, tone }: { label: string; tone: string }) {
 
 const TH = ({ children }: { children: React.ReactNode }) => (
   <th
-  className="py-1.5 px-2.5 text-left font-semibold text-muted-foreground text-micro uppercase tracking-wider whitespace-nowrap"
+  className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap"
   >
     {children}
   </th>
@@ -115,7 +116,7 @@ const TD = ({
   tone?: UiTone | "strong";
   bold?: boolean;
 }) => (
-  <td className={cn("px-2.5 py-1.5", tone === "strong" ? "text-foreground" : toneText[tone ?? "flat"], bold && "font-semibold")}>
+  <td className={cn("px-3 py-1.5", tone === "strong" ? "text-foreground" : toneText[tone ?? "flat"], bold && "font-semibold")}>
     {children}
   </td>
 );
@@ -309,9 +310,9 @@ function SignalsPanel() {
           }))}
           className="w-44"
         />
-        <button id="signal-refresh" onClick={load} className={toolbarButton}>
+        <Button id="signal-refresh" size="xs" variant="outline" onClick={load}>
           ↻ Refresh
-        </button>
+        </Button>
         <span className="text-caption text-muted-foreground ml-auto">
           {items.length} of {total}
         </span>
@@ -377,9 +378,14 @@ function SignalsPanel() {
         <div className="flex flex-col gap-2">
           <div className="flex justify-between items-center">
             <SectionTitle>Signal detail</SectionTitle>
-            <button id="signal-detail-close" onClick={() => setDetail(null)} className={toolbarButton}>
+            <Button
+              id="signal-detail-close"
+              size="xs"
+              variant="quiet"
+              onClick={() => setDetail(null)}
+            >
               Close
-            </button>
+            </Button>
           </div>
           <SignalDetail record={detail} />
         </div>
@@ -443,9 +449,9 @@ function AnalyticsPanel() {
               className="w-[160px]"
             />
           </div>
-          <button id="analytics-run" onClick={run} disabled={loading} className={toolbarButton}>
+          <Button id="analytics-run" size="xs" onClick={run} disabled={loading}>
             {loading ? "Analyzing…" : "Analyze"}
-          </button>
+          </Button>
         </div>
         <div className="mt-1.5 text-caption text-muted-foreground">{desc}</div>
       </Card>
@@ -603,9 +609,9 @@ function EffectivenessPanel() {
               className="w-[160px]"
             />
           </div>
-          <button id="effectiveness-run" onClick={run} disabled={loading} className={toolbarButton}>
+          <Button id="effectiveness-run" size="xs" onClick={run} disabled={loading}>
             {loading ? "Measuring…" : "Measure"}
-          </button>
+          </Button>
         </div>
         <div className="mt-1.5 text-caption text-muted-foreground">
           Bands are compared to their complement within the same evidence class — never to

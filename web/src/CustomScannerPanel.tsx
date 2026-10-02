@@ -33,6 +33,7 @@ import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 
 // ─── Indicator catalogue ─────────────────────────────────────────────────────
 
@@ -166,16 +167,16 @@ function ConditionRow({
 
       {/* RHS type toggle */}
       {!isCross && (
-        <button
-          type="button"
+        <Button
+          size="xs"
+          variant="quiet"
           onClick={() =>
             onChange({ ...cond, rhs_type: cond.rhs_type === "value" ? "indicator" : "value" })
           }
-          className="flex items-center gap-1 rounded-md border border-border/60 bg-background px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
         >
           {cond.rhs_type === "value" ? "Fixed value" : "Indicator"}
-          <ChevronDown className="h-3 w-3" />
-        </button>
+          <ChevronDown className="size-3" />
+        </Button>
       )}
 
       {/* RHS */}
@@ -243,13 +244,15 @@ function ConditionRow({
       )}
 
       {/* Remove */}
-      <button
-        type="button"
+      <Button
+        size="icon-sm"
+        variant="plain"
+        className="hover:bg-destructive/10 hover:text-destructive ml-auto"
         onClick={onRemove}
-        className="ml-auto text-muted-foreground/50 hover:text-destructive"
+        aria-label="Remove condition"
       >
-        <X className="h-4 w-4" />
-      </button>
+        <X />
+      </Button>
     </div>
   );
 }
@@ -406,20 +409,23 @@ export default function CustomScannerPanel({
           </span>
           {savedScans.map((s) => (
             <div key={s.id} className="group flex items-center gap-0.5 rounded-full border border-border/50 bg-muted/30 pl-3 pr-1.5 py-1">
-              <button
-                type="button"
+              <Button
+                size="inline"
+                variant="link"
+                className="text-xs font-medium text-foreground"
                 onClick={() => loadScan(s)}
-                className="text-xs font-medium hover:text-primary"
               >
                 {s.name}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="plain"
+                className="hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => void deleteScan(s.id)}
-                className="ml-1 hidden h-4 w-4 items-center justify-center rounded-full text-muted-foreground/50 hover:text-destructive group-hover:flex"
+                aria-label="Delete scan"
               >
-                <X className="h-3 w-3" />
-              </button>
+                <X />
+              </Button>
             </div>
           ))}
         </div>
@@ -432,23 +438,13 @@ export default function CustomScannerPanel({
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold">Conditions</span>
             {conditions.length > 1 && (
-              <div className="flex rounded-lg border border-border/60 overflow-hidden text-xs font-semibold">
-                {(["AND", "OR"] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setCombine(v)}
-                    className={cn(
-                      "px-3 py-1 transition-colors",
-                      combine === v
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-background text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {v}
-                  </button>
-                ))}
-              </div>
+              <Tabs value={combine} onValueChange={(v) => setCombine(v as "AND" | "OR")} variant="segment">
+                <TabsList>
+                  {(["AND", "OR"] as const).map((v) => (
+                    <TabsTrigger key={v} value={v}>{v}</TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
             )}
           </div>
 
@@ -461,36 +457,28 @@ export default function CustomScannerPanel({
             />
           ))}
 
-          <button
-            type="button"
+          <Button
+            size="inline"
+            variant="link"
+            className="text-muted-foreground hover:text-foreground hover:no-underline text-xs"
             onClick={addCondition}
-            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary"
           >
+
             <Plus className="h-3.5 w-3.5" />
             Add condition
-          </button>
+          </Button>
         </div>
 
         {/* ── Universe + run bar ───────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-3">
           {/* Universe */}
-          <div className="flex rounded-lg border border-border/60 overflow-hidden text-xs font-semibold">
-            {(["all", "watchlist"] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setUniverse(v)}
-                className={cn(
-                  "px-3 py-1.5 transition-colors",
-                  universe === v
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-background text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {v === "all" ? "All NSE" : "Watchlist"}
-              </button>
-            ))}
-          </div>
+          <Tabs value={universe} onValueChange={(v) => setUniverse(v as "all" | "watchlist")} variant="segment">
+            <TabsList>
+              {(["all", "watchlist"] as const).map((v) => (
+                <TabsTrigger key={v} value={v}>{v === "all" ? "All NSE" : "Watchlist"}</TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
 
           {universe === "watchlist" && (
             <Input
@@ -531,14 +519,16 @@ export default function CustomScannerPanel({
               </Button>
             </div>
           ) : (
-            <button
-              type="button"
+            <Button
+              size="inline"
+              variant="link"
+              className="text-muted-foreground hover:text-foreground hover:no-underline text-xs"
               onClick={() => setShowSaveInput(true)}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
             >
+
               <Save className="h-3.5 w-3.5" />
               Save scan
-            </button>
+            </Button>
           )}
         </div>
 
@@ -581,20 +571,20 @@ export default function CustomScannerPanel({
             <table className="w-full border-collapse text-body">
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30 text-left">
-                  <th className="px-4 py-2.5 font-semibold">Symbol</th>
+                  <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Symbol</th>
                   {SORT_COLS.map((c) => (
                     <th
                       key={c.key}
                       onClick={() => onSort(c.key)}
-                      className="cursor-pointer select-none px-3 py-2.5 text-right font-semibold hover:text-foreground text-muted-foreground"
+                      className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground"
                     >
                       {c.label}
                       {sortKey === c.key ? (sortDir === -1 ? " ▼" : " ▲") : ""}
                     </th>
                   ))}
-                  <th className="px-3 py-2.5 font-semibold text-muted-foreground">Trend</th>
-                  <th className="px-3 py-2.5 font-semibold text-muted-foreground">Signals</th>
-                  <th className="px-3 py-2.5" />
+                  <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trend</th>
+                  <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Signals</th>
+                  <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground" />
                 </tr>
               </thead>
               <tbody>
@@ -606,13 +596,13 @@ export default function CustomScannerPanel({
                       key={r.symbol}
                       className="border-b border-border/40 last:border-0 hover:bg-primary/[0.03] transition-colors"
                     >
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-1.5">
                         <div className="flex items-center gap-1.5">
                           <strong className="font-semibold">{r.symbol.replace("-EQ", "")}</strong>
                           {tick && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" />}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{r.score.toFixed(1)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{r.score.toFixed(1)}</td>
                       <td className={cn("px-3 py-2 text-right tabular-nums font-medium transition-colors duration-300",
                           tick?.flash === "up" && "text-gain",
                         tick?.flash === "down" && "text-destructive",
@@ -645,7 +635,7 @@ export default function CustomScannerPanel({
                       )}>
                         {r.vol_x.toFixed(1)}×
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-1.5">
                         <span className={cn(
                             "rounded-full px-2 py-0.5 text-micro font-semibold",
                             r.trend === "UP" ? "border border-gain/20 bg-gain/[0.08] text-gain" :
@@ -655,14 +645,14 @@ export default function CustomScannerPanel({
                           {r.trend}
                         </span>
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-1.5">
                         <span className="flex flex-wrap gap-1">
                         {r.breakout && <span className="rounded-full border border-gain/20 bg-gain/[0.08] px-2 py-0.5 text-micro font-semibold text-gain">BREAKOUT</span>}
                         {r.gold_cross_5d && <span className="rounded-full border border-warning/20 bg-warning/[0.08] px-2 py-0.5 text-micro font-semibold text-warning">GOLDEN ✕</span>}
                         {r.rsi < 30 && <span className="rounded-full border border-primary/20 bg-primary/[0.08] px-2 py-0.5 text-micro font-semibold text-primary">OVERSOLD</span>}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-3 py-1.5 text-right">
                         <Button
                           size="sm"
                           variant="ghost"

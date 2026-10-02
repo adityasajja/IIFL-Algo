@@ -335,9 +335,10 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
         </StatefulButton>
 
         {isMfa ? (
-          <button
-            type="button"
-            className="text-body font-medium text-primary hover:underline"
+          <Button
+            size="inline"
+            variant="link"
+            className="text-body font-medium"
             onClick={() => {
               setTotp("");
               setView("login");
@@ -347,13 +348,14 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
             }}
           >
             ← Use a different account
-          </button>
+          </Button>
         ) : null}
 
         {!isSetup && status.allow_signup ? (
-          <button
-            type="button"
-            className="text-body font-medium text-primary hover:underline"
+          <Button
+            size="inline"
+            variant="link"
+            className="text-body font-medium"
             onClick={() => {
               setView(isRegister ? "login" : "register");
               setError(null);
@@ -362,7 +364,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
             }}
           >
             {isRegister ? "← I already have an account" : "Create an account →"}
-          </button>
+          </Button>
         ) : null}
 
         {!isSetup && !status.allow_signup ? (

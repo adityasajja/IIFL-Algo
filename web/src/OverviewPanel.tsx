@@ -157,13 +157,12 @@ export default function OverviewPanel({ onNavigate }: Props) {
           <p className="text-micro font-normal uppercase tracking-[0.1px] text-muted-foreground">Forward &middot; Paper trading</p>
           <Tooltip content={lastRefreshedAt ? `Updated ${lastRefreshedAt}` : "Refresh"} side="bottom" delay={400}>
               <Button
-                variant="outline"
-                size="icon"
-          onClick={() => loadData(true)}
-          disabled={refreshing}
-          aria-label="Refresh"
-                className="size-8 rounded-lg border-border bg-card/60 text-muted-foreground backdrop-blur-sm hover:text-foreground"
-        >
+                variant="quiet"
+                size="icon-sm"
+                onClick={() => loadData(true)}
+                disabled={refreshing}
+                aria-label="Refresh"
+              >
           <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
               </Button>
             </Tooltip>
@@ -268,13 +267,14 @@ export default function OverviewPanel({ onNavigate }: Props) {
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Strategies running</span>
-            <button
-              type="button"
+            <Button
+              size="inline"
+              variant="link"
+              className="text-xs"
               onClick={() => onNavigate("paper")}
-              className="flex items-center gap-0.5 text-xs text-primary hover:underline"
             >
               {runningDeployments.length > 0 ? "Manage" : "Start one"} <IconChevR size={12} />
-            </button>
+            </Button>
           </div>
           <div className="mt-3 flex items-baseline gap-3">
             <span className="text-4xl font-semibold tracking-tight tabular-nums">{runningDeployments.length}</span>
@@ -299,13 +299,14 @@ export default function OverviewPanel({ onNavigate }: Props) {
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Signals waiting for you</span>
-            <button
-              type="button"
+            <Button
+              size="inline"
+              variant="link"
+              className="text-xs"
               onClick={() => onNavigate("signals")}
-              className="flex items-center gap-0.5 text-xs text-primary hover:underline"
             >
               Review <IconChevR size={12} />
-            </button>
+            </Button>
           </div>
           <div className="mt-3 text-4xl font-semibold tracking-tight tabular-nums">{waiting.length}</div>
           {waiting.length > 0 ? (

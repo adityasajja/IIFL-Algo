@@ -189,9 +189,14 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               {flagged.map((h) => (
                 <div key={h.symbol} className="px-5 py-3">
                   <div className="flex items-center justify-between gap-3">
-                    <button type="button" onClick={() => onOpenChart?.(h.symbol)} className="font-semibold hover:underline">
+                    <Button
+                      size="inline"
+                      variant="link"
+                      className="font-semibold text-foreground"
+                      onClick={() => onOpenChart?.(h.symbol)}
+                    >
                       {h.symbol}
-                    </button>
+                    </Button>
                     {h.pnl_pct != null && (
                       <span className={cn("text-sm tabular-nums", h.pnl_pct >= 0 ? "text-gain" : "text-loss")}>
                         {signed(h.pnl_pct, 0)}
@@ -256,9 +261,14 @@ function IdeaRow({ idea, onOpenChart }: { idea: InsightIdea; onOpenChart?: (symb
     <div className="px-5 py-3.5" title={`${idea.evidence}${idea.risk ? ` ${idea.risk}` : ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <button type="button" onClick={() => onOpenChart?.(idea.symbol)} className="font-semibold hover:underline">
+          <Button
+            size="inline"
+            variant="link"
+            className="font-semibold text-foreground"
+            onClick={() => onOpenChart?.(idea.symbol)}
+          >
             {idea.symbol}
-          </button>
+          </Button>
           <AnimatedBadge
           status={idea.setup === "strong_rs" ? "success" : idea.setup === "oversold" ? "warning" : "neutral"}
             size="sm"
@@ -413,7 +423,14 @@ function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (s
           <div className="divide-y divide-border rounded-lg border border-border">
             {p.open.map((t) => (
               <div key={`${t.entry_date}-${t.symbol}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                <button type="button" onClick={() => onOpenChart?.(t.symbol)} className="font-semibold hover:underline">{t.symbol}</button>
+                <Button
+                  size="inline"
+                  variant="link"
+                  className="font-semibold text-foreground"
+                  onClick={() => onOpenChart?.(t.symbol)}
+                >
+                  {t.symbol}
+                </Button>
                 <span className="text-xs text-muted-foreground tabular-nums">
                   in at {inr(t.entry)} · target {inr(t.entry * (1 + p.plan.target_pct / 100))} · stop {inr(t.entry * (1 - p.plan.stop_pct / 100))}
                 </span>

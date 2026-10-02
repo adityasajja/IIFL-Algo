@@ -86,21 +86,23 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
                 {error}
               </p>
             ) : null}
-            <button
-              type="button"
+            <Button
+              size="inline"
+              variant="link"
+              className="text-body font-medium"
               onClick={() => setView("manual")}
-              className="text-body font-medium text-primary hover:underline"
             >
               Use an auth code
-            </button>
+            </Button>
             {onClose ? (
-              <button
-                type="button"
+              <Button
+                size="inline"
+                variant="link"
+                className="text-muted-foreground hover:text-foreground hover:no-underline text-xs"
                 onClick={onClose}
-                className="text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 Not now
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>

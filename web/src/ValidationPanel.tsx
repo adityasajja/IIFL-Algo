@@ -124,17 +124,17 @@ export default function ValidationPanel() {
 
           <div className="overflow-x-auto rounded-lg border border-border/60">
             <table className="w-full text-body">
-              <thead className="bg-muted/40 text-caption uppercase tracking-wide text-muted-foreground">
+              <thead className="bg-muted/40">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">Strategy</th>
-                  <th className="px-3 py-2 text-right font-medium">Claimed</th>
-                  <th className="px-3 py-2 text-right font-medium">Measured</th>
-                  <th className="px-3 py-2 text-right font-medium">OOS Sharpe</th>
-                  <th className="px-3 py-2 text-right font-medium">OOS return</th>
-                  <th className="px-3 py-2 text-right font-medium">vs control</th>
-                  <th className="px-3 py-2 text-right font-medium">Trades</th>
-                  <th className="px-3 py-2 text-right font-medium">Expectancy</th>
-                  <th className="px-3 py-2 text-center font-medium">Verdict</th>
+                  <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Strategy</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Claimed</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Measured</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">OOS Sharpe</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">OOS return</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">vs control</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Trades</th>
+                  <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Expectancy</th>
+                  <th className="px-3 py-2 text-center text-micro font-semibold uppercase tracking-wider text-muted-foreground">Verdict</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,11 +205,11 @@ function ResultRow({ r }: { r: ValidationResult }) {
   const z = r.sharpe_z_vs_control;
   return (
     <tr className="border-t border-border/60">
-      <td className="px-3 py-2 whitespace-nowrap font-medium">{pretty(r.strategy)}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 whitespace-nowrap font-medium">{pretty(r.strategy)}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {claimed(r.strategy)}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums">
+      <td className="px-3 py-1.5 text-right tabular-nums">
         {r.measured_win_rate !== undefined ? fmtPct(r.measured_win_rate * 100, 1) : "—"}
       </td>
       <td
@@ -230,7 +230,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
       >
         {fmtPct(r.oos_return_pct ?? 0, 1)}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums">
+      <td className="px-3 py-1.5 text-right tabular-nums">
         {z === null || z === undefined ? (
           <Minus className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
         ) : (
@@ -240,7 +240,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
           </span>
         )}
       </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {r.measured_trades?.toLocaleString() ?? "—"}
       </td>
       <td
@@ -255,7 +255,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
           ? `${r.measured_expectancy_r >= 0 ? "+" : ""}${fmtNum(r.measured_expectancy_r, 3)}R`
           : "—"}
       </td>
-      <td className="px-3 py-2 text-center">
+      <td className="px-3 py-1.5 text-center">
         {r.passed ? (
           <Badge tone="good">pass</Badge>
         ) : (

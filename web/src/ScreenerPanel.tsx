@@ -315,14 +315,15 @@ function ConditionRow({
       ) : null}
       </div>
 
-      <button
-        type="button"
+      <Button
+        size="icon-sm"
+        variant="plain"
+        className="hover:bg-destructive/10 hover:text-destructive ml-auto"
         onClick={onRemove}
-        className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
         aria-label="remove condition"
       >
-        <X className="h-3.5 w-3.5" />
-      </button>
+        <X />
+      </Button>
     </div>
   );
 }
@@ -415,14 +416,15 @@ function GroupEditor({
             </Button>
           ) : null}
           {onRemove ? (
-            <button
-              type="button"
+            <Button
+              size="icon-sm"
+              variant="plain"
+              className="hover:bg-destructive/10 hover:text-destructive"
               onClick={onRemove}
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
               aria-label="remove group"
             >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+              <Trash2 />
+            </Button>
           ) : null}
         </div>
       </div>
@@ -723,9 +725,10 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                 key={scan.scan_id}
                 className="group flex items-center gap-1 rounded-lg border border-border bg-muted/30 pl-2.5 pr-1 py-1"
               >
-                <button
-                  type="button"
-                  className="text-body font-medium hover:text-primary"
+                <Button
+                  size="inline"
+                  variant="link"
+                  className="text-body font-medium text-foreground"
                   onClick={async () => {
                     setRunning(true);
                     setError(null);
@@ -747,11 +750,12 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                   }}
                 >
                   {scan.name}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="plain"
+                  className="hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
                   aria-label={`delete ${scan.name}`}
-                  className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
                   onClick={async () => {
                     try {
                       await screenerDeleteSaved(scan.scan_id);
@@ -761,8 +765,8 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                     }
                   }}
                 >
-                  <X className="h-3 w-3" />
-                </button>
+                  <X />
+                </Button>
               </div>
             ))}
           </div>
@@ -798,9 +802,9 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
               <table className="w-full text-body">
                 <thead>
                   <tr className="border-b border-border text-left text-caption uppercase tracking-wide text-muted-foreground">
-                    <th className="w-6 py-2" />
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground w-6" />
                     {visibleColumns.map((col) => (
-                      <th key={col} className="whitespace-nowrap px-2 py-2 font-medium">
+                      <th key={col} className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         {COL_LABELS[col] ?? col}
                       </th>
                     ))}
@@ -816,7 +820,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                           className="cursor-pointer border-b border-border/50 hover:bg-muted/30"
                           onClick={() => toggle(row.symbol)}
                         >
-                          <td className="py-2 pl-1 text-muted-foreground">
+                          <td className="px-3 py-1.5 text-muted-foreground">
                             {open ? (
                               <ChevronDown className="h-3.5 w-3.5" />
                             ) : (
@@ -824,18 +828,19 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                             )}
                           </td>
                           {visibleColumns.map((col) => (
-                            <td key={col} className="whitespace-nowrap px-2 py-2">
+                            <td key={col} className="px-3 py-1.5 whitespace-nowrap">
                               {col === "symbol" ? (
-                                <button
-                                  type="button"
-                                  className="font-medium hover:text-primary"
+                                <Button
+                                  size="inline"
+                                  variant="link"
+                                  className="font-medium text-foreground"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     onOpenChart?.(row.symbol);
                                   }}
                                 >
                                   {row.symbol}
-                                </button>
+                                </Button>
                               ) : col === "setup" ? (
                                 <span className="rounded-full bg-primary/15 px-2 py-0.5 text-caption font-medium text-primary">
                                   {String(row[col] ?? "—")}
@@ -857,7 +862,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                         {open ? (
                           <tr key={`${row.symbol}-why`} className="border-b border-border/50">
                             <td />
-                            <td colSpan={visibleColumns.length} className="px-2 pb-3 pt-1">
+                            <td colSpan={visibleColumns.length} className="px-3 pb-3 pt-1">
                               <div className="rounded-lg border border-border bg-muted/30 p-3">
                                 <div className="mb-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                                   Why {row.symbol} matched

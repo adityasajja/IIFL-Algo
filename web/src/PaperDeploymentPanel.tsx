@@ -1261,13 +1261,14 @@ function MonitorView({
           setDetails(true);
         }}
       />
-      <button
-        type="button"
+      <Button
+        size="inline"
+        variant="link"
+        className="text-muted-foreground hover:text-foreground hover:no-underline text-sm"
         onClick={() => setDetails((v) => !v)}
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         {details ? "Hide details and controls" : "Details and controls"}
-      </button>
+      </Button>
       {details && (<>
       {/* the picker + the four controls */}
       <Card>
@@ -1921,13 +1922,13 @@ function ForwardEvidenceCounterCard({
               <table className="w-full text-left text-[11.5px]">
                 <thead>
                   <tr className="border-b border-border/50 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                    <th className="pb-1.5 font-semibold">Strategy</th>
-                    <th className="pb-1.5 font-semibold">Version</th>
-                    <th className="pb-1.5 text-right font-semibold">Genuine Forward</th>
-                    <th className="pb-1.5 text-right font-semibold">Today</th>
-                    <th className="pb-1.5 text-right font-semibold">Last 7d</th>
-                    <th className="pb-1.5 text-right font-semibold">Paper Forward</th>
-                    <th className="pb-1.5 text-right font-semibold">In-Sample</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Strategy</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Version</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Genuine Forward</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Today</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Last 7d</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">Paper Forward</th>
+                    <th className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground">In-Sample</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
@@ -1944,23 +1945,23 @@ function ForwardEvidenceCounterCard({
                           isSelected && "bg-primary/[0.04] font-semibold",
                         )}
                       >
-                        <td className="py-2 text-[11.5px]">
+                        <td className="px-3 py-1.5 text-[11.5px]">
                           {strategyNames[s.strategy_id] ?? (
                             <span className="font-mono text-caption text-muted-foreground">
                           {s.strategy_id.slice(0, 12)}
                             </span>
                           )}
                         </td>
-                        <td className="py-2">
+                        <td className="px-3 py-1.5">
                           {s.strategy_version !== null ? `v${s.strategy_version}` : "—"}
                         </td>
-                        <td className="py-2 text-right font-semibold text-gain tabular-nums">
+                        <td className="px-3 py-1.5 text-right font-semibold text-gain tabular-nums">
                           {s.total_genuine_forward}
                         </td>
-                        <td className="py-2 text-right tabular-nums">{s.today_genuine_forward}</td>
-                        <td className="py-2 text-right tabular-nums">{s.last_7d_genuine_forward}</td>
-                        <td className="py-2 text-right tabular-nums">{s.paper_forward}</td>
-                        <td className="py-2 text-right tabular-nums text-muted-foreground">
+                        <td className="px-3 py-1.5 text-right tabular-nums">{s.today_genuine_forward}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{s.last_7d_genuine_forward}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{s.paper_forward}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                           {s.in_sample}
                         </td>
                       </tr>
@@ -2650,19 +2651,19 @@ function CompareView({
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/60 text-left text-micro uppercase tracking-wider text-muted-foreground">
-                    <th className="px-2 py-1.5 font-medium">Figure</th>
-                    <th className="px-2 py-1.5 font-medium">Champion V{comparison.champion_version}</th>
-                    <th className="px-2 py-1.5 font-medium">Challenger V{comparison.challenger_version}</th>
-                    <th className="px-2 py-1.5 font-medium">Δ (challenger − champion)</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Figure</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Champion V{comparison.champion_version}</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Challenger V{comparison.challenger_version}</th>
+                    <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground">Δ (challenger − champion)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.label} className="border-b border-border/40 last:border-0">
-                      <td className="px-2 py-1.5 text-muted-foreground">{r.label}</td>
-                      <td className="px-2 py-1.5 tabular-nums">{r.label === "Forward trades" ? (r.champ ?? "—") : r.pct ? fmtPctOrDash(r.champ) : cell(r.champ)}</td>
-                      <td className="px-2 py-1.5 tabular-nums">{r.label === "Forward trades" ? (r.chall ?? "—") : r.pct ? fmtPctOrDash(r.chall) : cell(r.chall)}</td>
-                      <td className="px-2 py-1.5 tabular-nums text-muted-foreground">
+                      <td className="px-3 py-1.5 text-muted-foreground">{r.label}</td>
+                      <td className="px-3 py-1.5 tabular-nums">{r.label === "Forward trades" ? (r.champ ?? "—") : r.pct ? fmtPctOrDash(r.champ) : cell(r.champ)}</td>
+                      <td className="px-3 py-1.5 tabular-nums">{r.label === "Forward trades" ? (r.chall ?? "—") : r.pct ? fmtPctOrDash(r.chall) : cell(r.chall)}</td>
+                      <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
                         {r.delta == null ? "—" : r.pct ? fmtPctOrDash(r.delta) : fmtDelta(r.delta, metric)}
                       </td>
                     </tr>
@@ -2682,17 +2683,17 @@ function CompareView({
                   <table className="w-full table-fixed">
                     <thead>
                       <tr className="border-b border-border/60 text-left text-micro uppercase tracking-wider text-muted-foreground">
-                        <th className="w-1/5 px-2 py-1.5 font-medium">Changed</th>
-                        <th className="w-2/5 px-2 py-1.5 font-medium">Champion V{comparison.champion_version}</th>
-                        <th className="w-2/5 px-2 py-1.5 font-medium">Challenger V{comparison.challenger_version}</th>
+                        <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground w-1/5">Changed</th>
+                        <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground w-2/5">Champion V{comparison.champion_version}</th>
+                        <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground w-2/5">Challenger V{comparison.challenger_version}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {comparison.definition_diff.changes.map((c) => (
                         <tr key={c.parameter} className="border-b border-border/40 font-mono text-caption last:border-0">
-                          <td className="break-words px-2 py-1.5">{c.parameter}</td>
-                          <td className="break-words px-2 py-1.5">{fmtDiffValue(c.champion)}</td>
-                          <td className="break-words px-2 py-1.5">{fmtDiffValue(c.challenger)}</td>
+                          <td className="px-3 py-1.5 text-body break-words">{c.parameter}</td>
+                          <td className="px-3 py-1.5 text-body break-words">{fmtDiffValue(c.champion)}</td>
+                          <td className="px-3 py-1.5 text-body break-words">{fmtDiffValue(c.challenger)}</td>
                         </tr>
                       ))}
                     </tbody>

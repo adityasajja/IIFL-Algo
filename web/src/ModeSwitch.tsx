@@ -171,13 +171,12 @@ export function ModeDetails({ ex }: { ex: ExecutionModeCtl }) {
                 {ex.reason.trim().length === 0 ? "Reason required" : "Enable live execution"}
               </StatefulButton>
               <Button
-                size="sm"
+                size="xs"
                 variant="ghost"
                 onClick={() => {
                   ex.setConfirmLive(false);
                   ex.setReason("");
                 }}
-                className="h-8 text-xs"
               >
                 Cancel
               </Button>

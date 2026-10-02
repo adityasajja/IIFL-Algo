@@ -36,6 +36,7 @@ import {
   type WatchlistSummary,
 } from "./api";
 import { Button } from "./components/ui/button";
+import { Chip } from "./components/ui/chip";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
 import { ButtonLoader, PageLoader } from "./components/ui/loading";
 import { Input } from "./components/motion/input";
@@ -622,7 +623,11 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
               }}
             />
             <div className="flex gap-1.5">
-              <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createList()}>
+              <Button
+                size="sm"
+                disabled={busy || !newName.trim()}
+                onClick={() => void createList()}
+              >
                 Create
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setRenaming(false)}>
@@ -796,7 +801,11 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                     }}
                   />
                 </div>
-                <Button size="sm" disabled={busy || !renameValue.trim()} onClick={() => void renameList()}>
+                <Button
+                  size="sm"
+                  disabled={busy || !renameValue.trim()}
+                  onClick={() => void renameList()}
+                >
                   Save
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setRenaming(false)}>
@@ -828,15 +837,17 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                         <ButtonLoader size={16} />
                       ) : draft ? (
                         <Tooltip content="Clear" side="left" delay={400}>
-                        <button
-                          type="button"
+                        <Button
+                          size="icon-sm"
+                          variant="plain"
                           onClick={() => {
                             setDraft("");
                             setSuggestions([]);
                           }}
+                          aria-label="Clear"
                         >
-                          <X className="size-4" />
-                        </button>
+                          <X />
+                        </Button>
                         </Tooltip>
                       ) : undefined
                     }
@@ -863,7 +874,12 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                     }}
                   />
                 </div>
-                <Button size="md" disabled={busy || !draft.trim()} onClick={() => void addSymbols()}>
+                <Button
+                  size="md"
+                  disabled={busy || !draft.trim()}
+                  onClick={() => void addSymbols()}
+                >
+
                   <Plus className="size-4" />
                   Add
                 </Button>
@@ -926,9 +942,9 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                 <table className="w-full border-collapse text-body">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-left">
-                      <th className="w-8 px-2 py-2" />
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground w-8" />
                       <th
-                        className="px-3 py-2 font-semibold"
+                        className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground"
                         aria-sort={sortOf("symbol").dir === "asc" ? "ascending" : sortOf("symbol").dir === "desc" ? "descending" : "none"}
                       >
                         <SortButton
@@ -940,7 +956,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                       {activeSpecs.map((c) => (
                         <th
                           key={c.key}
-                          className="px-3 py-2 text-right font-semibold"
+                          className="px-3 py-2 text-right text-micro font-semibold uppercase tracking-wider text-muted-foreground"
                           aria-sort={sortOf(c.key).dir === "asc" ? "ascending" : sortOf(c.key).dir === "desc" ? "descending" : "none"}
                         >
                           <SortButton
@@ -950,7 +966,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                           />
                         </th>
                       ))}
-                      <th className="px-3 py-2" />
+                      <th className="px-3 py-2 text-left text-micro font-semibold uppercase tracking-wider text-muted-foreground" />
                     </tr>
                   </thead>
                   <tbody>
@@ -961,7 +977,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                           key={symbol}
                           className="border-b border-border/60 transition-colors last:border-0 hover:bg-primary/[0.03]"
                         >
-                          <td className="px-2 py-1.5">
+                          <td className="px-3 py-1.5">
                             {/* Freshness is per row: a cached close shown next to a
                                 live one is the single most misleading thing this
                                 table could do. */}
@@ -994,13 +1010,14 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                           </td>
                           <td className="px-3 py-1.5">
                             <Tooltip content="Open chart" side="top" delay={400}>
-                            <button
-                              type="button"
-                              className="text-left font-semibold hover:underline"
+                            <Button
+                              size="inline"
+                              variant="link"
+                              className="font-semibold text-foreground"
                               onClick={() => onOpenChart?.(symbol)}
                             >
                               {symbol}
-                            </button>
+                            </Button>
                             </Tooltip>
                             {row?.name ? (
                               <span className="ml-2 text-caption text-muted-foreground">
@@ -1040,47 +1057,55 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                                   {sort.length === 0 ? (
                                     <>
                                       <Tooltip content="Move up" side="left" delay={400}>
-                                  <button
-                                    type="button"
+                                  <Button
+                                    size="icon-sm"
+                                    variant="plain"
+                                    className="-my-1"
                                     disabled={busy || index === 0}
                                     onClick={() => void move(index, -1)}
-                                          className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                    aria-label="Move up"
                                   >
-                                    <ArrowUp className="size-3.5" />
-                                  </button>
+                                    <ArrowUp />
+                                  </Button>
                                       </Tooltip>
                                       <Tooltip content="Move down" side="left" delay={400}>
-                                  <button
-                                    type="button"
+                                  <Button
+                                    size="icon-sm"
+                                    variant="plain"
+                                    className="-my-1"
                                     disabled={busy || index === detail.items.length - 1}
                                     onClick={() => void move(index, 1)}
-                                          className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                    aria-label="Move down"
                                   >
-                                    <ArrowDown className="size-3.5" />
-                                  </button>
+                                    <ArrowDown />
+                                  </Button>
                                       </Tooltip>
                                     </>
                                   ) : null}
                                   <Tooltip content="Remove from this list" side="left" delay={400}>
-                                  <button
-                                    type="button"
+                                  <Button
+                                    size="icon-sm"
+                                    variant="plain"
+                                    className="hover:bg-destructive/10 hover:text-destructive -my-1"
                                     disabled={busy}
                                     onClick={() => void removeSymbol(symbol)}
-                                      className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
+                                    aria-label="Remove from this list"
                                   >
-                                    <X className="size-3.5" />
-                                  </button>
+                                    <X />
+                                  </Button>
                                   </Tooltip>
                                 </>
                               ) : null}
                               <Tooltip content="Open chart" side="left" delay={400}>
-                              <button
-                                type="button"
+                              <Button
+                                size="icon-sm"
+                                variant="plain"
+                                className="-my-1"
                                 onClick={() => onOpenChart?.(symbol)}
-                                  className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                                aria-label="Open chart"
                               >
-                                <BarChart3 className="size-3.5" />
-                              </button>
+                                <BarChart3 />
+                              </Button>
                               </Tooltip>
                             </div>
                           </td>
@@ -1178,22 +1203,10 @@ function ColumnPicker({
             const on = selected.includes(c.key);
             return (
               <Tooltip content={c.description} side="top" delay={400}>
-              <button
-                key={c.key}
-                type="button"
-                disabled={disabled}
-                onClick={() => onToggle(c.key)}
-                aria-pressed={on}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-50",
-                  on
-                    ? "border-primary/40 bg-primary/10 text-foreground"
-                    : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
-                )}
-              >
+              <Chip key={c.key} disabled={disabled} selected={on} onClick={() => onToggle(c.key)} className="min-h-0 gap-1 px-2.5 py-1">
                 {on ? <Check className="size-3 text-primary" /> : null}
                 {columnLabel(c)}
-              </button>
+              </Chip>
               </Tooltip>
             );
           })}
