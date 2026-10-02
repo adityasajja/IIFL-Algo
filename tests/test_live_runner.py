@@ -10,6 +10,7 @@ never placed a single order — and failed silently rather than loudly.
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -20,7 +21,8 @@ from atr.core.models import Bar, Instrument, MarketSnapshot
 from atr.live.runner import LiveConfig, LiveRunner
 from atr.strategy.strategies.sma_crossover import SmaCrossover
 
-START = datetime.now().replace(second=0, microsecond=0)
+# Wall-clock time in IST (the runner reads naive timestamps as IST), not the machine's local zone.
+START = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None).replace(second=0, microsecond=0)
 
 
 def _series(n: int, offset: float = 0.0) -> np.ndarray:

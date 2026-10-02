@@ -921,6 +921,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
   // sent twice (the confirmation's id is what the server de-duplicates on).
   const confirmOrder = useOrderConfirm();
   const placing = useRef(false);
+  const [quickQty, setQuickQty] = useState(1);
+  const qty = Number.isInteger(quickQty) && quickQty > 0 ? quickQty : 1;
   const handleQuickOrder = async (isBuy: boolean) => {
     if (placing.current) return;
     const lastPrice = hoverData?.close ?? candles[candles.length - 1]?.close ?? 0;
@@ -929,7 +931,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       symbol,
       exchange: "NSEEQ",
       side,
-      quantity: 1,
+      quantity: qty,
       orderType: "MARKET",
       price: lastPrice > 0 ? lastPrice : null,
       priceSource: cacheAsOf !== null ? "cache" : "last",
@@ -940,7 +942,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       const res = await placeOrder({
         symbol,
         exchange: "NSEEQ",
-        quantity: isBuy ? 1 : -1,
+        quantity: isBuy ? qty : -qty,
         order_type: "MARKET",
         price: lastPrice,
         client_order_id: ok.clientOrderId,
@@ -950,7 +952,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       } else {
         toast({
           title: res.duplicate ? "Already placed" : `${side} order sent`,
-          description: `1 unit of ${symbol.replace("-EQ", "")}, ${String(res.status).toLowerCase()}`,
+          description: `${qty} unit${qty === 1 ? "" : "s"} of ${symbol.replace("-EQ", "")}, ${String(res.status).toLowerCase()}`,
           status: "success",
         });
       }
@@ -1032,12 +1034,21 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
           {/* Quick Buy / Sell Execution Pills (Like TV Pro) */}
           <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={quickQty}
+              onChange={(e) => setQuickQty(Math.floor(Number(e.target.value)) || 1)}
+              aria-label="Quantity"
+              className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs tabular-nums"
+            />
             <Button
               size="xs"
               variant="outline"
               className="border-loss/40 text-loss hover:border-loss hover:bg-loss/10"
               disabled={currentPrice <= 0}
-              title={currentPrice <= 0 ? "No price yet" : "Sell 1 at market (asks first)"}
+              title={currentPrice <= 0 ? "No price yet" : `Sell ${qty} at market (asks first)`}
               onClick={() => void handleQuickOrder(false)}
             >
               <span>Sell</span>
@@ -1048,7 +1059,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               variant="outline"
               className="border-gain/40 text-gain hover:border-gain hover:bg-gain/10"
               disabled={currentPrice <= 0}
-              title={currentPrice <= 0 ? "No price yet" : "Buy 1 at market (asks first)"}
+              title={currentPrice <= 0 ? "No price yet" : `Buy ${qty} at market (asks first)`}
               onClick={() => void handleQuickOrder(true)}
             >
               <span>Buy</span>

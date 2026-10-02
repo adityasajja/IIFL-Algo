@@ -398,6 +398,8 @@ class LimitsRiskGate:
     engine: Any  # atr.execution.risk.RiskEngine
     portfolio: Any
     instruments: Any  # Callable[[str, str], atr.core.models.Instrument]
+    #: A limit price further than this from the last known price is refused as a fat-finger.
+    price_band_pct: float = 0.10
 
     def __call__(self, draft: OrderDraft) -> RiskDecision:
         from atr.core.enums import OrderType, Side
@@ -426,6 +428,9 @@ class LimitsRiskGate:
             )
 
         limits = getattr(self.engine, "limits", None)
+        band = self._price_band_check(draft)
+        if band is not None:
+            return band
         daily = self._daily_loss_check(draft, order, limits)
         if daily is not None:
             return daily
@@ -443,6 +448,23 @@ class LimitsRiskGate:
                 "unpriceable_order",
             )
         return RiskDecision.ok()
+
+    def _price_band_check(self, draft: OrderDraft) -> RiskDecision | None:
+        """Refuse a limit price far from the last price (a mistyped extra zero). Skipped when
+        there is no limit price or no reference price — nothing to compare against."""
+        if not draft.limit_price or self.price_band_pct <= 0:
+            return None
+        last = self._last_price(draft)
+        if last <= 0:
+            return None
+        gap = abs(float(draft.limit_price) - last) / last
+        if gap > self.price_band_pct:
+            return RiskDecision.reject(
+                f"limit price {float(draft.limit_price):,.2f} is {gap:.0%} away from the last "
+                f"price {last:,.2f} (allowed {self.price_band_pct:.0%}) — check for a typo",
+                "price_band",
+            )
+        return None
 
     def _daily_loss_check(self, draft: OrderDraft, order: Any, limits: Any) -> RiskDecision | None:
         """Refuse new risk once today's loss reaches ``max_daily_loss``. Exits stay allowed;

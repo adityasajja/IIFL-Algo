@@ -458,11 +458,10 @@ class WatchlistService:
             **values,
         }
 
-    @staticmethod
-    def _frame(cache_file: str | None) -> pd.DataFrame | None:
+    def _frame(self, cache_file: str | None) -> pd.DataFrame | None:
         if not cache_file:
             return None
-        path = Path(CACHE_ROOT) / cache_file
+        path = Path(getattr(self.master, "cache_root", CACHE_ROOT)) / cache_file
         if not path.exists():
             return None
         try:

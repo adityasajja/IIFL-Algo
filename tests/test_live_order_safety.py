@@ -217,3 +217,11 @@ class TestDailyLoss:
     def test_unreadable_book_fails_closed(self):
         r = _gate(_Book(readable=False), 5000)(_d())
         assert not r.allowed and r.code == "daily_loss_unknown"
+
+
+class TestPriceBand:
+    def test_far_limit_refused_near_allowed(self):
+        far = OrderDraft(user_id="u", symbol="INFY", exchange="NSE", side="BUY", quantity=1, order_type="LIMIT", limit_price=1000.0)
+        r = _gate(_Book(), None)(far)
+        assert not r.allowed and r.code == "price_band"
+        assert _gate(_Book(), None)(_d()).allowed

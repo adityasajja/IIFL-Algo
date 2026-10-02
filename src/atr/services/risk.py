@@ -158,6 +158,12 @@ class LiveGuards:
             )
         return self.inner(draft)
 
+    def __getattr__(self, name: str) -> Any:
+        # Callers reach through to the gate's engine/portfolio; the wrapper must not hide them.
+        if name == "inner":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
+
 
 def _limits_as_dict(limits: RiskLimits) -> dict[str, Any]:
     """Serialise limits, turning ``inf`` into ``None``.
