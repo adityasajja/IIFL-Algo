@@ -11,6 +11,7 @@ import {
   listDeployments,
   listSavedStrategies,
   type DashboardSummary,
+  type DataStatus,
   type Deployment,
   type Health,
   type Position,
@@ -24,7 +25,10 @@ import { Card, Hint } from "./components/ui/card";
 import { AnimatedBadge } from "./components/motion/animated-badge";
 import { TiltCard } from "./components/motion/tilt-card";
 import { useLiveTicks } from "./lib/useLiveTicks";
+import { DataTrust } from "./DataTrust";
 import { JourneyCard } from "./JourneyCard";
+import { TrackRecordCard } from "./TrackRecordCard";
+import { toneFill, type Tone } from "./lib/tone";
 import { journeySteps, nextStep } from "./lib/journey";
 import type { Tab } from "./lib/nav";
 import { cn } from "./lib/utils";
@@ -33,13 +37,15 @@ import { formatInr as inrFmt, TYPOGRAPHY } from "./lib/theme";
 
 interface Props {
   onNavigate: (tab: Tab, sub?: string) => void;
+  dataStatus?: DataStatus | null;
+  dataError?: boolean;
 }
 
 // ─── Status Badges ────────────────────────────────────────────────────────────
 type StatusType = "HEALTHY" | "WARNING" | "STALE" | "ERROR" | "NOT_ACTIVE";
 
 // ─── Main OverviewPanel ───────────────────────────────────────────────────────
-export default function OverviewPanel({ onNavigate }: Props) {
+export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -163,70 +169,38 @@ export default function OverviewPanel({ onNavigate }: Props) {
 
   const pnlTone = dayPnl === null ? "text-muted-foreground" : dayPnl > 0 ? "text-gain" : dayPnl < 0 ? "text-loss" : "text-foreground";
 
+  const toneOfStatus: Record<StatusType, Tone> = { HEALTHY: "good", WARNING: "warn", ERROR: "bad", STALE: "warn", NOT_ACTIVE: "flat" };
+
   return (
     <div className="space-y-6 pb-12">
-      {/* Hero: mesh backdrop, headline + actions in one row, session status docked
- to its footer. One surface, one reading path. */}
-      <section className="gradient-mesh overflow-hidden rounded-[20px] border border-border">
-        <div className="px-6 pt-6 sm:px-8">
-          <div className="flex items-center justify-between gap-3">
-          <p className="text-micro font-normal uppercase tracking-[0.1px] text-muted-foreground">Forward &middot; Paper trading</p>
-          <Tooltip content={lastRefreshedAt ? `Updated ${lastRefreshedAt}` : "Refresh"} side="bottom" delay={400}>
-              <Button
-                variant="quiet"
-                size="icon-sm"
-                onClick={() => loadData(true)}
-                disabled={refreshing}
-                aria-label="Refresh"
-              >
-          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-              </Button>
-            </Tooltip>
-      </div>
-          <div className="flex flex-col gap-5 pb-7 pt-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-[600px]">
-            <h1 className="max-w-[640px] text-display text-foreground sm:text-5xl sm:leading-[1.15] sm:tracking-[-0.96px]">{next ? "Prove it before you risk it." : "How am I doing today?"}</h1>
-            <p className="mt-2 max-w-[520px] text-base font-light leading-[1.4] text-muted-foreground">{next ? "Build a strategy, test it on prices it has never seen, run it on paper, and only then trade it live." : "Live prices, open trades, and proof on prices the strategy has never seen, in one quiet ledger."}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 lg:pb-1">
-            <Button variant="primary" size="md" onClick={() => (next ? onNavigate(next.tab, next.sub) : onNavigate("learning"))}>{next ? next.action : "Open performance"}</Button>
-            </div>
-          </div>
-        </div>
-        {/* Refresh lives in the hero eyebrow row, so it never owns a row alone. */}
-
-        {/* Status strip docked to the hero footer: the four things that decide
- whether the app can do its job, read as one surface with the hero. */}
-        <div className="grid grid-cols-2 gap-px border-t border-border bg-border/80 lg:grid-cols-4 dark:bg-white/10">
-        {lights.map((l) => (
-          <div key={l.key} className="flex items-center gap-3 bg-white/85 px-6 py-3.5 backdrop-blur-sm dark:bg-card/80">
-            <span className="relative grid size-3 place-items-center">
-              {l.status === "HEALTHY" && (
-                  <span className="absolute inline-flex size-2.5 animate-ping rounded-full bg-gain/20" />
-              )}
-              <span
-                className={cn(
-                    "relative size-2 rounded-full ring-2 ring-card",
-                    l.status === "HEALTHY"
-                      ? "bg-gain"
-                      : l.status === "NOT_ACTIVE"
-                        ? "bg-muted-foreground/30"
-                        : l.status === "WARNING"
-                          ? "bg-warning"
-                          : "bg-destructive",
-                )}
-              />
-            </span>
-            <div className="min-w-0">
-                <div className="text-body font-medium text-foreground">{l.label}</div>
-              <div className="truncate text-xs text-muted-foreground">{l.word}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      </section>
+      {/* The page leads with the evidence: what the strategies did, against the market. */}
+      <TrackRecordCard onStart={() => onNavigate("paper")} />
 
       <JourneyCard steps={steps} next={next} onNavigate={onNavigate} />
+
+      {/* Four lights for whether the app can do its job right now. */}
+      <Card padding="none" className="overflow-hidden">
+        <div className="grid grid-cols-2 divide-border lg:grid-cols-[repeat(4,1fr)_auto] lg:divide-x">
+          {lights.map((l) => (
+            <div key={l.key} className="flex items-center gap-3 px-5 py-3">
+              <i className={cn("size-2.5 shrink-0 rounded-full", toneFill[toneOfStatus[l.status]], l.status === "HEALTHY" && "animate-pulse")} />
+              <div className="min-w-0">
+                <div className="text-body font-medium text-foreground">{l.label}</div>
+                <div className="truncate text-xs text-muted-foreground">{l.word}</div>
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center justify-end px-3 py-3">
+            <Tooltip content={lastRefreshedAt ? `Updated ${lastRefreshedAt}` : "Refresh"} side="bottom" delay={400}>
+              <Button variant="quiet" size="icon-sm" onClick={() => loadData(true)} disabled={refreshing} aria-label="Refresh">
+                <RefreshCw className={cn(refreshing && "animate-spin")} />
+              </Button>
+            </Tooltip>
+          </div>
+        </div>
+      </Card>
+
+      <DataTrust status={dataStatus ?? null} brokerConnected={!!health?.session_active} error={dataError} />
 
       {/* Today, full width: the one answer the dashboard leads with. */}
       <TiltCard

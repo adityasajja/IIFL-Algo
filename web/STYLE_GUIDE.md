@@ -336,6 +336,23 @@ EXPERIMENTAL        Labs
 - Home always shows where the user is on the path and the one next step (`lib/journey.ts`).
 - Renaming or moving a page means adding the old id to `LEGACY` in `nav.ts`, so bookmarks keep working.
 
+### 4.1b Show, then say
+
+The first answer to "is this working?" is a picture, not a paragraph.
+
+- **Lead with the evidence.** Home opens on the track record: one hero figure, the curve against
+  the Nifty 50, the depth of every fall, then four small facts. Words are labels.
+- **A picture before a number.** A meter, a ring, a rail or a dot says it before the digits do. A
+  sentence behind a control is a hover (`Tooltip`), not text on the page.
+- **Every figure carries its provenance.** Simulated or real, where the prices came from, and how
+  many trading sessions old they are, as a chip or a freshness dot. Never green unless current.
+- **A missing thing is shown as missing.** No data is a ghost of the chart and one action, never a
+  flat line; an unpriced day is flagged, never smoothed.
+- **Charts follow the dataviz rules:** one axis, thin marks, the accent for the thing that matters
+  and gray for its yardstick, direct end labels, a crosshair readout, a table view, keyboard access.
+- The limits (practice money, not advice, live orders are yours) are icons with a hover, always on
+  Home. Legal wording is for a lawyer; the product's plain version lives in `DataTrust`.
+
 ### 4.2 Showing market numbers
 
 | Thing | Format | Example |

@@ -16,6 +16,7 @@ import {
 } from "./components/motion/animated-sidebar";
 import {
   type LucideIcon,
+  Info,
   Bell,
   Briefcase,
   ChartPie,
@@ -71,13 +72,16 @@ const AlphaHuntPanel = lazy(() => import("./AlphaHuntPanel"));
 const EpisodicPivotPanel = lazy(() => import("./EpisodicPivotPanel"));
 import {
   appLogout,
+  getDataStatus,
   getHealth,
   getLoginStatus,
   logoutSession,
+  type DataStatus,
   type Health,
   type LoginStatus,
 } from "./api";
 import { Callout } from "./components/ui/stat";
+import { DataPill } from "./DataTrust";
 import { NAV_GROUPS, PAGES, SUBS, normaliseSub, parseRoute, type Tab } from "./lib/nav";
 import { useSession } from "./lib/useSession";
 import { cn } from "./lib/utils";
@@ -277,6 +281,25 @@ function LiveClock() {
   );
 }
 
+const PATH_STEPS: Tab[] = ["strategies", "evidence", "paper", "trading", "learning"];
+
+/** Where this page sits on the path, as five dots: shown on the path pages only. */
+function StepDots({ tab }: { tab: Tab }) {
+  const at = PATH_STEPS.indexOf(tab);
+  if (at < 0) return null;
+  return (
+    <ol className="mt-1.5 flex items-center gap-1.5" aria-label={`Step ${at + 1} of ${PATH_STEPS.length}`}>
+      {PATH_STEPS.map((t, i) => (
+        <li
+          key={t}
+          title={PAGES[t].name}
+          className={cn("h-1.5 rounded-full transition-all", i === at ? "w-6 bg-primary" : i < at ? "w-1.5 bg-gain" : "w-1.5 bg-border")}
+        />
+      ))}
+    </ol>
+  );
+}
+
 /** The second row of a page, built from the page's sub-pages in lib/nav.ts. */
 function SubTabs({ tab, value, onChange }: { tab: Tab; value: string; onChange: (v: string) => void }) {
   return (
@@ -361,6 +384,8 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [auth, setAuth] = useState<LoginStatus | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
+  const [dataError, setDataError] = useState(false);
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -397,6 +422,22 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("atr.theme", theme);
   }, [theme]);
+
+  const refreshData = useCallback(async () => {
+    try {
+      setDataStatus(await getDataStatus());
+      setDataError(false);
+    } catch {
+      // Keep the last answer: a failed check must not turn a known date into "unknown".
+      setDataError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshData();
+    const t = setVisibleInterval(() => void refreshData(), 60_000);
+    return () => clearInterval(t);
+  }, [refreshData]);
 
   useEffect(() => {
     void refreshHealth();
@@ -642,8 +683,15 @@ export default function App() {
                 </AnimatedSidebarTrigger>
               </Tooltip>
             <div className="min-w-0">
-                <div className="truncate text-heading text-foreground">{meta.title}</div>
-                <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{meta.blurb}</div>
+                <div className="flex items-center gap-2">
+                  <div className="truncate text-heading text-foreground">{meta.title}</div>
+                  <Tooltip content={meta.blurb} side="bottom" delay={150}>
+                    <span className="grid size-6 shrink-0 cursor-help place-items-center rounded-full text-muted-foreground hover:text-foreground" role="img" aria-label={meta.blurb}>
+                      <Info className="size-4" aria-hidden="true" />
+                    </span>
+                  </Tooltip>
+                </div>
+                <StepDots tab={tab} />
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -670,6 +718,8 @@ export default function App() {
                   </button>
                 </Tooltip>
               )}
+
+              <DataPill status={dataStatus} onClick={() => setTab("dashboard")} />
 
               <LiveClock />
 
@@ -706,7 +756,7 @@ export default function App() {
         </div>
 
         <Suspense fallback={<PageLoader />}>
-        {tab === "dashboard" && <OverviewPanel onNavigate={(t, s) => setTab(t, s)} />}
+        {tab === "dashboard" && <OverviewPanel onNavigate={(t, s) => setTab(t, s)} dataStatus={dataStatus} dataError={dataError} />}
         {tab === "watchlist" && (
           <WatchlistPanel permissions={principal?.permissions ?? []} onOpenChart={openChart} />
         )}

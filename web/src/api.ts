@@ -4915,3 +4915,83 @@ export const getAnalyticsMaeMfe = (
   return v1<{ ok: boolean; data: MaeMfeAnalytics }>(`/analytics/mae-mfe?${params}`);
 };
 
+
+
+// ---------------------------------------------------------------------------
+// track record and data freshness: the trust layer
+// ---------------------------------------------------------------------------
+
+export interface TrackRecordSummary {
+  return_pct: number;
+  benchmark_return_pct: number | null;
+  excess_pct: number | null;
+  max_drawdown_pct: number;
+  current_drawdown_pct: number;
+  net_pnl: number;
+  closed_trades: number;
+  win_rate_pct: number | null;
+  commission_paid: number;
+}
+
+export interface TrackRecordProvenance {
+  /** Always true today: the fills come from the paper venue, not a broker. */
+  simulated: boolean;
+  fills: string;
+  prices: string;
+  prices_as_of: string | null;
+  benchmark: { name: string; source: string | null; as_of: string | null };
+  /** False when some day had to value a held name at cost for lack of a close. */
+  complete: boolean;
+  unpriced_days: number;
+}
+
+/** `has_data` is false until a deployment has traded; then there is no curve at all. */
+export interface TrackRecord {
+  scope: "all" | "deployment";
+  deployment_id: string | null;
+  window_days: number;
+  deployments: number;
+  has_data: boolean;
+  capital?: number;
+  base?: number;
+  start?: string;
+  end?: string;
+  trading_days?: number;
+  points?: { d: string; equity: number; benchmark: number | null }[];
+  summary?: TrackRecordSummary;
+  unpriced_days?: number;
+  provenance: TrackRecordProvenance;
+}
+
+export const getTrackRecord = (days = 90) =>
+  v1<TrackRecord>(`/paper/track-record?days=${days}`);
+
+export interface DataSource {
+  id: "prices" | "index" | string;
+  label: string;
+  role: string;
+  origin: string;
+  as_of: string | null;
+  sessions_behind: number | null;
+  status: "fresh" | "late" | "stale" | "missing";
+}
+
+export interface DataStatus {
+  expected_session: string;
+  checked_at: string;
+  market_open: boolean;
+  overall: "fresh" | "late" | "stale" | "missing";
+  sources: DataSource[];
+  topup: {
+    id: string;
+    label: string;
+    ran_at: string | null;
+    ran_date_ist: string | null;
+    updated: number | null;
+    failed: number | null;
+    names: number | null;
+  } | null;
+  samples: number;
+}
+
+export const getDataStatus = () => v1<DataStatus>("/data/status");

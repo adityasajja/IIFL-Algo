@@ -19,6 +19,8 @@ export type JourneyFacts = {
 export type JourneyStep = {
   id: "build" | "test" | "paper" | "live" | "review";
   title: string;
+  /** One word for the rail. */
+  short: string;
   /** One plain sentence: what this step is and why it comes here. */
   what: string;
   done: boolean;
@@ -34,6 +36,7 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
     {
       id: "build",
       title: "Build a strategy",
+      short: "Build",
       what: "Write the rules for when to buy and when to sell.",
       done: f.strategies > 0,
       tab: "strategies",
@@ -42,6 +45,7 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
     {
       id: "test",
       title: "Test it",
+      short: "Test",
       what: "Check it on prices it has never seen. Most ideas fail here, and that is the point.",
       done: f.deployable > 0,
       tab: "evidence",
@@ -51,6 +55,7 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
     {
       id: "paper",
       title: "Paper trade it",
+      short: "Paper",
       what: "Run it on live prices with practice money for a few weeks.",
       done: f.paperRuns > 0,
       tab: "paper",
@@ -59,6 +64,7 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
     {
       id: "live",
       title: "Go live",
+      short: "Live",
       what: "Connect your broker, set your limits, and let it place real orders.",
       done: live && f.brokerConnected,
       tab: "trading",
@@ -68,6 +74,7 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
     {
       id: "review",
       title: "Review",
+      short: "Review",
       what: "See what it did, what it cost, and where the results came from.",
       done: false,
       tab: "learning",

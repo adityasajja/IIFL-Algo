@@ -1,13 +1,23 @@
-import { Check } from "lucide-react";
+import { Briefcase, Check, ChartPie, FlaskConical, Layers, Radio, type LucideIcon } from "lucide-react";
+import { Tooltip } from "./components/motion/tooltip";
 import { Button } from "./components/ui/button";
-import { Card, CardHeader } from "./components/ui/card";
+import { Card } from "./components/ui/card";
 import type { JourneyStep } from "./lib/journey";
 import type { Tab } from "./lib/nav";
 import { cn } from "./lib/utils";
 
+const ICON: Record<JourneyStep["id"], LucideIcon> = {
+  build: Layers,
+  test: FlaskConical,
+  paper: Radio,
+  live: Briefcase,
+  review: ChartPie,
+};
+
 /**
- * The product in five steps, with the next one marked. The same path as the sidebar's
- * first group, so a new user sees where they are and what to do without reading a manual.
+ * The path from idea to live trading as a rail: a node per step, a line that fills as steps are
+ * done, and one button on the step that is next. The sentence behind each step is a hover, not
+ * a paragraph: the picture carries the order and the progress.
  */
 export function JourneyCard({
   steps,
@@ -18,47 +28,44 @@ export function JourneyCard({
   next: JourneyStep | null;
   onNavigate: (tab: Tab, sub?: string) => void;
 }) {
-  const doneCount = steps.filter((s) => s.done).length;
+  const nextIndex = next ? steps.findIndex((s) => s.id === next.id) : steps.length;
   return (
     <Card padding="md">
-      <CardHeader
-        title="Your path to live trading"
-        sub={next ? "Each step unlocks the next. Do them in order." : "You are live. Review keeps you honest."}
-        action={<span className="text-caption tabular-nums text-muted-foreground">{doneCount} of {steps.length - 1} done</span>}
-      />
-      <ol className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <ol className="flex items-start" aria-label="Path to live trading">
         {steps.map((s, i) => {
+          const Icon = ICON[s.id];
           const isNext = next?.id === s.id;
+          const reached = i < nextIndex || s.done;
           return (
-            <li
-              key={s.id}
-              className={cn(
-                "flex flex-col gap-2 rounded-lg border p-3",
-                isNext ? "border-primary/50 bg-primary/5" : "border-border",
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "grid size-5 shrink-0 place-items-center rounded-full text-micro font-semibold",
-                    s.done ? "bg-gain text-primary-foreground" : isNext ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
-                  )}
-                  aria-hidden="true"
-                >
-                  {s.done ? <Check className="size-3" /> : i + 1}
-                </span>
-                <span className="text-sm font-semibold text-foreground">{s.title}</span>
-                {s.done ? <span className="sr-only">(done)</span> : null}
+            <li key={s.id} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+              <div className="relative flex w-full items-center justify-center">
+                {i > 0 ? (
+                  <span className={cn("absolute right-1/2 h-0.5 w-full rounded-full", i <= nextIndex ? "bg-gain" : "bg-border")} aria-hidden="true" />
+                ) : null}
+                <Tooltip content={s.what} side="bottom" delay={200}>
+                  <Button
+                    size="icon"
+                    variant={isNext ? "primary" : "quiet"}
+                    className={cn("relative z-10", reached && !isNext && "border-gain/50 text-gain bg-card", !reached && !isNext && "bg-card", isNext && "ring-4 ring-primary/20")}
+                    aria-label={`${s.title}${s.done ? " (done)" : isNext ? " (next)" : ""}`}
+                    aria-current={isNext ? "step" : undefined}
+                    onClick={() => onNavigate(s.tab, s.sub)}
+                  >
+                    <Icon className="size-4" />
+                  </Button>
+                </Tooltip>
+                {s.done ? (
+                  <span className="absolute left-1/2 top-0 z-20 ml-2 grid size-4 -translate-y-1 place-items-center rounded-full bg-gain text-primary-foreground" aria-hidden="true">
+                    <Check className="size-2.5" />
+                  </span>
+                ) : null}
               </div>
-              <p className="text-xs leading-relaxed text-muted-foreground">{s.what}</p>
-              <Button
-                size="xs"
-                variant={isNext ? "primary" : "quiet"}
-                className="mt-auto self-start"
-                onClick={() => onNavigate(s.tab, s.sub)}
-              >
-                {s.action}
-              </Button>
+              <span className={cn("text-xs", isNext ? "font-semibold text-foreground" : "text-muted-foreground")}>{s.short}</span>
+              {isNext ? (
+                <Button size="xs" onClick={() => onNavigate(s.tab, s.sub)}>
+                  {s.action}
+                </Button>
+              ) : null}
             </li>
           );
         })}
