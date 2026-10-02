@@ -85,6 +85,11 @@ class TickPrice:
     price: float
     timestamp: datetime | None = None
     age_seconds: float | None = None
+    #: From the same tick packet when the feed supplies them: the session's real open and the best
+    #: bid/ask. None means "the feed did not say", never zero.
+    open: float | None = None
+    bid: float | None = None
+    ask: float | None = None
 
     def get_age_seconds(self, now: datetime | None = None) -> float | None:
         if self.age_seconds is not None:
@@ -104,6 +109,29 @@ class TickPrice:
 # ===========================================================================
 # Price sources
 # ===========================================================================
+def cached_adv_source(cache_root: Path | None = None, days: int = 20) -> Callable[[str, str], float | None]:
+    """Average daily volume (shares) over the last ``days`` bars of the local cache, or None."""
+    from atr.instruments.service import CACHE_ROOT, get_instrument_master
+
+    root = Path(cache_root) if cache_root is not None else Path(CACHE_ROOT)
+
+    def source(symbol: str, exchange: str) -> float | None:
+        try:
+            record = get_instrument_master().get(symbol, exchange)
+            cache_file = getattr(record, "cache_file", None)
+            if not cache_file or not (root / cache_file).exists():
+                return None
+            import pandas as pd
+
+            volume = pd.read_parquet(root / cache_file, columns=["volume"])["volume"].tail(days)
+            value = float(volume.mean())
+            return value if value > 0 else None
+        except Exception:  # noqa: BLE001 - unknown liquidity is "not modelled", never zero
+            return None
+
+    return source
+
+
 def cached_close_source(cache_root: Path | None = None) -> Callable[[str, str], float | None]:
     """The last close in the local daily cache. The offline default.
 
@@ -190,7 +218,19 @@ def live_tick_source(
                 now_aware = now if now.tzinfo else now.replace(tzinfo=ts_aware.tzinfo)
                 age = max(0.0, (now_aware - ts_aware).total_seconds())
 
-            return TickPrice(price=float(price), timestamp=ts, age_seconds=age)
+            open_px = bid = ask = None
+            try:
+                tick = b.latest_tick(symbol) if hasattr(b, "latest_tick") else None
+                if tick is not None:
+                    open_px = float(tick.open) if tick.open and float(tick.open) > 0 else None
+                    b_, a_ = tick.best_bid, tick.best_ask
+                    if b_ and a_ and 0 < float(b_) <= float(a_):
+                        bid, ask = float(b_), float(a_)
+            except Exception:  # noqa: BLE001 - extras are optional; the price itself is what matters
+                pass
+            return TickPrice(
+                price=float(price), timestamp=ts, age_seconds=age, open=open_px, bid=bid, ask=ask
+            )
         except Exception:  # noqa: BLE001 - a missing stream is "no price"
             logger.debug("live tick lookup failed for %s", symbol)
             return None
@@ -333,6 +373,13 @@ class PaperVenue:
     clock: Callable[[], datetime] = field(default=utcnow)
     #: Maximum allowable age for a reference tick in seconds. If exceeded, orders are rejected.
     max_tick_age_seconds: float | None = 60.0
+    #: Average daily volume for a symbol, in shares. With it, a large order pays market impact and
+    #: fills no more than ``max_participation`` of a day's volume; without it (None, or no data for
+    #: the symbol) fills use only the flat slippage, which is optimistic for thin stocks.
+    adv: Callable[[str, str], float | None] | None = None
+    max_participation: float = 0.05
+    #: Impact in bps = this x sqrt(order / ADV). 100 means 1% of a day's volume costs ~10 bps.
+    impact_coefficient_bps: float = 100.0
 
     def submit(self, draft: Any) -> VenueOutcome:
         """Fill or rest. See :func:`match_order` for the rules."""
@@ -388,7 +435,13 @@ class PaperVenue:
             )
 
         return self._fill(
-            draft, instrument, decision.price or reference or 0.0, reference, tick_ts, price_age
+            draft,
+            instrument,
+            decision.price or reference or 0.0,
+            reference,
+            tick_ts,
+            price_age,
+            quote=raw_reference if isinstance(raw_reference, TickPrice) else None,
         )
 
     def match(self, order: dict[str, Any]) -> VenueOutcome:
@@ -413,6 +466,21 @@ class PaperVenue:
                         "resting_reason": f"stale tick ({price_age:.1f}s)",
                     },
                 )
+
+        last_touch = order.get("updated_at")
+        if (
+            self.adv is not None
+            and float(order.get("filled_quantity") or 0.0) > 0
+            and getattr(last_touch, "date", None) is not None
+            and last_touch.date() == self.clock().date()
+        ):
+            # A partly-filled order already took today's volume allowance; it does not take another
+            # slice every poll. (The order row's own timestamp, so this survives a restart.)
+            return VenueOutcome(
+                status=VENUE_ACCEPTED,
+                broker_order_id=order.get("broker_order_id"),
+                raw={"resting_reason": "today's volume allowance for this order is used up"},
+            )
 
         decision = match_order(
             order_type=order["order_type"],
@@ -446,6 +514,21 @@ class PaperVenue:
             order, instrument, decision.price or reference or 0.0, reference, outstanding, tick_ts, price_age
         )
 
+    def _liquidity(self, symbol: str, exchange: str, side: Side, price: float, quantity: float):
+        """Apply the volume cap and market impact. Returns (price, quantity, details)."""
+        details: dict[str, Any] = {}
+        adv = self.adv(symbol, exchange) if self.adv is not None else None
+        if not adv or adv <= 0:
+            return price, quantity, details
+        cap = max(1.0, float(int(adv * self.max_participation)))
+        if quantity > cap:
+            details["capped_from"] = quantity
+            quantity = cap
+        impact_bps = self.impact_coefficient_bps * (quantity / adv) ** 0.5
+        price += (price * impact_bps / 10_000.0) * (1 if side is Side.BUY else -1)
+        details.update(adv=adv, participation=quantity / adv, impact_bps=round(impact_bps, 2))
+        return price, quantity, details
+
     def _fill(
         self,
         draft: Any,
@@ -454,14 +537,28 @@ class PaperVenue:
         reference: float,
         tick_ts: datetime | None = None,
         price_age: float | None = None,
+        quote: TickPrice | None = None,
     ) -> VenueOutcome:
         side = Side.BUY if draft.side.strip().upper() == "BUY" else Side.SELL
-        price = self.slippage.apply(raw_price, side, instrument)
+        basis = "last_plus_flat_slippage"
+        if (
+            quote is not None
+            and quote.bid
+            and quote.ask
+            and str(draft.order_type).upper() == "MARKET"
+        ):
+            # A market order crosses the spread: buys pay the ask, sells receive the bid. The real
+            # quote replaces the flat slippage guess rather than adding to it.
+            price = float(quote.ask if side is Side.BUY else quote.bid)
+            basis = "quote"
+        else:
+            price = self.slippage.apply(raw_price, side, instrument)
         quantity = abs(float(draft.quantity)) * max(0.0, min(1.0, self.fill_ratio))
         if quantity <= 0:
             return VenueOutcome(
                 status=VENUE_ACCEPTED, raw={"resting_reason": "fill_ratio produced no size"}
             )
+        price, quantity, liquidity = self._liquidity(draft.symbol, draft.exchange, side, price, quantity)
         commission = float(self.costs.compute(quantity, price, instrument, side))
         raw_payload: dict[str, Any] = {
             "reference_price": reference,
@@ -469,6 +566,8 @@ class PaperVenue:
             "commission": commission,
             "slippage_bps": _bps(reference, price, side),
             "venue": "paper",
+            "fill_basis": basis,
+            **liquidity,
         }
         if tick_ts is not None:
             raw_payload["price_timestamp"] = tick_ts.isoformat()
@@ -496,6 +595,7 @@ class PaperVenue:
     ) -> VenueOutcome:
         side = Side.BUY if order["side"].strip().upper() == "BUY" else Side.SELL
         price = self.slippage.apply(raw_price, side, instrument)
+        price, quantity, liquidity = self._liquidity(order["symbol"], order["exchange"], side, price, quantity)
         commission = float(self.costs.compute(quantity, price, instrument, side))
         raw_payload: dict[str, Any] = {
             "reference_price": reference,
@@ -504,6 +604,7 @@ class PaperVenue:
             "slippage_bps": _bps(reference, price, side),
             "venue": "paper",
             "matched_resting_order": True,
+            **liquidity,
         }
         if tick_ts is not None:
             raw_payload["price_timestamp"] = tick_ts.isoformat()

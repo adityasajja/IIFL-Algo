@@ -932,3 +932,16 @@ def test_stale_history_pauses_new_entries(wired, deployment, monkeypatch):
 def test_signal_basis_defaults_to_closed_bar():
     assert RunnerConfig.from_deployment({"config": {"symbols": ["X"]}}).signal_basis == "closed_bar"
     assert RunnerConfig.from_deployment({"config": {"symbols": ["X"], "signal_basis": "live"}}).signal_basis == "live"
+
+
+def test_the_session_open_comes_from_the_feed_when_it_reports_one(wired, deployment):
+    from atr.services.paper import TickPrice
+
+    feed = LiveFeed()
+    runner, _ = wired(feed=feed)
+    loop = _loop(runner, deployment)
+    feed.prices[SYMBOL] = TickPrice(price=1010.0, open=1004.0)
+    from atr.market_calendar import get_market_calendar
+
+    opened, minutes = loop._session_open(SYMBOL, 1010.0, SESSION, get_market_calendar())
+    assert (opened, minutes) == (1004.0, 0.0)

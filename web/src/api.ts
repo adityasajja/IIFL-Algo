@@ -5034,6 +5034,14 @@ export interface DataStatus {
     names: number | null;
   } | null;
   samples: number;
+  /** The nightly check of the stored prices for split-like jumps and holes; null until it has run. */
+  quality?: {
+    checked_at: string | null;
+    symbols: number | null;
+    jumps: string[];
+    gaps: string[];
+    unreadable: string[];
+  } | null;
   demo?: boolean;
 }
 

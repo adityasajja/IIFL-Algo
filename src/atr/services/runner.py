@@ -844,6 +844,11 @@ class DeploymentLoop:
         """
         local = when.astimezone(IST) if when.tzinfo else when.replace(tzinfo=IST)
         today = local.date()
+        true_open = self._tick_open(symbol)
+        if true_open is not None:
+            # The feed reports the session's real opening price, so no guessing from the first
+            # price this loop happened to see, and no "late start" penalty.
+            return true_open, 0.0
         seen = self._first_price.get(symbol)
         if seen is None or seen[0] != today:
             start, _ = cal.session_bounds(today)
@@ -851,6 +856,15 @@ class DeploymentLoop:
             seen = (today, price, minutes)
             self._first_price[symbol] = seen
         return seen[1], seen[2]
+
+    def _tick_open(self, symbol: str) -> float | None:
+        """The session's real open from the live tick, when the feed supplies one."""
+        try:
+            val = self.venue.prices(symbol, self.config.exchange)
+        except Exception:  # noqa: BLE001 - no tick, no open
+            return None
+        open_px = getattr(val, "open", None)
+        return float(open_px) if open_px and float(open_px) > 0 else None
 
     def _bar_key(self, symbol: str) -> str:
         """A key that changes once per bar, so a rule fires once per bar.
@@ -1369,7 +1383,12 @@ class PaperRunner:
     def venue(self) -> PaperVenue:
         if self._venue is None:
             prices = self._price_source or default_price_source()
-            self._venue = PaperVenue(prices=prices)
+            # Market impact and the volume cap need the daily cache; a caller-supplied price source
+            # (a test, an operator's own feed) keeps flat slippage unless it wires liquidity itself.
+            from atr.services.paper import cached_adv_source
+
+            adv = cached_adv_source() if self._price_source is None else None
+            self._venue = PaperVenue(prices=prices, adv=adv)
         return self._venue
 
     @property

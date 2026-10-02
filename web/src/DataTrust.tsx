@@ -56,6 +56,7 @@ export function DataTrust({
         <Stop icon={<Database className="size-4" />} title="Stored prices">
           {prices ? <SourceRow s={prices} /> : <Row dot="flat" label="Stock prices" note="checking" />}
           {index ? <SourceRow s={index} /> : null}
+          <QualityRow quality={status?.quality} />
         </Stop>
         <Link />
         <Stop icon={<FlaskConical className="size-4" />} title="Paper venue">
@@ -105,6 +106,20 @@ function Row({ dot, label, note, icon }: { dot: Tone; label: string; note: strin
       <span className="min-w-0 truncate text-foreground">{label}</span>
       <span className="ml-auto shrink-0 text-muted-foreground">{note}</span>
     </div>
+  );
+}
+
+function QualityRow({ quality }: { quality: DataStatus["quality"] }) {
+  if (!quality) return <Row dot="flat" label="History check" note="not run yet" />;
+  const suspect = quality.jumps.length + quality.gaps.length + quality.unreadable.length;
+  const detail = [...quality.jumps, ...quality.gaps, ...quality.unreadable.map((s) => `${s} unreadable`)].slice(0, 4).join("; ");
+  const row = <Row dot={suspect ? "warn" : "good"} label="History check" note={suspect ? `${suspect} suspect` : "clean"} />;
+  return suspect ? (
+    <Tooltip content={`Likely unadjusted splits or missing days: ${detail}. Results on these names may be wrong.`} side="top" delay={300} wrapperClassName="flex w-full">
+      <div className="w-full">{row}</div>
+    </Tooltip>
+  ) : (
+    row
   );
 }
 

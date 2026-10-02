@@ -74,6 +74,10 @@ async def _jobs_loop() -> None:
     from atr.research import gap_plan
 
     gap = DailyJob("gap_plan", lambda: gap_plan.run_daily(DATA_ROOT), at=(17, 45), weekdays_only=True)
+    from atr.data import quality
+
+    # After the price top-up: flags unadjusted splits and holes before the next session uses them.
+    data_check = DailyJob("data_check", lambda: quality.run_daily(DATA_ROOT), at=(17, 10), weekdays_only=True)
     from atr.insights.holdings import load_holdings
     from atr.services.pnl_calendar import refresh_real
 
@@ -108,7 +112,7 @@ async def _jobs_loop() -> None:
     real_pnl = DailyJob("real_pnl", record_real_pnl, at=(17, 50), weekdays_only=True)
     # After the close and before the day-scoped records reset; tried again if the login is not live.
     tradebook = DailyJob("tradebook", capture_tradebook, at=(15, 45), weekdays_only=True, retries=6, retry_minutes=20)
-    await run_forever([backup, tracker, gap, real_pnl, tradebook], JobStore(DATA_ROOT))
+    await run_forever([backup, data_check, tracker, gap, real_pnl, tradebook], JobStore(DATA_ROOT))
 
 
 async def _eod_refresh_loop() -> None:

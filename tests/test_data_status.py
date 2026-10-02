@@ -96,3 +96,18 @@ def test_the_route_returns_the_shape(fresh_env, master):
     body = client.get("/api/v1/data/status", headers={"Authorization": f"Bearer {token}"}).json()
     assert set(body) >= {"expected_session", "overall", "sources", "market_open"}
     assert {s["id"] for s in body["sources"]} == {"prices", "index"}
+
+
+def test_the_nightly_check_flags_a_split_like_jump_and_status_reports_it(tmp_path):
+    import pandas as pd
+
+    from atr.data import quality
+    from atr.data.eod_refresh import cache_dir
+
+    root = cache_dir(tmp_path)
+    root.mkdir(parents=True)
+    idx = pd.bdate_range("2025-01-01", periods=10)
+    pd.DataFrame({"ts": idx, "close": [100, 101, 50, 51, 52, 53, 54, 55, 56, 57]}).to_parquet(root / "ABC-EQ.parquet")
+    result = quality.run_daily(tmp_path)
+    assert result["symbols"] == 1 and any("ABC-EQ" in j for j in result["jumps"])
+    assert quality.read(tmp_path)["jumps"] == result["jumps"]

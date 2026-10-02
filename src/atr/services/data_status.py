@@ -29,6 +29,22 @@ SAMPLE = ("RELIANCE-EQ", "TCS-EQ", "INFY-EQ", "HDFCBANK-EQ", "ICICIBANK-EQ", "SB
 _ORDER = {"fresh": 0, "late": 1, "stale": 2, "missing": 3}
 
 
+def _quality(data_root: Path) -> dict[str, Any] | None:
+    """The last nightly price-history check, or None if it has never run."""
+    from atr.data import quality
+
+    found = quality.read(data_root)
+    if found is None:
+        return None
+    return {
+        "checked_at": found.get("checked_at"),
+        "symbols": found.get("symbols"),
+        "jumps": found.get("jumps", []),
+        "gaps": found.get("gaps", []),
+        "unreadable": found.get("unreadable", []),
+    }
+
+
 def expected_session(now: datetime, cal: NSEMarketCalendar) -> date:
     """The latest trading date whose daily bar should exist by ``now``."""
     local = now.astimezone(IST) if now.tzinfo else now.replace(tzinfo=IST)
@@ -147,5 +163,6 @@ def build_status(data_root: Path, now: datetime | None = None, cal: NSEMarketCal
         "sources": sources,
         "topup": topup,
         "samples": len(files),
+        "quality": _quality(data_root),
         "demo": is_demo(data_root),
     }
