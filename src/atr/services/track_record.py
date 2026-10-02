@@ -57,21 +57,39 @@ def replay_equity(
 ) -> tuple[list[DayPoint], dict[str, Any]]:
     """Equity at the close of each of ``days``, replaying ``fills`` oldest first.
 
-    Also returns the closed-trade statistics, which fall out of the same replay: a fill that
-    realises P&L closes (part of) a trade.
+    Also returns the closed-trade statistics from the same replay. A trade is an *episode*: it opens
+    when a position leaves flat and closes when it returns to flat, and its result is the P&L those
+    fills realised minus the commission they paid. That is the rule the trade journal uses, so the
+    two cannot disagree about what a trade is.
     """
     ordered = sorted(fills, key=lambda f: f.ts)
     portfolio = Portfolio(initial_cash=initial_cash)
     last_mark: dict[str, float] = {}
     out: list[DayPoint] = []
-    closed = wins = 0
+    closed = wins = losses = 0
+    gross_win = gross_loss = 0.0
+    episode: dict[str, list[float]] = {}  # symbol -> [realised, commission] since it left flat
     i = 0
     for day in days:
         while i < len(ordered) and fill_day(ordered[i]) <= day:
-            realised = portfolio.apply_fill(ordered[i])
-            if realised:
+            fill = ordered[i]
+            symbol = fill.instrument.symbol
+            held = portfolio.positions.get(symbol)
+            was_flat = held is None or held.is_flat
+            realised = portfolio.apply_fill(fill)
+            acc = episode.setdefault(symbol, [0.0, 0.0])
+            acc[0] += realised
+            acc[1] += abs(fill.commission)
+            if not was_flat and portfolio.positions[symbol].is_flat:
+                net = acc[0] - acc[1]
                 closed += 1
-                wins += realised > 0
+                if net > 0:
+                    wins += 1
+                    gross_win += net
+                elif net < 0:
+                    losses += 1
+                    gross_loss += -net
+                episode.pop(symbol)
             i += 1
         priced = True
         value = portfolio.cash
@@ -91,9 +109,29 @@ def replay_equity(
     stats = {
         "closed_trades": closed,
         "wins": wins,
+        "losses": losses,
+        "gross_win": gross_win,
+        "gross_loss": gross_loss,
         "commission_paid": portfolio.commission_paid,
     }
     return out, stats
+
+
+def _payoff(wins: int, losses: int, gross_win: float, gross_loss: float) -> dict[str, Any]:
+    """Average win, average loss and profit factor, each None when it cannot be measured.
+
+    A win rate alone says nothing: 53% of trades can win and the book still lose money. The
+    payoff is what turns it into an expectancy. Profit factor needs a loss to divide by.
+    """
+    return {
+        "win_count": wins,
+        "loss_count": losses,
+        "gross_win": gross_win,
+        "gross_loss": gross_loss,
+        "avg_win": gross_win / wins if wins else None,
+        "avg_loss": -gross_loss / losses if losses else None,
+        "profit_factor": gross_win / gross_loss if gross_loss > 0 else None,
+    }
 
 
 def max_drawdown_pct(values: list[float]) -> float:
@@ -170,6 +208,7 @@ def build_record(
             "closed_trades": closed,
             "win_rate_pct": (stats["wins"] / closed * 100.0) if closed else None,
             "commission_paid": stats["commission_paid"],
+            **_payoff(stats["wins"], stats["losses"], stats["gross_win"], stats["gross_loss"]),
         },
         "unpriced_days": sum(1 for p in shown if not p.priced),
     }
@@ -208,7 +247,10 @@ def combine(records: list[dict[str, Any]]) -> dict[str, Any]:
     ret = (values[-1] / base - 1.0) * 100.0
     bench_ret = (bench_vals[-1] / base - 1.0) * 100.0 if bench_vals else None
     closed = sum(r["summary"]["closed_trades"] for r in live)
-    wins = sum(r["summary"]["closed_trades"] * (r["summary"]["win_rate_pct"] or 0.0) / 100.0 for r in live)
+    wins = sum(r["summary"]["win_count"] for r in live)
+    losses = sum(r["summary"]["loss_count"] for r in live)
+    gross_win = sum(r["summary"]["gross_win"] for r in live)
+    gross_loss = sum(r["summary"]["gross_loss"] for r in live)
     return {
         "has_data": True,
         "capital": sum(r["capital"] for r in live),
@@ -227,6 +269,7 @@ def combine(records: list[dict[str, Any]]) -> dict[str, Any]:
             "closed_trades": closed,
             "win_rate_pct": (wins / closed * 100.0) if closed else None,
             "commission_paid": sum(r["summary"]["commission_paid"] for r in live),
+            **_payoff(wins, losses, gross_win, gross_loss),
         },
         "unpriced_days": max(r["unpriced_days"] for r in live),
     }
@@ -357,6 +400,36 @@ class TrackRecordService:
             return sorted({d for d in benchmark if since <= d <= today} | {since})
         return [since + timedelta(days=n) for n in range((today - since).days + 1)
                 if (since + timedelta(days=n)).weekday() < 5 or n == 0]
+
+    def journal_status(self, user_id: str) -> dict[str, Any]:
+        """Whether the trade journal agrees with the ledger about how many trades have closed.
+
+        Performance pages read the journal; the track record replays the ledger. They are meant to
+        be the same arithmetic (the journal is a projection of the position fold), but the journal
+        is written by a reconcile step, so it can lag. This says whether it does.
+        """
+        from atr.appdb.repositories import DeploymentRepository, TradeJournalRepository
+
+        ledger_closed = journal_closed = 0
+        with self.db.session() as session:
+            rows = [r for r in DeploymentRepository.list_for_user(session, user_id)
+                    if str(r.get("mode", "")).upper() == "PAPER" and r.get("status") != "STOPPED"]
+        for row in rows:
+            fills = self.ledger.fills(user_id, deployment_id=row["deployment_id"])
+            if not fills:
+                continue
+            _, stats = replay_equity(fills, float(row["capital"]), [fill_day(fills[-1])], lambda *_: None)
+            ledger_closed += stats["closed_trades"]
+            with self.db.session() as session:
+                _, total = TradeJournalRepository.list_for_user(
+                    session, user_id, deployment_id=row["deployment_id"], closed_only=True, limit=1
+                )
+            journal_closed += int(total)
+        return {
+            "ledger_closed": ledger_closed,
+            "journal_closed": journal_closed,
+            "in_sync": ledger_closed == journal_closed,
+        }
 
     def build(
         self, user_id: str, *, deployment_id: str | None = None, days: int = DEFAULT_DAYS

@@ -333,3 +333,95 @@ def test_the_curve_agrees_with_the_ledgers_own_total(owner, closes_and_index):
     record = owner.get(f"/api/v1/paper/deployments/{dep}/track-record").json()
     assert record["summary"]["net_pnl"] == pytest.approx(ledger["total_pnl"], abs=0.01)
     assert record["summary"]["closed_trades"] == 1
+
+
+# ───────────────────── trades are episodes, as in the journal ─────────────────────
+class TestEpisodes:
+    def test_scaling_out_is_one_trade_not_two(self):
+        fills = [
+            fill(Side.BUY, 10, 100.0, day(0)),
+            fill(Side.SELL, 5, 110.0, day(1)),   # partial exit: still open
+            fill(Side.SELL, 5, 120.0, day(2)),   # flat: the trade closes here
+        ]
+        _, stats = replay_equity(fills, 10_000.0, CAL, closes({day(0): 100.0}))
+        assert stats["closed_trades"] == 1 and stats["wins"] == 1
+        assert stats["gross_win"] == pytest.approx(150.0)  # 5*10 + 5*20
+
+    def test_costs_can_turn_a_gross_win_into_a_loss(self):
+        fills = [fill(Side.BUY, 10, 100.0, day(0), commission=30.0),
+                 fill(Side.SELL, 10, 101.0, day(1), commission=30.0)]  # +10 gross, -50 net
+        _, stats = replay_equity(fills, 10_000.0, CAL, closes({day(0): 100.0}))
+        assert stats["wins"] == 0 and stats["losses"] == 1
+        assert stats["gross_loss"] == pytest.approx(50.0)
+
+    def test_a_reopened_position_is_a_new_trade(self):
+        fills = [fill(Side.BUY, 1, 100.0, day(0)), fill(Side.SELL, 1, 110.0, day(1)),
+                 fill(Side.BUY, 1, 100.0, day(2)), fill(Side.SELL, 1, 90.0, day(3))]
+        _, stats = replay_equity(fills, 10_000.0, CAL, closes({day(0): 100.0}))
+        assert (stats["closed_trades"], stats["wins"], stats["losses"]) == (2, 1, 1)
+
+    def test_an_open_position_is_not_a_closed_trade(self):
+        _, stats = replay_equity([fill(Side.BUY, 1, 100.0, day(0))], 10_000.0, CAL, closes({day(0): 100.0}))
+        assert stats["closed_trades"] == 0
+
+
+class TestPayoff:
+    def _r(self, fills):
+        return build_record(fills=fills, initial_cash=100_000.0, calendar=CAL, close_on=closes({day(0): 100.0}),
+                            benchmark=None, window_days=90, today=day(4))["summary"]
+
+    def test_average_win_loss_and_profit_factor(self):
+        s = self._r([fill(Side.BUY, 10, 100.0, day(0)), fill(Side.SELL, 10, 120.0, day(1)),    # +200
+                     fill(Side.BUY, 10, 100.0, day(2)), fill(Side.SELL, 10, 95.0, day(3))])    # -50
+        assert s["avg_win"] == pytest.approx(200.0) and s["avg_loss"] == pytest.approx(-50.0)
+        assert s["profit_factor"] == pytest.approx(4.0)
+
+    def test_no_loss_means_no_profit_factor_not_infinity(self):
+        s = self._r([fill(Side.BUY, 10, 100.0, day(0)), fill(Side.SELL, 10, 120.0, day(1))])
+        assert s["profit_factor"] is None and s["avg_loss"] is None
+
+    def test_no_closed_trade_means_nothing_to_average(self):
+        s = self._r([fill(Side.BUY, 10, 100.0, day(0))])
+        assert s["avg_win"] is None and s["avg_loss"] is None and s["profit_factor"] is None
+
+    def test_the_whole_book_pools_its_trades(self):
+        def rec(f):
+            return build_record(fills=f, initial_cash=10_000.0, calendar=CAL, close_on=closes({day(0): 100.0}),
+                                benchmark=None, window_days=90, today=day(4))
+        a = rec([fill(Side.BUY, 10, 100.0, day(0)), fill(Side.SELL, 10, 120.0, day(1))])
+        b = rec([fill(Side.BUY, 10, 100.0, day(0), symbol="INFY-EQ"), fill(Side.SELL, 10, 90.0, day(1), symbol="INFY-EQ")])
+        s = combine([a, b])["summary"]
+        assert (s["closed_trades"], s["win_count"], s["loss_count"]) == (2, 1, 1)
+        assert s["profit_factor"] == pytest.approx(2.0)
+
+
+def test_after_a_sync_the_journal_and_the_track_record_agree(owner, closes_and_index):
+    """The point of one source of truth: Performance (journal) and Home (ledger) must match."""
+    dep = _deploy(owner)
+    owner.post(f"/api/v1/paper/deployments/{dep}/start")
+    _buy(owner, dep, qty=10)
+    owner.post(f"/api/v1/paper/deployments/{dep}/orders",
+               json={"symbol": "RELIANCE", "side": "SELL", "quantity": 10,
+                     "requested_price": 2500.0, "limit_price": 2500.0})
+
+    behind = owner.get("/api/v1/paper/journal-status").json()
+    assert behind["ledger_closed"] == 1 and behind["in_sync"] is (behind["journal_closed"] == 1)
+
+    synced = owner.post("/api/v1/paper/sync-journal").json()
+    assert synced["in_sync"] is True and synced["journal_closed"] == 1
+    # reconciling again must not journal the same round trip twice
+    again = owner.post("/api/v1/paper/sync-journal").json()
+    assert again["journal_closed"] == 1 and again["synced"]["journal"]["opened"] == 0
+
+    from atr.appdb.engine import get_app_db
+    from atr.appdb.repositories import TradeJournalRepository
+
+    with get_app_db().session() as session:
+        rows, _ = TradeJournalRepository.list_for_user(session, owner_user_id(owner), closed_only=True, limit=50)
+    record = owner.get(f"/api/v1/paper/deployments/{dep}/track-record").json()["summary"]
+    assert record["closed_trades"] == len(rows) == 1
+    assert record["net_pnl"] == pytest.approx(sum(r["net_pnl"] for r in rows), abs=0.01)
+
+
+def owner_user_id(client) -> str:
+    return client.get("/api/v1/auth/me").json()["user_id"]

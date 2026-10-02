@@ -301,6 +301,7 @@ function Filled({ data, view, refreshing }: { data: TrackRecord; view: "chart" |
               </div>
             </div>
           )}
+          <Payoff win={s.avg_win ?? null} loss={s.avg_loss ?? null} factor={s.profit_factor ?? null} />
         </Tile>
         <Tile label="Days of evidence">
           <div className="text-xl font-semibold tabular-nums">
@@ -354,6 +355,30 @@ function Tile({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex min-w-0 flex-col justify-between gap-2 rounded-lg border border-border p-3">
       <div className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="space-y-1.5">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * What a win is worth against what a loss costs, as two bars of proportional length. A win rate alone
+ * hides this: most trades can win and the book still lose money.
+ */
+function Payoff({ win, loss, factor }: { win: number | null; loss: number | null; factor: number | null }) {
+  if (win == null && loss == null) return null;
+  const w = win ?? 0;
+  const l = Math.abs(loss ?? 0);
+  const top = Math.max(w, l) || 1;
+  return (
+    <div className="space-y-1" aria-label={`Average win ${formatInr(w)}, average loss ${formatInr(-l)}`}>
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 rounded-full bg-gain" style={{ width: `${(w / top) * 100}%`, minWidth: w ? 4 : 0 }} />
+        <span className="text-micro tabular-nums text-muted-foreground">{win == null ? "\u2014" : `+${formatInr(w)}`}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 rounded-full bg-loss" style={{ width: `${(l / top) * 100}%`, minWidth: l ? 4 : 0 }} />
+        <span className="text-micro tabular-nums text-muted-foreground">{loss == null ? "\u2014" : `\u2212${formatInr(l)}`}</span>
+      </div>
+      {factor != null ? <div className="text-micro text-muted-foreground tabular-nums">profit factor {factor.toFixed(2)}</div> : null}
     </div>
   );
 }

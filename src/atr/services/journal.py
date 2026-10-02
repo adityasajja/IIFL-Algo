@@ -50,6 +50,15 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _naive(ts: Any) -> datetime | None:
+    """A timestamp as naive UTC, so a stored value and a fill's can be compared."""
+    if ts is None:
+        return None
+    if getattr(ts, "tzinfo", None) is not None:
+        return ts.astimezone(UTC).replace(tzinfo=None)
+    return ts
+
+
 class TradeJournalService:
     """Opens and closes journal episodes from the deployment's folded positions."""
 
@@ -158,7 +167,65 @@ class TradeJournalService:
                     ", ".join(sorted(known_symbols))[:120],
                 )
 
+            # A round trip that began and ended between two reconciles was never seen as an open
+            # position, so the pass above could not journal it. The fills still hold it, so every
+            # closed flat-to-flat episode in them is journalled here if it is not already.
+            journalled = [
+                (row["symbol"], _naive(row.get("entry_ts")), _naive(row.get("exit_ts")))
+                for row in existing
+            ]
+            for symbol, first, last, episode_fills in self._closed_episodes(fills):
+                start, end = _naive(first.ts), _naive(last.ts)
+                if any(
+                    s == symbol and e_in is not None and start is not None and end is not None
+                    and start <= e_in <= end
+                    for s, e_in, _ in journalled
+                ):
+                    continue
+                attribution = self._attribution(session, getattr(first, "order_id", None))
+                row = TradeJournalRepository.open_trade(
+                    session,
+                    user_id=user_id,
+                    symbol=symbol,
+                    side="BUY" if first.side.sign > 0 else "SELL",
+                    quantity=float(first.quantity),
+                    entry_price=float(first.price),
+                    entry_ts=first.ts,
+                    deployment_id=deployment_id,
+                    strategy_id=attribution.get("strategy_id"),
+                    strategy_version=attribution.get("strategy_version"),
+                    signal_reason=attribution.get("reason"),
+                    evidence_grade=attribution.get("evidence_grade"),
+                )
+                trade_id = self._close(session, TradeJournalRepository, row, episode_fills, user_id)
+                if trade_id:
+                    opened.append(row["trade_id"])
+                    closed.append(trade_id)
+                    journalled.append((symbol, start, end))
+
         return {"opened": opened, "closed": closed, "open_now": len(open_by_symbol)}
+
+    @staticmethod
+    def _closed_episodes(fills: list[Any]) -> list[tuple[str, Any, Any, list[Any]]]:
+        """Every flat-to-flat round trip in a fill sequence: ``(symbol, first, last, fills)``.
+
+        The same definition the position fold uses: an episode opens when a symbol leaves flat and
+        closes when it returns to flat. An episode still open at the end is not returned.
+        """
+        book: dict[str, list[Any]] = {}
+        qty: dict[str, float] = {}
+        out: list[tuple[str, Any, Any, list[Any]]] = []
+        for fill in sorted(fills, key=lambda f: f.ts):
+            symbol = getattr(fill.instrument, "symbol", None)
+            if symbol is None:
+                continue
+            was_flat = abs(qty.get(symbol, 0.0)) < 1e-9
+            qty[symbol] = qty.get(symbol, 0.0) + fill.side.sign * float(fill.quantity)
+            book[symbol] = [fill] if was_flat else [*book.get(symbol, []), fill]
+            if abs(qty[symbol]) < 1e-9 and not was_flat:
+                episode = book.pop(symbol)
+                out.append((symbol, episode[0], fill, episode))
+        return out
 
     # ------------------------------------------------------------------
     @staticmethod

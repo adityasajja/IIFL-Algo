@@ -43,26 +43,10 @@ import { cn } from "./lib/utils";
 import { DrawingCanvas, type DrawingTool } from "./components/chart/DrawingCanvas";
 import { evaluatePineScript, parsePineInputs, PINE_PRESETS, type PineSeriesResult } from "./lib/pineScript";
 import { setVisibleInterval } from "./lib/visibleInterval";
+import { useChartWatchlist } from "./lib/useChartWatchlist";
+import { shortDay } from "./lib/track-view";
 
 type BarTime = string | UTCTimestamp;
-
-interface WatchRow {
-  symbol: string;
-  name?: string;
-  last: number;
-  chg: number;
-  chg_pts?: number;
-  vol?: number;
-}
-
-const DEFAULT_WATCH: WatchRow[] = [
-  { symbol: "RELIANCE-EQ", name: "Reliance Industries", last: 2980.5, chg: 0.85, chg_pts: 25.1, vol: 6540000 },
-  { symbol: "HDFCBANK-EQ", name: "HDFC Bank", last: 1650.0, chg: -0.32, chg_pts: -5.3, vol: 9200000 },
-  { symbol: "INFY-EQ", name: "Infosys Ltd", last: 1820.25, chg: 1.15, chg_pts: 20.7, vol: 4800000 },
-  { symbol: "TCS-EQ", name: "Tata Consultancy", last: 4210.0, chg: 0.45, chg_pts: 18.9, vol: 2300000 },
-  { symbol: "SBIN-EQ", name: "State Bank of India", last: 815.4, chg: -0.65, chg_pts: -5.3, vol: 11400000 },
-  { symbol: "NIFTYBEES-EQ", name: "Nifty 50 ETF", last: 265.8, chg: 0.28, chg_pts: 0.74, vol: 3500000 },
-];
 
 const TIMEFRAMES = [
   { v: "1s", label: "1s", isTick: true },
@@ -216,15 +200,11 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     volume: number;
   } | null>(null);
 
-  // Watchlist
-  const [watchlist, setWatchlist] = useState<WatchRow[]>(() => {
-    try {
-      const saved = localStorage.getItem("atr.tv.watchlist");
-      return saved ? JSON.parse(saved) : DEFAULT_WATCH;
-    } catch {
-      return DEFAULT_WATCH;
-    }
-  });
+  // The side list is the real default watchlist with real quotes (see useChartWatchlist).
+  const watch = useChartWatchlist();
+  const watchlist = watch.rows;
+  // Set when the bars came from the local cache rather than the broker, so they are never taken for live.
+  const [cacheAsOf, setCacheAsOf] = useState<string | null>(null);
 
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -241,11 +221,6 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
   // Live price tick
   const { getTick } = useLiveTicks(useMemo(() => [symbol], [symbol]));
   const liveTick = getTick(symbol);
-
-  // Save watchlist
-  useEffect(() => {
-    localStorage.setItem("atr.tv.watchlist", JSON.stringify(watchlist));
-  }, [watchlist]);
 
   // Search autocomplete
   useEffect(() => {
@@ -294,6 +269,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
             throw new Error("No live tick data - ensure market is open and symbol is subscribed");
           }
           setSymbol(targetSym);
+          setCacheAsOf(null);
           setCandles(ticks.map((t) => ({
             ts: t.ts,
             open: t.open,
@@ -357,6 +333,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         }
         setSymbol(targetSym);
         setCandles(res.candles);
+        setCacheAsOf(res.source === "local_cache" ? (res.as_of ?? "") : null);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -1004,7 +981,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   autoFocus
-                  className="w-full rounded-md bg-card px-2.5 py-1.5 text-xs text-white placeholder-muted-foreground outline-none border border-border focus:border-primary"
+                  className="w-full rounded-md bg-card px-2.5 py-1.5 text-xs text-foreground placeholder-muted-foreground outline-none border border-border focus:border-primary"
                 />
                 <div data-lenis-prevent className="mt-2 max-h-56 overflow-y-auto space-y-0.5">
                   {searchResults.map((r) => (
@@ -1093,7 +1070,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 <div className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">
                   Active Indicators
                 </div>
-                <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
+                <label className="flex items-center justify-between text-xs hover:text-foreground cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-primary" />
                     EMA Ribbon (9, 21, 50)
@@ -1105,7 +1082,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     className="accent-chart-blue"
                   />
                 </label>
-                <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
+                <label className="flex items-center justify-between text-xs hover:text-foreground cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-chart-yellow" />
                     200 EMA
@@ -1117,7 +1094,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     className="accent-chart-yellow"
                   />
                 </label>
-                <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
+                <label className="flex items-center justify-between text-xs hover:text-foreground cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-chart-sky" />
                     Bollinger Bands
@@ -1129,7 +1106,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     className="accent-chart-sky"
                   />
                 </label>
-                <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
+                <label className="flex items-center justify-between text-xs hover:text-foreground cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-chart-violet" />
                     RSI (14) Pane
@@ -1141,7 +1118,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     className="accent-chart-violet"
                   />
                 </label>
-                <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
+                <label className="flex items-center justify-between text-xs hover:text-foreground cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-gain" />
                     Volume Overlay
@@ -1282,19 +1259,24 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         <div className="flex flex-1 flex-col min-w-0 relative">
           {/* TradingView Legend & OHLC HUD Bar */}
           <div className="absolute top-2 left-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption font-mono pointer-events-none bg-card/85 px-2 py-1 rounded-md border border-border/60 backdrop-blur">
-            <span className="font-semibold text-white">{symbol.replace("-EQ", "")}</span>
+            <span className="font-semibold text-foreground">{symbol.replace("-EQ", "")}</span>
             <span className="text-muted-foreground">· {timeframe.toUpperCase()}</span>
+            {cacheAsOf !== null ? (
+              <span className="text-warning" title="Daily bars from the local cache, not the broker">
+                · cached to {shortDay(cacheAsOf)}
+              </span>
+            ) : null}
             <span className="text-muted-foreground">· NSE</span>
             {hoverData && (
               <>
                 <span className="text-muted-foreground">
-                  O <span className="text-white">{hoverData.open.toFixed(2)}</span>
+                  O <span className="text-foreground">{hoverData.open.toFixed(2)}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  H <span className="text-white">{hoverData.high.toFixed(2)}</span>
+                  H <span className="text-foreground">{hoverData.high.toFixed(2)}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  L <span className="text-white">{hoverData.low.toFixed(2)}</span>
+                  L <span className="text-foreground">{hoverData.low.toFixed(2)}</span>
                 </span>
                 <span className="text-muted-foreground">
                 C <span className={cn(isUp ? "text-gain" : "text-loss")}>{hoverData.close.toFixed(2)}</span>
@@ -1304,7 +1286,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 </span>
                 {showVolume && (
                   <span className="text-muted-foreground">
-                    Vol <span className="text-white">{(hoverData.volume / 100000).toFixed(2)}L</span>
+                    Vol <span className="text-foreground">{(hoverData.volume / 100000).toFixed(2)}L</span>
                   </span>
                 )}
               </>
@@ -1353,7 +1335,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     <div className="border-t border-border relative group/pane flex flex-col bg-card">
                       {/* Indicator Header Legend (TradingView Style) */}
                       <div className="absolute top-1.5 left-2 z-20 flex items-center gap-2 text-caption font-mono select-none bg-card/85 px-2 py-0.5 rounded-md border border-border/60 backdrop-blur">
-                        <span className="font-semibold text-white truncate max-w-[200px]" title={indicatorName}>
+                        <span className="font-semibold text-foreground truncate max-w-[200px]" title={indicatorName}>
                           {indicatorName}
                         </span>
 
@@ -1421,7 +1403,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-card text-xs">
                 <div className="flex items-center gap-2">
                   <Code size={14} className="text-primary" />
-                  <span className="font-semibold text-white tracking-wide">Pine Script Indicator Studio</span>
+                  <span className="font-semibold text-foreground tracking-wide">Pine Script Indicator Studio</span>
                   <span className="text-micro text-primary font-mono bg-primary/10 px-1.5 py-0.5 rounded-md border border-primary/30 font-semibold">v6 Reference</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1462,7 +1444,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                         setPineError(err?.message || "Syntax error in script");
                       }
                     }}
-                    className="h-6 px-2.5 text-xs bg-primary hover:bg-primary/90 text-white font-medium flex items-center gap-1"
+                    className="h-6 px-2.5 text-xs bg-primary hover:bg-primary/90 text-foreground font-medium flex items-center gap-1"
                   >
                   {pineAppliedMsg ? <Check size={12} className="text-gain" /> : <Play size={11} fill="currentColor" />}
                     <span>{pineAppliedMsg ? "Applied!" : "Apply to Chart"}</span>
@@ -1544,7 +1526,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   )}
                 </div>
                 <div className="flex items-center gap-3 text-muted-foreground text-[10.5px]">
-                <span>Shortcut: <kbd className="bg-border px-1 py-0.5 rounded-md text-white text-micro">Ctrl</kbd> + <kbd className="bg-border px-1 py-0.5 rounded-md text-white text-micro">Enter</kbd></span>
+                <span>Shortcut: <kbd className="bg-border px-1 py-0.5 rounded-md text-foreground text-micro">Ctrl</kbd> + <kbd className="bg-border px-1 py-0.5 rounded-md text-foreground text-micro">Enter</kbd></span>
                   <span>|</span>
                   <span>Built-ins: <span className="text-primary">ta.sma</span>, <span className="text-primary">ta.ema</span>, <span className="text-primary">ta.rsi</span>, <span className="text-primary">ta.macd</span>, <span className="text-primary">ta.atr</span>, <span className="text-primary">plot</span></span>
                 </div>
@@ -1599,7 +1581,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
             {/* Add Symbol Dropdown / Search Modal */}
             {addSymbolOpen && (
               <div className="absolute right-2 top-9 z-50 w-72 rounded-md border border-border bg-muted p-2.5 normal-case">
-                <div className="flex items-center justify-between border-b border-border pb-2 text-xs font-semibold text-white">
+                <div className="flex items-center justify-between border-b border-border pb-2 text-xs font-semibold text-foreground">
                   <span>Add Symbol</span>
                   <Button
                     size="icon-sm"
@@ -1617,7 +1599,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     value={addSymbolQuery}
                     onChange={(e) => setAddSymbolQuery(e.target.value)}
                     autoFocus
-                    className="w-full rounded-md bg-card pl-7 pr-2.5 py-1.5 text-xs text-white placeholder-muted-foreground outline-none border border-border focus:border-primary"
+                    className="w-full rounded-md bg-card pl-7 pr-2.5 py-1.5 text-xs text-foreground placeholder-muted-foreground outline-none border border-border focus:border-primary"
                   />
                   <Search size={12} className="absolute left-2 top-2 text-muted-foreground" />
                 </div>
@@ -1632,15 +1614,9 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                           type="button"
                           onClick={() => {
                             if (!alreadyInWatch) {
-                              setWatchlist((prev) => [
-                                ...prev,
-                                {
-                                  symbol: r.symbol,
-                                  name: r.symbol.replace("-EQ", ""),
-                                  last: 0,
-                                  chg: 0,
-                                },
-                              ]);
+                              void watch.add(r.symbol).catch((e) =>
+                                toast({ title: "Could not add", description: e instanceof Error ? e.message : String(e), status: "error" }),
+                              );
                             }
                             setSymbol(r.symbol);
                             void loadCandles(r.symbol);
@@ -1650,7 +1626,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                           className="flex w-full items-center justify-between px-2 py-1.5 text-left text-xs transition-colors hover:bg-border"
                         >
                           <div>
-                            <span className="font-semibold text-white">{r.symbol}</span>
+                            <span className="font-semibold text-foreground">{r.symbol}</span>
                             <span className="ml-1.5 text-micro text-muted-foreground">{r.exchange}</span>
                           </div>
                           {alreadyInWatch ? (
@@ -1675,9 +1651,14 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
           {/* Watchlist Items */}
           <div data-lenis-prevent className="flex-1 overflow-y-auto divide-y divide-border/40">
+            {watch.loaded && watchlist.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                {watch.error ? watch.error : "Nothing here yet. Use + to add a stock."}
+              </div>
+            ) : null}
             {watchlist.map((item) => {
               const active = item.symbol === symbol;
-              const up = item.chg >= 0;
+              const up = (item.chg ?? 0) >= 0;
               return (
                 <div
                   key={item.symbol}
@@ -1691,14 +1672,21 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   )}
                 >
                   <div className="min-w-0 pr-2">
-                    <div className="font-semibold text-white truncate">{item.symbol.replace("-EQ", "")}</div>
+                    <div className="font-semibold text-foreground truncate">{item.symbol.replace("-EQ", "")}</div>
                     <div className="text-micro text-muted-foreground truncate">{item.name ?? "Equity"}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-right tabular-nums">
-                      <div className="font-medium text-white">₹{item.last.toLocaleString("en-IN")}</div>
+                      <div className="font-medium text-foreground">
+                        {item.last == null ? "\u2014" : `\u20B9${item.last.toLocaleString("en-IN")}`}
+                        {item.stale && item.last != null ? (
+                          <span className="ml-1 text-micro font-normal text-muted-foreground" title="From the local cache, not live">
+                            cached
+                          </span>
+                        ) : null}
+                      </div>
                       <div className={cn("text-[10.5px] font-semibold", up ? "text-gain" : "text-loss")}>
-                        {up ? `+${item.chg.toFixed(2)}%` : `${item.chg.toFixed(2)}%`}
+                        {item.chg == null ? "\u2014" : up ? `+${item.chg.toFixed(2)}%` : `${item.chg.toFixed(2)}%`}
                       </div>
                     </div>
                     <Tooltip content="Remove from watchlist" side="left" delay={400}>
@@ -1708,7 +1696,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                       className="hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setWatchlist((prev) => prev.filter((w) => w.symbol !== item.symbol));
+                        void watch.remove(item.symbol);
                       }}
                       aria-label="Remove from watchlist"
                     >
@@ -1725,11 +1713,11 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           <div className="border-t border-border bg-muted/60 p-3 text-xs">
             <div className="flex items-baseline justify-between">
               <div>
-                <div className="font-semibold text-white text-sm">{symbol.replace("-EQ", "")}</div>
+                <div className="font-semibold text-foreground text-sm">{symbol.replace("-EQ", "")}</div>
                 <div className="text-micro text-muted-foreground">NSE Equity · Market Open</div>
               </div>
               <div className="text-right">
-              <div className="font-semibold text-base text-white tabular-nums">₹{currentPrice.toFixed(2)}</div>
+              <div className="font-semibold text-base text-foreground tabular-nums">₹{currentPrice.toFixed(2)}</div>
               <div className={cn("text-xs font-semibold tabular-nums", isUp ? "text-gain" : "text-loss")}>
                   {isUp ? `+${currentChg}%` : `${currentChg}%`}
                 </div>
@@ -1739,21 +1727,21 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
             <div className="mt-3 grid grid-cols-2 gap-2 text-caption border-t border-border pt-2 text-muted-foreground">
               <div>
                 <span>High: </span>
-                <span className="text-white font-mono">{hoverData?.high.toFixed(2) ?? "—"}</span>
+                <span className="text-foreground font-mono">{hoverData?.high.toFixed(2) ?? "—"}</span>
               </div>
               <div>
                 <span>Low: </span>
-                <span className="text-white font-mono">{hoverData?.low.toFixed(2) ?? "—"}</span>
+                <span className="text-foreground font-mono">{hoverData?.low.toFixed(2) ?? "—"}</span>
               </div>
               <div>
                 <span>Volume: </span>
-                <span className="text-white font-mono">
+                <span className="text-foreground font-mono">
                   {hoverData?.volume ? `${(hoverData.volume / 100000).toFixed(2)}L` : "—"}
                 </span>
               </div>
               <div>
                 <span>Timeframe: </span>
-                <span className="text-white font-mono">{timeframe.toUpperCase()}</span>
+                <span className="text-foreground font-mono">{timeframe.toUpperCase()}</span>
               </div>
             </div>
 
@@ -1803,7 +1791,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card">
                 <div className="flex items-center gap-2">
                     <SlidersHorizontal size={16} className="text-primary" />
-                  <span className="font-semibold text-white text-sm truncate max-w-[340px]">
+                  <span className="font-semibold text-foreground text-sm truncate max-w-[340px]">
                     {indicatorTitle}
                   </span>
                 </div>
@@ -1848,7 +1836,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
                           return (
                             <div key={inputDef.id} className="flex items-center justify-between gap-4">
-                              <label className="text-white font-medium text-xs truncate max-w-[200px]" title={inputDef.title}>
+                              <label className="text-foreground font-medium text-xs truncate max-w-[200px]" title={inputDef.title}>
                                 {inputDef.title}
                               </label>
 
@@ -1894,7 +1882,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                                       setPineInputs(updated);
                                       localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
                                     }}
-                                      className="w-24 px-2 py-1.5 rounded-md bg-card border border-border text-white text-right font-mono text-xs focus:outline-none focus:border-primary"
+                                      className="w-24 px-2 py-1.5 rounded-md bg-card border border-border text-foreground text-right font-mono text-xs focus:outline-none focus:border-primary"
                                   />
                                 )}
                               </div>
@@ -1935,7 +1923,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                                 }}
                                   className="h-4 w-4 rounded-md bg-card border-border text-primary cursor-pointer"
                               />
-                              <span className="font-medium text-white text-xs truncate max-w-[160px]" title={p.name}>
+                              <span className="font-medium text-foreground text-xs truncate max-w-[160px]" title={p.name}>
                                 {p.name}
                               </span>
                             </div>

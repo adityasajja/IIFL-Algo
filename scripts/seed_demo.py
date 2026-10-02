@@ -148,6 +148,10 @@ def main() -> int:
         with db.session() as session:
             session.execute(update(deployments).where(deployments.c.deployment_id == dep["deployment_id"]).values(
                 status="RUNNING", started_at=datetime(trade_days[0].year, trade_days[0].month, trade_days[0].day, 4, 0)))
+    # Bring the trade journal (which Performance reads) up to date with the ledger, as the app does.
+    synced = client.post("/api/v1/paper/sync-journal")
+    assert synced.status_code == 200, synced.text
+    assert synced.json()["in_sync"], synced.json()
     print(f"seeded {len(SYMBOLS)} stocks to {last}, a strategy, 2 paper deployments and {total_fills} fills")
     print(f"log in as: demo / {args.password}   (then: atr serve)")
     return 0

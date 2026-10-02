@@ -206,6 +206,9 @@ export interface CandlesResponse {
   exchange: string;
   interval: string;
   candles: Candle[];
+  /** `local_cache` when the bars came from disk rather than the broker. */
+  source?: string;
+  as_of?: string;
 }
 
 export const getCandles = (params: {
@@ -4931,6 +4934,11 @@ export interface TrackRecordSummary {
   closed_trades: number;
   win_rate_pct: number | null;
   commission_paid: number;
+  /** Mean profit of a winning trade and mean loss of a losing one (a negative number). Null when none. */
+  avg_win?: number | null;
+  avg_loss?: number | null;
+  /** Gross profit over gross loss. Null with no losing trade: it cannot be measured, so it is not infinity. */
+  profit_factor?: number | null;
 }
 
 export interface TrackRecordProvenance {
@@ -4964,6 +4972,17 @@ export interface TrackRecord {
   unpriced_days?: number;
   provenance: TrackRecordProvenance;
 }
+
+export interface JournalStatus {
+  ledger_closed: number;
+  journal_closed: number;
+  /** False when Performance (the journal) is behind the ledger the track record replays. */
+  in_sync: boolean;
+}
+
+export const getJournalStatus = () => v1<JournalStatus>("/paper/journal-status");
+export const syncJournal = () =>
+  v1<JournalStatus & { synced: Record<string, unknown> }>("/paper/sync-journal", { method: "POST" });
 
 export const getTrackRecord = (days = 90) =>
   v1<TrackRecord>(`/paper/track-record?days=${days}`);

@@ -1283,7 +1283,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
             <SummaryStat
               label="Paper P&L"
               value={hasPnl ? totalPnl : null}
-              sub={hasPnl ? (totalPnl > 0 ? "unrealised gain" : totalPnl < 0 ? "unrealised loss" : "flat P&L") : "no data yet"}
+              sub={hasPnl ? (totalPnl === 0 ? "flat since start" : "since start, after costs") : "no data yet"}
               accent={hasPnl && totalPnl > 0}
               bad={hasPnl && totalPnl < 0}
               isMoney

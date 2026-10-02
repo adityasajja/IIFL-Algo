@@ -73,6 +73,8 @@ const EpisodicPivotPanel = lazy(() => import("./EpisodicPivotPanel"));
 import {
   appLogout,
   getDataStatus,
+  getJournalStatus,
+  syncJournal,
   getHealth,
   getLoginStatus,
   logoutSession,
@@ -226,11 +228,47 @@ function EvidenceTabContainer({ sub, onSubChange }: { sub: string; onSubChange: 
 
 // ─── Performance: what happened, and why ──────────────────────────────────────
 function PerformanceTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (s: string) => void }) {
+  const [sync, setSync] = useState<"checking" | "ok" | "synced" | "failed">("checking");
+  const [version, setVersion] = useState(0);
+
+  // Performance reads the trade journal and Home replays the ledger. They are the same arithmetic,
+  // but the journal is written by a reconcile step and can lag. Look first, and catch it up if so,
+  // rather than showing "0 trades" next to a track record that has some.
+  const check = useCallback(async () => {
+    setSync("checking");
+    try {
+      const status = await getJournalStatus();
+      if (status.in_sync) {
+        setSync("ok");
+        return;
+      }
+      await syncJournal();
+      setVersion((v) => v + 1);
+      setSync("synced");
+    } catch {
+      setSync("failed");
+    }
+  }, []);
+  useEffect(() => {
+    void check();
+  }, [check]);
+
   return (
     <div className="space-y-4">
-      <SubTabs tab="learning" value={sub} onChange={onSubChange} />
-      {sub === "review" && <LearningPanel />}
-      {sub === "attribution" && <AnalyticsPanel />}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SubTabs tab="learning" value={sub} onChange={onSubChange} />
+        {sync === "synced" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-gain/25 bg-gain/10 px-2.5 py-0.5 text-caption font-semibold text-gain">
+            Caught up with your paper ledger
+          </span>
+        ) : sync === "failed" ? (
+          <Button size="xs" variant="outline" onClick={() => void check()}>
+            Could not check the ledger. Retry
+          </Button>
+        ) : null}
+      </div>
+      {sub === "review" && <LearningPanel key={version} />}
+      {sub === "attribution" && <AnalyticsPanel key={version} />}
     </div>
   );
 }

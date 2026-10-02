@@ -28,8 +28,18 @@ def candles(
 ) -> dict[str, Any]:
     """Raw OHLCV candles for charting. Interval accepts 1m/5m/15m/30m/60m/1d."""
     from atr.scanner import resolve_conid
+    from atr.services.chart_data import DAILY_INTERVALS, cached_candles
 
-    client = _authed_client()
+    # Daily bars are on disk, so the chart should not depend on a broker login for them. The broker
+    # is still tried first when a session exists (it has today's partial bar); the cache answers
+    # when it cannot be reached. Intraday has no cache, so it still needs the broker.
+    try:
+        client = _authed_client()
+    except HTTPException:
+        cached = cached_candles(symbol, exchange, interval, from_date, to_date)
+        if cached is not None and interval in DAILY_INTERVALS:
+            return cached
+        raise
     # `_symbol_master` keeps a 5-minute-TTL master per exchange; this endpoint used
     # to build a fresh `InstrumentMaster` and re-parse the ~10k-row cache from disk
     # on every single request (every candle load, every chart pan) instead of

@@ -261,6 +261,26 @@ def track_record(
     return TrackRecordService().build(principal.user_id, days=days)
 
 
+@router.get("/journal-status")
+def journal_status(principal: Principal = Depends(_READ)) -> dict[str, Any]:
+    """Does the trade journal (which Performance reads) agree with the ledger (which the track
+    record replays) on how many trades have closed? ``in_sync`` false means Performance is behind."""
+    return TrackRecordService().journal_status(principal.user_id)
+
+
+@router.post("/sync-journal")
+def sync_journal(principal: Principal = Depends(_READ)) -> dict[str, Any]:
+    """Bring the journal and the attribution of closed trades up to date with the ledger.
+
+    Idempotent, and it only writes projections derived from the ledger: it cannot change an
+    order, a fill or a position, which is why a read permission is enough.
+    """
+    from atr.services.attribution import AttributionService
+
+    result = AttributionService().attribute_user(principal.user_id)
+    return {"synced": result, **TrackRecordService().journal_status(principal.user_id)}
+
+
 @router.get("/deployments", dependencies=[Depends(_READ)])
 def list_deployments(
     principal: Principal = Depends(_READ), status_filter: str | None = None
