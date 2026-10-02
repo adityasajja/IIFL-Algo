@@ -1,0 +1,108 @@
+{
+ "target": "P(next week >= 2%) of 60% or more",
+ "base_rate_early_pct": 27.63,
+ "base_rate_late_pct": 32.95,
+ "combinations_searched": 362,
+ "best_early_score_on_shuffled_outcomes_pct": 32.38,
+ "chosen_on_early_half_graded_on_late_half": [
+  {
+   "rule": "down_10pct_in_4w AND up_3pct_last_week AND volatile_top_quintile",
+   "early_p_hit": 44.16,
+   "early_n": 976,
+   "late_p_hit": 35.59,
+   "late_n": 503,
+   "late_net_pct_per_week": -0.242
+  },
+  {
+   "rule": "below_ema50 AND down_10pct_in_4w AND volatile_top_quintile",
+   "early_p_hit": 42.31,
+   "early_n": 4814,
+   "late_p_hit": 44.05,
+   "late_n": 2565,
+   "late_net_pct_per_week": 0.79
+  },
+  {
+   "rule": "down_10pct_in_4w AND volatile_top_quintile",
+   "early_p_hit": 42.26,
+   "early_n": 4945,
+   "late_p_hit": 43.24,
+   "late_n": 2759,
+   "late_net_pct_per_week": 0.698
+  },
+  {
+   "rule": "up_gt_2pct_day_this_week AND down_10pct_in_4w AND volatile_top_quintile",
+   "early_p_hit": 42.08,
+   "early_n": 3531,
+   "late_p_hit": 41.77,
+   "late_n": 1858,
+   "late_net_pct_per_week": 0.455
+  },
+  {
+   "rule": "down_10pct_in_4w AND down_3pct_last_week AND volatile_top_quintile",
+   "early_p_hit": 41.95,
+   "early_n": 2694,
+   "late_p_hit": 46.76,
+   "late_n": 1450,
+   "late_net_pct_per_week": 1.072
+  },
+  {
+   "rule": "rsi_below_30 AND down_10pct_in_4w AND volatile_top_quintile",
+   "early_p_hit": 41.6,
+   "early_n": 1250,
+   "late_p_hit": 49.87,
+   "late_n": 377,
+   "late_net_pct_per_week": 1.638
+  },
+  {
+   "rule": "rsi_below_30 AND volatile_top_quintile",
+   "early_p_hit": 41.53,
+   "early_n": 1257,
+   "late_p_hit": 49.87,
+   "late_n": 379,
+   "late_net_pct_per_week": 1.653
+  },
+  {
+   "rule": "below_ema50 AND rsi_below_30 AND volatile_top_quintile",
+   "early_p_hit": 41.53,
+   "early_n": 1257,
+   "late_p_hit": 49.87,
+   "late_n": 379,
+   "late_net_pct_per_week": 1.653
+  },
+  {
+   "rule": "up_gt_2pct_day_this_week AND down_10pct_in_4w AND up_3pct_last_week",
+   "early_p_hit": 41.33,
+   "early_n": 1292,
+   "late_p_hit": 33.73,
+   "late_n": 830,
+   "late_net_pct_per_week": -0.302
+  },
+  {
+   "rule": "below_ema50 AND down_10pct_in_4w AND up_3pct_last_week",
+   "early_p_hit": 41.02,
+   "early_n": 1270,
+   "late_p_hit": 34.03,
+   "late_n": 770,
+   "late_net_pct_per_week": -0.206
+  },
+  {
+   "rule": "down_10pct_in_4w AND up_3pct_last_week",
+   "early_p_hit": 40.95,
+   "early_n": 1321,
+   "late_p_hit": 33.45,
+   "late_n": 852,
+   "late_net_pct_per_week": -0.322
+  },
+  {
+   "rule": "rsi_below_30 AND up_gt_2pct_day_this_week AND volatile_top_quintile",
+   "early_p_hit": 40.7,
+   "early_n": 656,
+   "late_p_hit": 49.32,
+   "late_n": 146,
+   "late_net_pct_per_week": 1.534
+  }
+ ],
+ "reaching_60_on_late_half": 0,
+ "median_late_p_hit_of_chosen": 43.64,
+ "survivorship_note": "universe is today's long-history names; failed companies are absent"
+}

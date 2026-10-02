@@ -1,0 +1,85 @@
+{
+ "method": "gradient-boosted classifier, expanding-window walk-forward, one retrain per test year",
+ "measurements": [
+  "ret_1d",
+  "ret_2d",
+  "ret_3d",
+  "ret_5d",
+  "ret_10d",
+  "ret_20d",
+  "ret_60d",
+  "ret_120d",
+  "vol_10d",
+  "vol_20d",
+  "vol_60d",
+  "vol_ratio_10_60",
+  "rsi14",
+  "dist_ema20",
+  "dist_ema50",
+  "dist_ema200",
+  "dist_52w_high",
+  "dist_52w_low",
+  "dist_20d_high",
+  "range_10d",
+  "today_range",
+  "vol_ratio_5_20",
+  "vol_today_vs_20",
+  "gap_max_5d",
+  "drop_max_5d",
+  "up_days_10",
+  "mkt_ret_5d",
+  "mkt_ret_20d",
+  "mkt_ret_60d",
+  "mkt_vol_20d",
+  "mkt_above_200d",
+  "rank_ret_20d",
+  "rank_ret_5d",
+  "rank_vol_20d"
+ ],
+ "calibration_pooled_out_of_sample": [
+  {
+   "bin": "[0.0, 0.2)",
+   "actual_p_hit": 27.15,
+   "n": 10994,
+   "net_pct_per_week": -0.138
+  },
+  {
+   "bin": "[0.2, 0.3)",
+   "actual_p_hit": 32.09,
+   "n": 54270,
+   "net_pct_per_week": 0.134
+  },
+  {
+   "bin": "[0.3, 0.4)",
+   "actual_p_hit": 33.2,
+   "n": 52368,
+   "net_pct_per_week": 0.122
+  },
+  {
+   "bin": "[0.4, 0.5)",
+   "actual_p_hit": 35.13,
+   "n": 11644,
+   "net_pct_per_week": 0.238
+  },
+  {
+   "bin": "[0.5, 0.6)",
+   "actual_p_hit": 38.75,
+   "n": 3102,
+   "net_pct_per_week": 0.785
+  },
+  {
+   "bin": "[0.6, 1.01)",
+   "actual_p_hit": 49.49,
+   "n": 3304,
+   "net_pct_per_week": 1.318
+  }
+ ],
+ "top3_per_week": {
+  "p_pick_hits": 40.3,
+  "weeks_basket_gained_2pct": 43.28,
+  "avg_net_pct_per_week": 1.021,
+  "weeks": 402
+ },
+ "base_rate_pct": 32.95,
+ "survivorship_note": "universe is today's long-history names; failed companies are absent"
+}
