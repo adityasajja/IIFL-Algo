@@ -29,14 +29,16 @@ def infer_periods_per_year(index: pd.DatetimeIndex) -> float:
     return len(index) * 365.25 / span_days
 
 
-def max_drawdown(equity: pd.Series) -> tuple[float, float]:
+def max_drawdown(
+    equity: pd.Series, *, return_drawdown: bool = False
+) -> tuple[float, float] | tuple[float, float, pd.Series]:
     """Return (max drawdown as a positive fraction, longest DD in calendar days).
 
     Duration is peak-to-end-of-underwater-period, not bar count — 50,000 bars
     below high is meaningless, 11 days is actionable.
     """
     if equity.empty:
-        return 0.0, 0.0
+        return (0.0, 0.0, pd.Series(dtype=float)) if return_drawdown else (0.0, 0.0)
     running_max = equity.cummax()
     drawdown = equity / running_max - 1.0
     max_dd = float(drawdown.min())
@@ -57,7 +59,51 @@ def max_drawdown(equity: pd.Series) -> tuple[float, float]:
         peak_idx = max(start - 1, 0)
         days = (equity.index[end] - equity.index[peak_idx]).total_seconds() / 86400.0
         longest = max(longest, days)
+    if return_drawdown:
+        return abs(max_dd), longest, drawdown
     return abs(max_dd), longest
+
+
+def ulcer_index(equity: pd.Series, *, drawdown: pd.Series | None = None) -> float:
+    """Root-mean-square of the percentage drawdown at every bar.
+
+    `max_drawdown` reports the single worst peak-to-trough move; it cannot
+    tell a strategy that dipped 20% and recovered in a week from one that
+    ground sideways 15% underwater for six months — both can report a
+    similar max drawdown while being very different to actually hold. Ulcer
+    Index weights depth *and* duration together: a long, shallow drawdown
+    accumulates just as much as a short, deep one, because every bar spent
+    underwater contributes to the sum, not just the single lowest point.
+    """
+    if equity.empty:
+        return 0.0
+    if drawdown is None:
+        running_max = equity.cummax()
+        dd_arr = (equity / running_max - 1.0).to_numpy(dtype=float)
+    else:
+        dd_arr = drawdown.to_numpy(dtype=float)
+    dd_pct = dd_arr * 100.0
+    return float(np.sqrt((dd_pct**2).mean()))
+
+
+def omega_ratio(returns: pd.Series, threshold: float = 0.0) -> float:
+    """Ratio of total gains to total losses relative to `threshold`, per-period.
+
+    Where Sharpe/Sortino reduce the whole return distribution to a mean and a
+    (downside) standard deviation — implicitly treating it as roughly
+    symmetric — Omega sums the actual excess above and below the threshold
+    directly, so it responds to skew and fat tails that those two are blind
+    to: a strategy with frequent small losses and rare huge wins can have a
+    mediocre Sharpe and a striking Omega, or the reverse.
+    """
+    if returns.empty:
+        return 0.0
+    excess = returns - threshold
+    gains = excess[excess > 0].sum()
+    losses = -excess[excess < 0].sum()
+    if losses <= 1e-12:
+        return float("inf") if gains > 1e-12 else 0.0
+    return float(gains / losses)
 
 
 @dataclass
@@ -72,6 +118,8 @@ class Metrics:
     max_drawdown_pct: float
     max_drawdown_days: float
     calmar: float
+    ulcer_index: float
+    omega_ratio: float
     num_trades: int
     win_rate_pct: float
     profit_factor: float
@@ -117,6 +165,8 @@ class Metrics:
             ("Max drawdown", f"{self.max_drawdown_pct:.2f}%"),
             ("Max DD (days)", f"{self.max_drawdown_days:.1f}"),
             ("Calmar", f"{self.calmar:.2f}"),
+            ("Ulcer index", f"{self.ulcer_index:.2f}"),
+            ("Omega ratio", f"{self.omega_ratio:.2f}"),
             ("Trades", f"{self.num_trades}"),
             ("Win rate", f"{self.win_rate_pct:.2f}%"),
             ("Profit factor", f"{self.profit_factor:.2f}"),
@@ -151,8 +201,8 @@ def compute_metrics(
     start, end = float(equity.iloc[0]), float(equity.iloc[-1])
     years = max((equity.index[-1] - equity.index[0]).total_seconds() / (365 * 24 * 3600), 1e-9)
 
-    total_return = end / start - 1.0
-    cagr = (end / start) ** (1 / years) - 1 if start > 0 else 0.0
+    total_return = end / start - 1.0 if start > 0 else 0.0
+    cagr = (end / start) ** (1 / years) - 1 if start > 0 and end > 0 else -1.0
 
     vol = float(returns.std(ddof=1)) * np.sqrt(ppy) if len(returns) > 1 else 0.0
     mean_return = float(returns.mean()) * ppy if len(returns) else 0.0
@@ -162,8 +212,14 @@ def compute_metrics(
     downside_vol = float(downside.std(ddof=1)) * np.sqrt(ppy) if len(downside) > 1 else 0.0
     sortino = (mean_return - risk_free_rate) / downside_vol if downside_vol > 1e-12 else 0.0
 
-    mdd, mdd_days = max_drawdown(equity)
+    mdd, mdd_days, dd_series = max_drawdown(equity, return_drawdown=True)
     calmar = (cagr / mdd) if mdd > 1e-9 else 0.0
+    ulcer = ulcer_index(equity, drawdown=dd_series)
+    # Per-period threshold matching the risk-free rate used everywhere else
+    # here, so Omega and Sharpe are answering the same "relative to what"
+    # question rather than two different ones.
+    omega_threshold = risk_free_rate / ppy if ppy > 0 else 0.0
+    omega = omega_ratio(returns, threshold=omega_threshold)
 
     if not trades.empty and "net_pnl" in trades:
         pnls = trades["net_pnl"].astype(float)
@@ -198,6 +254,8 @@ def compute_metrics(
         max_drawdown_pct=mdd * 100,
         max_drawdown_days=mdd_days,
         calmar=float(calmar),
+        ulcer_index=ulcer,
+        omega_ratio=omega,
         num_trades=num_trades,
         win_rate_pct=float(win_rate),
         profit_factor=float(profit_factor),

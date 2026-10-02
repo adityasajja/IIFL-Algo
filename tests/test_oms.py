@@ -474,7 +474,10 @@ def test_an_unpriceable_order_is_refused_rather_than_treated_as_zero_notional(ap
     decision = gate(_draft(trader, quantity=1000, limit_price=None))
     assert decision.allowed is False
     assert decision.code == "unpriceable_order"
-    assert "cannot price" in decision.reason
+    # The refusal now comes from the engine itself (so backtest and live get
+    # it too), and the gate maps it to its own code — same verdict, one layer
+    # down from where this test originally pinned it.
+    assert "reference price" in decision.reason
 
 
 def test_a_limit_price_makes_the_notional_checkable(app_db, trader):

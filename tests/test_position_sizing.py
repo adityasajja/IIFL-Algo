@@ -349,3 +349,39 @@ def test_pipeline_cannot_bypass_risk_engine_or_portfolio_gate():
     )
     assert not decision.allowed
     assert "INFY exposure 100,000 would exceed 60,000" in decision.reason
+
+
+def test_percent_of_capital_scales_with_contract_multiplier():
+    """10% of 1M at 100 with a 100x future is 10 contracts, not 1000 shares."""
+    cfg = SizingConfig(
+        method=SizingMethod.PERCENT_OF_CAPITAL,
+        capital_fraction=0.10,
+    )
+    res = PositionSizingEngine.calculate(
+        cfg,
+        entry_price=100.0,
+        capital=1_000_000.0,
+        available_capital=1_000_000.0,
+        multiplier=100.0,
+    )
+    assert res.raw_quantity == pytest.approx(10.0)
+    assert res.final_quantity == 10
+    assert res.position_value == pytest.approx(100_000.0)
+
+
+def test_risk_per_trade_scales_with_contract_multiplier():
+    """Risking 1000 with a 10-point stop on a 100x future is 1 contract."""
+    cfg = SizingConfig(
+        method=SizingMethod.RISK_PER_TRADE,
+        risk_per_trade_rupees=1000.0,
+    )
+    res = PositionSizingEngine.calculate(
+        cfg,
+        entry_price=100.0,
+        capital=1_000_000.0,
+        available_capital=1_000_000.0,
+        stop_price=90.0,
+        multiplier=100.0,
+    )
+    assert res.raw_quantity == pytest.approx(1.0)
+    assert res.final_quantity == 1

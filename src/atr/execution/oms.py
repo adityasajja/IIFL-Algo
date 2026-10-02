@@ -404,6 +404,12 @@ class LimitsRiskGate:
         )
         verdict = self.engine.check_order(order, self.portfolio)
         if not verdict.allowed:
+            from atr.execution.risk import NO_REFERENCE_PRICE_REASON
+
+            if verdict.reason == NO_REFERENCE_PRICE_REASON:
+                # The engine refused an unpriceable order; report the gate's
+                # own code for it rather than a generic risk rejection.
+                return RiskDecision.reject(verdict.reason, "unpriceable_order")
             return RiskDecision.reject(
                 verdict.reason or "rejected by risk", "risk_limit"
             )

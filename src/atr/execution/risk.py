@@ -42,6 +42,12 @@ class RiskVerdict:
         return cls(False, reason)
 
 
+#: Rejection reason when an order cannot be priced against finite notional
+#: caps. A shared constant (not a string literal in two files) so the OMS
+#: adapter can recognise this refusal and report its own code for it.
+NO_REFERENCE_PRICE_REASON = "no reference price to enforce notional limits"
+
+
 @dataclass
 class RiskEngine:
     limits: RiskLimits = field(default_factory=RiskLimits)
@@ -116,12 +122,30 @@ class RiskEngine:
         return RiskVerdict.ok()
 
     # ------------------------------------------------------------------
+    def _is_risk_reducing(self, order: Order, portfolio) -> bool:
+        """True when ``order`` moves the position closer to flat, not further from it.
+
+        A flip through zero to the opposite side still counts, as long as the
+        resulting magnitude is smaller — exposure went down either way.
+        """
+        held = portfolio.position(order.instrument.symbol).quantity
+        projected = held + order.signed_quantity
+        return abs(projected) < abs(held) - 1e-9
+
     def check_order(self, order: Order, portfolio) -> RiskVerdict:
         """Per-order check, run before submission."""
         if self.limits.kill_switch:
             return RiskVerdict.reject("kill switch engaged")
         if self.halted:
-            return RiskVerdict.reject(self.halt_reason or "halted")
+            # A halt (daily-loss trip, etc.) must still let the engine flatten
+            # the book. Rejecting every order unconditionally here means
+            # ``ctx.close_all()`` — called the moment the halt fires — has its
+            # own closing orders rejected by the halt it's responding to, so
+            # positions stay open through what was meant to be an emergency
+            # flatten. Only orders that reduce exposure get the exception; a
+            # halt must never be a backdoor to adding risk.
+            if not self._is_risk_reducing(order, portfolio):
+                return RiskVerdict.reject(self.halt_reason or "halted")
 
         symbol = order.instrument.symbol
         if self.limits.allowed_symbols is not None and symbol not in self.limits.allowed_symbols:
@@ -134,8 +158,18 @@ class RiskEngine:
 
         price = order.limit_price or portfolio.position(symbol).last_price or 0.0
         notional = order.quantity * price * order.instrument.multiplier
+        # ``inf`` is the default for "no cap" — only a finite limit is a limit.
+        order_cap = self.limits.max_order_notional
+        position_cap = self.limits.max_position_notional
+        order_cap_set = order_cap is not None and order_cap != float("inf")
+        position_cap_set = position_cap is not None and position_cap != float("inf")
+        if price <= 0 and (order_cap_set or position_cap_set):
+            # No reference price (a market order on a never-marked symbol):
+            # the notional is unknowable, and treating it as zero would wave
+            # through any size. Reject rather than guess.
+            return RiskVerdict.reject(NO_REFERENCE_PRICE_REASON)
 
-        if self.limits.max_order_notional and notional > self.limits.max_order_notional:
+        if order_cap_set and notional > order_cap:
             return RiskVerdict.reject(f"order notional {notional:,.0f} exceeds limit")
 
         if self.limits.max_position_per_symbol:
@@ -145,8 +179,13 @@ class RiskEngine:
                     f"projected position {projected} > {self.limits.max_position_per_symbol}"
                 )
 
-        if self.limits.max_position_notional and notional > self.limits.max_position_notional:
-            return RiskVerdict.reject(f"position notional {notional:,.0f} exceeds limit")
+        if position_cap_set:
+            held = portfolio.position(symbol).quantity
+            projected_notional = abs(held + order.signed_quantity) * price * order.instrument.multiplier
+            if projected_notional > position_cap:
+                return RiskVerdict.reject(
+                    f"projected position notional {projected_notional:,.0f} exceeds limit"
+                )
 
         if self.limits.max_daily_trades and self.orders_today >= self.limits.max_daily_trades:
             return RiskVerdict.reject(f"daily trade limit reached ({self.orders_today})")

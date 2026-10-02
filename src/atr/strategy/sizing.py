@@ -160,6 +160,7 @@ class PositionSizingEngine:
         stop_price: float | None = None,
         stop_loss_pct: float | None = None,
         atr: float | None = None,
+        multiplier: float = 1.0,
         current_stock_exposure: float = 0.0,
         max_stock_exposure: float | None = None,
         current_portfolio_exposure: float = 0.0,
@@ -200,7 +201,13 @@ class PositionSizingEngine:
             stop_distance = risk_per_share
             resolved_stop_price = max(entry_price - risk_per_share, 0.0)
 
-        # 2. Calculate raw quantity based on configured method
+        # 2. Calculate raw quantity based on configured method.
+        # All rupee notionals buy exposure, and one unit of quantity costs
+        # ``entry_price * multiplier`` (100x for a NIFTY future). Dividing by
+        # the bare price sizes derivatives ~multiplier-times too big.
+        mult = multiplier if multiplier and multiplier > 0 else 1.0
+        contract_mult = mult
+        unit_price = entry_price * contract_mult
         raw_qty: float = 0.0
         calculated_risk_amount: float | None = None
         rejection_reason: str | None = None
@@ -212,17 +219,17 @@ class PositionSizingEngine:
 
         elif method == SizingMethod.FIXED_RUPEE_VALUE:
             val = float(config.fixed_rupee_value or 0.0)
-            raw_qty = (val / entry_price) if val > 0 else 0.0
+            raw_qty = (val / unit_price) if val > 0 else 0.0
 
         elif method == SizingMethod.PERCENT_OF_CAPITAL:
             frac = config.capital_fraction or 0.10
             notional = cap_allocated * frac
-            raw_qty = (notional / entry_price) if notional > 0 else 0.0
+            raw_qty = (notional / unit_price) if notional > 0 else 0.0
 
         elif method == SizingMethod.PERCENT_OF_AVAILABLE_CAPITAL:
             frac = config.capital_fraction or 0.10
             notional = cap_avail * frac
-            raw_qty = (notional / entry_price) if notional > 0 else 0.0
+            raw_qty = (notional / unit_price) if notional > 0 else 0.0
 
         elif method == SizingMethod.RISK_PER_TRADE:
             # Risk amount
@@ -237,7 +244,7 @@ class PositionSizingEngine:
                 rejection_reason = "Zero or invalid stop distance for RISK_PER_TRADE sizing"
                 raw_qty = 0.0
             else:
-                raw_qty = calculated_risk_amount / risk_per_share
+                raw_qty = calculated_risk_amount / (risk_per_share * contract_mult)
 
         elif method == SizingMethod.ATR_VOLATILITY_SIZING:
             # Risk amount
@@ -258,7 +265,7 @@ class PositionSizingEngine:
                 stop_distance = risk_per_share
                 if resolved_stop_price is None:
                     resolved_stop_price = max(entry_price - risk_per_share, 0.0)
-                raw_qty = calculated_risk_amount / risk_per_share
+                raw_qty = calculated_risk_amount / (risk_per_share * contract_mult)
 
         if raw_qty <= 0:
             return cls._empty_result(
@@ -282,29 +289,29 @@ class PositionSizingEngine:
 
         # (max_quantity_value, label) — each cap is applied in order
         _caps: list[tuple[float | None, str]] = [
-            ((cap_avail * 0.98) / entry_price if cap_avail > 0 else 0.0, "Available Capital"),
-            (config.max_position_value / entry_price if config.max_position_value else None, "Strategy Max Position Value"),
+            ((cap_avail * 0.98) / unit_price if cap_avail > 0 else 0.0, "Available Capital"),
+            (config.max_position_value / unit_price if config.max_position_value else None, "Strategy Max Position Value"),
             (config.max_quantity if config.max_quantity else None, "Strategy Max Quantity"),
             (
-                (cap_allocated * (config.max_portfolio_exposure_pct if config.max_portfolio_exposure_pct <= 1.0 else config.max_portfolio_exposure_pct / 100.0)) / entry_price
+                (cap_allocated * (config.max_portfolio_exposure_pct if config.max_portfolio_exposure_pct <= 1.0 else config.max_portfolio_exposure_pct / 100.0)) / unit_price
                 if config.max_portfolio_exposure_pct and config.max_portfolio_exposure_pct > 0
                 else None,
                 "Strategy Max Portfolio Exposure",
             ),
             (
-                max(max_stock_exposure - current_stock_exposure, 0.0) / entry_price
+                max(max_stock_exposure - current_stock_exposure, 0.0) / unit_price
                 if max_stock_exposure and max_stock_exposure > 0
                 else None,
                 "Stock Exposure Limit",
             ),
             (
-                max(max_total_portfolio_exposure - current_portfolio_exposure, 0.0) / entry_price
+                max(max_total_portfolio_exposure - current_portfolio_exposure, 0.0) / unit_price
                 if max_total_portfolio_exposure and max_total_portfolio_exposure > 0
                 else None,
                 "Portfolio Exposure Limit",
             ),
             (
-                max(max_sector_exposure - current_sector_exposure, 0.0) / entry_price
+                max(max_sector_exposure - current_sector_exposure, 0.0) / unit_price
                 if max_sector_exposure and max_sector_exposure > 0
                 else None,
                 "Sector Exposure Limit",
@@ -337,7 +344,7 @@ class PositionSizingEngine:
             final_int = 0
 
         # Derived metrics
-        pos_value = final_int * entry_price
+        pos_value = final_int * unit_price
         port_impact_pct = (pos_value / cap_allocated * 100.0) if cap_allocated > 0 else 0.0
         sector_impact_pct = (
             ((current_sector_exposure + pos_value) / cap_allocated * 100.0)

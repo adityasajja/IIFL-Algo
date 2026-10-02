@@ -290,8 +290,7 @@ class Position(BaseModel):
         if self.is_flat:
             self.avg_price = fill.price
             self.quantity = signed_new
-            if self.opened_at is None:
-                self.opened_at = fill.ts
+            self.opened_at = fill.ts
         elif self.direction == fill.side.sign:
             # Adding to the position: weighted average cost.
             total_qty = abs(self.quantity) + fill.quantity
@@ -314,10 +313,13 @@ class Position(BaseModel):
                 self.quantity = self.direction * new_qty
                 if self.is_flat:
                     self.avg_price = 0.0
+                    self.opened_at = None
             else:
-                # Position flipped through to the other side.
+                # Position flipped through to the other side: the old trade
+                # is closed and a new one opens at this fill's timestamp.
                 self.quantity = fill.side.sign * remaining
                 self.avg_price = fill.price
+                self.opened_at = fill.ts
 
         self.realized_pnl += realised
         self.updated_at = fill.ts

@@ -27,8 +27,9 @@ src/atr/
 Design rules that matter:
 
 1. **No look-ahead.** Market orders signalled on bar *i* fill at the open of bar
-   *i+1*. Limit orders fill at the worse of limit price and open, so a gap
-   through your limit doesn't fill at your price.
+   *i+1*. Limit orders fill at the limit price or better — the open when the
+   market opened in your favour, your limit when it gapped against you but
+   still touched — never at a price the bar never offered.
 2. **Conservation is asserted.** `Portfolio.check_invariant()` runs every bar:
    equity must equal `initial_cash + realised + unrealised − commission`. If the
    fills or margin logic is wrong, the backtest crashes instead of lying.

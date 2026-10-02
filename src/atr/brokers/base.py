@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from atr.core.models import Fill, Funds, Holding, Instrument, Order, Position
+from atr.core.models import Funds, Holding, Instrument, Order, Position
 
 
 class BrokerError(RuntimeError):
@@ -73,13 +73,3 @@ class Broker(ABC):
                 self.cancel_order(order.broker_order_id)
                 cancelled += 1
         return cancelled
-
-
-class FillListener(ABC):
-    """Receives execution reports (live trading)."""
-
-    @abstractmethod
-    def on_fill(self, fill: Fill) -> None: ...
-
-    @abstractmethod
-    def on_order_update(self, order: Order) -> None: ...

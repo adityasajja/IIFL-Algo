@@ -105,7 +105,7 @@ class Portfolio:
 
         self.cash += fill.signed_cash_flow
         self.commission_paid += fill.commission
-        self.slippage_cost += abs(fill.slippage) * fill.quantity
+        self.slippage_cost += abs(fill.slippage) * fill.quantity * fill.instrument.multiplier
         self.realized_pnl += realised
 
         if position.is_flat:

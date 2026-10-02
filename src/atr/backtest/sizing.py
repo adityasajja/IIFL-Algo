@@ -32,6 +32,7 @@ from datetime import datetime
 import pandas as pd
 
 from atr.strategy.base import Strategy, StrategyContext
+from atr.strategy.indicators import atr as _atr_indicator
 
 
 from atr.strategy.sizing import (
@@ -96,6 +97,8 @@ class SizingPlan:
         stop_price: float | None = None,
         stop_loss_pct: float | None = None,
         atr: float | None = None,
+        multiplier: float = 1.0,
+        quantity_step: float = 1.0,
     ) -> float:
         """Shares to hold, calculated by PositionSizingEngine."""
         if price <= 0 or not math.isfinite(price):
@@ -110,8 +113,16 @@ class SizingPlan:
             stop_price=stop_price,
             stop_loss_pct=stop_loss_pct,
             atr=atr,
+            multiplier=multiplier,
         )
-        return float(result.final_quantity)
+        qty = float(result.final_quantity)
+        # Respect the contract lot: a 37-lot answer on a 50-lot future is
+        # not an order the broker can place — floor to a whole number of
+        # lots rather than letting the broker silently shrink it later.
+        step = quantity_step if quantity_step and quantity_step > 0 else 1.0
+        if step > 1.0 and qty > 0:
+            qty = float(int(qty / step) * step)
+        return qty
 
 
 @dataclass
@@ -121,10 +132,21 @@ class ExitPlan:
     stop_loss: float | None = None
     take_profit: float | None = None
     trailing_stop: float | None = None
+    #: Trail by ``atr_multiple`` Ns of ATR instead of a fixed percentage —
+    #: the distance widens for a volatile name and tightens for a calm one,
+    #: rather than every symbol trailing the same percentage regardless of
+    #: how much it actually moves. Independent of ``trailing_stop``; set
+    #: whichever one the run wants (both together would just race each
+    #: other for whichever is tighter).
+    trailing_stop_atr_multiple: float | None = None
+    trailing_stop_atr_period: int = 14
 
     @property
     def any(self) -> bool:
-        return any(v is not None for v in (self.stop_loss, self.take_profit, self.trailing_stop))
+        return any(
+            v is not None
+            for v in (self.stop_loss, self.take_profit, self.trailing_stop, self.trailing_stop_atr_multiple)
+        )
 
 
 @dataclass
@@ -393,7 +415,12 @@ class SizedStrategy(Strategy):
             if price <= 0:
                 continue
 
-            want = self.sizing.target_quantity(equity=ctx.equity, price=price)
+            want = self.sizing.target_quantity(
+                equity=ctx.equity,
+                price=price,
+                multiplier=ctx.instruments[symbol].multiplier,
+                quantity_step=ctx.instruments[symbol].quantity_step or 1.0,
+            )
             want = math.floor(want) if want >= 1 else want
             if want <= 0:
                 continue
@@ -455,6 +482,7 @@ class SizedStrategy(Strategy):
             available_capital=ctx.equity,
             stop_price=stop_price,
             stop_loss_pct=stop_loss_pct,
+            multiplier=ctx.instruments[symbol].multiplier,
         )
 
         self.annotations.append(
@@ -506,13 +534,16 @@ class SizedStrategy(Strategy):
                 yield symbol, pos
 
     def _refresh_water(self, ctx: StrategyContext, symbol: str, track: _Track) -> None:
-        price = ctx.price(symbol)
-        if price <= 0:
+        bar = ctx.bars.get(symbol)
+        if bar is None:
             return
-        if track.direction > 0:
-            track.high_water = max(track.high_water or price, price)
-        else:
-            track.low_water = min(track.low_water or price, price)
+        # Water marks track the bar's extremes, not its close: a trailing
+        # stop ratchets on the best price the market actually offered, and a
+        # stop touched intrabar fires even if the close recovered.
+        if track.direction > 0 and bar.high > 0:
+            track.high_water = max(track.high_water or bar.high, bar.high)
+        elif track.direction < 0 and bar.low > 0:
+            track.low_water = min(track.low_water or bar.low, bar.low)
 
     def _check_exits(self, ctx: StrategyContext) -> None:
         """Close any position that has breached a protective level."""
@@ -528,11 +559,12 @@ class SizedStrategy(Strategy):
                 track.high_water = track.low_water = ctx.price(symbol)
 
             self._refresh_water(ctx, symbol, track)
+            bar = ctx.bars.get(symbol)
             price = ctx.price(symbol)
-            if price <= 0 or track.entry_price <= 0:
+            if price <= 0 or track.entry_price <= 0 or bar is None:
                 continue
 
-            exit_reason = self._breach(price, track)
+            exit_reason = self._breach(ctx, symbol, bar, track)
             if exit_reason is None:
                 continue
 
@@ -585,18 +617,40 @@ class SizedStrategy(Strategy):
             return track.entry_price * (1 - self.exits.stop_loss)
         return track.entry_price * (1 + self.exits.stop_loss)
 
-    def _breach(self, price: float, track: _Track) -> str | None:
-        """Which protective level, if any, this price crosses."""
+    def _current_atr(self, ctx: StrategyContext, symbol: str) -> float | None:
+        """Latest ATR reading for `symbol`, or ``None`` without enough history.
+
+        Computed straight from OHLC rather than requiring the inner strategy
+        to have precomputed an 'atr' column — the wrapper works over any
+        :class:`Strategy` and must not depend on what that strategy chose to
+        add in :meth:`prepare`.
+        """
+        period = self.exits.trailing_stop_atr_period
+        frame = ctx.history(symbol, n=period * 4)
+        if frame is None or len(frame) < period + 1:
+            return None
+        series = _atr_indicator(frame["high"], frame["low"], frame["close"], window=period)
+        value = series.iloc[-1]
+        return float(value) if value == value else None  # NaN check without importing math/np here
+
+    def _breach(self, ctx: StrategyContext, symbol: str, bar, track: _Track) -> str | None:
+        """Which protective level, if any, this bar crosses.
+
+        Breaches are tested against the bar's extremes, not its close: a
+        stop-loss touched at the low but recovered by the close still
+        stopped the position out in reality. The close-only convention
+        understated stop-outs on every volatile bar.
+        """
         long = track.direction > 0
 
         if self.exits.stop_loss is not None:
             limit = track.entry_price * (1 - self.exits.stop_loss if long else 1 + self.exits.stop_loss)
-            if (long and price <= limit) or (not long and price >= limit):
+            if (long and bar.low <= limit) or (not long and bar.high >= limit):
                 return "stop_loss"
 
         if self.exits.take_profit is not None:
             limit = track.entry_price * (1 + self.exits.take_profit if long else 1 - self.exits.take_profit)
-            if (long and price >= limit) or (not long and price <= limit):
+            if (long and bar.high >= limit) or (not long and bar.low <= limit):
                 return "take_profit"
 
         if self.exits.trailing_stop is not None:
@@ -604,11 +658,24 @@ class SizedStrategy(Strategy):
             # ever ratchet toward the position — never away from it.
             if long and track.high_water > 0:
                 limit = track.high_water * (1 - self.exits.trailing_stop)
-                if price <= limit:
+                if bar.low <= limit:
                     return "trailing_stop"
             elif not long and track.low_water > 0:
                 limit = track.low_water * (1 + self.exits.trailing_stop)
-                if price >= limit:
+                if bar.high >= limit:
                     return "trailing_stop"
+
+        if self.exits.trailing_stop_atr_multiple is not None:
+            current_atr = self._current_atr(ctx, symbol)
+            if current_atr is not None and current_atr > 0:
+                distance = current_atr * self.exits.trailing_stop_atr_multiple
+                if long and track.high_water > 0:
+                    limit = track.high_water - distance
+                    if bar.low <= limit:
+                        return "trailing_stop_atr"
+                elif not long and track.low_water > 0:
+                    limit = track.low_water + distance
+                    if bar.high >= limit:
+                        return "trailing_stop_atr"
 
         return None

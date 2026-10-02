@@ -127,15 +127,3 @@ class Timeframe(str, Enum):
             Timeframe.DAY_1: 86400,
         }[self]
 
-    @property
-    def bars_per_year(self) -> float:
-        """Used to annualise per-bar statistics."""
-        sec = self.seconds
-        if not sec:
-            raise ValueError("bars_per_year is undefined for tick data")
-        return (365 * 24 * 3600) / sec
-
-
-class TradingSession(str, Enum):
-    CONTINUOUS = "CONTINUOUS"  # crypto / FX
-    REGULAR = "REGULAR"  # exchange primary session only

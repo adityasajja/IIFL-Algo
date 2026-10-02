@@ -33,6 +33,11 @@ class SmaCrossover(Strategy):
             frame["sma_slow_prev"] = frame["sma_slow"].shift(1)
 
     def on_bar(self, ctx) -> None:
+        # Read once: equity cannot change mid-bar (no fill lands until the
+        # next bar's open), so re-reading it inside `_size` once per symbol
+        # was recomputing the same portfolio-wide sum over and over for
+        # nothing — the dominant cost in a multi-symbol backtest's profile.
+        equity = ctx.equity
         for symbol in ctx.instruments:
             row = ctx.row(symbol)
             fast_now, slow_now = row["sma_fast"], row["sma_slow"]
@@ -48,7 +53,7 @@ class SmaCrossover(Strategy):
             if not price or pd.isna(price):
                 continue
 
-            target_qty = self._size(ctx, symbol, price)
+            target_qty = self._size(ctx, symbol, price, equity)
             if target_qty == 0:
                 continue
 
@@ -90,9 +95,9 @@ class SmaCrossover(Strategy):
             )
         return None
 
-    def _size(self, ctx, symbol: str, price: float) -> int:
+    def _size(self, ctx, symbol: str, price: float, equity: float) -> int:
         instrument = ctx.instruments[symbol]
-        notional = ctx.equity * self.allocation
+        notional = equity * self.allocation
         step = max(instrument.quantity_step, 1)
         qty = int(notional / max(price * instrument.multiplier, 1e-9) / step) * step
         return int(qty)

@@ -225,6 +225,132 @@ def test_risk_blocks_short_when_disabled():
     assert not risk.check_order(order, portfolio).allowed
 
 
+def test_a_halt_still_lets_a_closing_order_through():
+    """A halt must not block the flatten it triggers.
+
+    `ctx.close_all()` runs the instant a halt fires, submitting its closing
+    orders through this same `check_order`. Rejecting every order
+    unconditionally while halted meant that flatten silently failed: the
+    engine logged a halt and "closed" the book, but the position stayed open
+    through it — the emergency exit was blocked by the emergency it was
+    responding to.
+    """
+    portfolio = Portfolio(initial_cash=100_000)
+    portfolio.ensure_position(EQ).quantity = 100
+    risk = RiskEngine(RiskLimits(max_daily_loss=1_000))
+    risk.trip("daily loss breached")
+
+    closing = Order(instrument=EQ, side=Side.SELL, quantity=100)
+    assert risk.check_order(closing, portfolio).allowed
+
+
+def test_a_halt_still_blocks_an_order_that_adds_risk():
+    """The halt exception is for exits only — it is not a backdoor to open more risk."""
+    portfolio = Portfolio(initial_cash=100_000)
+    portfolio.ensure_position(EQ).quantity = 100
+    risk = RiskEngine(RiskLimits(max_daily_loss=1_000))
+    risk.trip("daily loss breached")
+
+    adding = Order(instrument=EQ, side=Side.BUY, quantity=50)
+    verdict = risk.check_order(adding, portfolio)
+    assert not verdict.allowed
+    assert verdict.reason == "daily loss breached"
+
+
+def test_a_halt_still_blocks_a_flat_order_from_a_flat_book():
+    """From flat, any order opens new risk — there is nothing to reduce."""
+    portfolio = Portfolio(initial_cash=100_000)
+    risk = RiskEngine(RiskLimits(max_daily_loss=1_000))
+    risk.trip("daily loss breached")
+
+    order = Order(instrument=EQ, side=Side.BUY, quantity=10)
+    assert not risk.check_order(order, portfolio).allowed
+
+
+def test_the_kill_switch_blocks_exits_too_unlike_an_automatic_halt():
+    """The kill switch is a deliberate, unconditional stop — it has no exception.
+
+    Unlike the automatic daily-loss halt above, an operator hitting the kill
+    switch means "stop everything, including exits" — that intent must not be
+    softened by the same risk-reducing exception the automatic halt gets.
+    """
+    portfolio = Portfolio(initial_cash=100_000)
+    portfolio.ensure_position(EQ).quantity = 100
+    risk = RiskEngine(RiskLimits(kill_switch=True))
+
+    closing = Order(instrument=EQ, side=Side.SELL, quantity=100)
+    assert not risk.check_order(closing, portfolio).allowed
+
+
+def test_a_halt_flattens_the_book_end_to_end():
+    """The full engine path: a halt actually empties the position, not just approves the order."""
+    snaps = []
+    for i, price in enumerate([100.0, 100.0, 88.0, 88.0, 88.0]):
+        ts = datetime(2024, 1, 1, 9, 30) + timedelta(days=i)
+        bar = Bar(ts=ts, open=price, high=price * 1.01, low=price * 0.99,
+                  close=price, volume=10_000)
+        snaps.append(MarketSnapshot(ts=ts, bars={"TEST": bar}))
+
+    class _BuyOnceHere(Strategy):
+        name = "buy_once_here"
+        done = False
+
+        def on_bar(self, ctx) -> None:
+            if not self.done:
+                self.done = True
+                ctx.order("TEST", 500, tag="entry")
+
+    config = BacktestConfig(
+        initial_cash=100_000,
+        risk=RiskLimits(max_daily_loss=5_000),
+        slippage=SlippageModel(bps=0.0),
+    )
+    engine = BacktestEngine(ListFeed(snaps, {"TEST": EQ}), _BuyOnceHere(), config)
+    result = engine.run()
+
+    assert result.killed
+    assert engine.portfolio.position("TEST").quantity == 0
+
+
+def test_a_halt_also_cancels_resting_orders_not_just_the_position():
+    """A halt has to mean nothing pending, not just nothing held.
+
+    `close_all` only offsets a held position with a fresh market order — a
+    resting stop or limit order (an episodic-pivot-style entry, a protective
+    stop placed as its own order) is untouched by it and would sit in the
+    book indefinitely through a "halted" run. `Broker.cancel_all` existed
+    and was never called from here.
+    """
+    snaps = []
+    for i, price in enumerate([100.0, 100.0, 88.0, 88.0, 88.0]):
+        ts = datetime(2024, 1, 1, 9, 30) + timedelta(days=i)
+        bar = Bar(ts=ts, open=price, high=price * 1.01, low=price * 0.99,
+                  close=price, volume=10_000)
+        snaps.append(MarketSnapshot(ts=ts, bars={"TEST": bar}))
+
+    class _BuyAndPlaceRestingStop(Strategy):
+        name = "buy_and_resting_stop"
+        done = False
+
+        def on_bar(self, ctx) -> None:
+            if not self.done:
+                self.done = True
+                ctx.order("TEST", 500, tag="entry")
+                ctx.order("TEST", 100, order_type=OrderType.STOP, stop_price=200.0, tag="resting-stop")
+
+    config = BacktestConfig(
+        initial_cash=100_000,
+        risk=RiskLimits(max_daily_loss=5_000),
+        slippage=SlippageModel(bps=0.0),
+    )
+    engine = BacktestEngine(ListFeed(snaps, {"TEST": EQ}), _BuyAndPlaceRestingStop(), config)
+    result = engine.run()
+
+    assert result.killed
+    assert engine.portfolio.position("TEST").quantity == 0
+    assert engine.broker._resting == []
+
+
 def test_marking_with_a_missing_price_keeps_the_last_known_one():
     """A NaN price is not a price, and the damage does not stay local.
 
@@ -309,3 +435,120 @@ def test_sma_crossover_runs_and_respects_costs():
     assert result.metrics.total_commission > 0
     assert not result.equity.isna().any()
     assert result.metrics.num_trades >= 1
+
+
+# --------------------------------------------------------------------------
+# Regression tests for the 2026-09 audit fixes below. Each pins a bug that
+# the suite previously let through, so a revert fails loudly.
+
+
+def test_margin_counts_the_whole_book_not_one_symbol():
+    """Two 60%-of-equity positions must not both pass a 100% limit."""
+    from atr.backtest.broker import SimulatedBroker
+
+    fut2 = Instrument(
+        symbol="TESTFUT2", asset_class=AssetClass.FUTURE, multiplier=100,
+        initial_margin_per_unit=25, quantity_step=50,
+    )
+    portfolio = Portfolio(initial_cash=2_000)
+    broker = SimulatedBroker(portfolio, slippage=SlippageModel(bps=0))
+    first = Order(instrument=FUT, side=Side.BUY, quantity=50, order_type=OrderType.MARKET)
+    second = Order(instrument=fut2, side=Side.BUY, quantity=50, order_type=OrderType.MARKET)
+    broker.submit(first, now=datetime(2024, 1, 1))
+    broker.submit(second, now=datetime(2024, 1, 1))
+    bar = Bar(ts=datetime(2024, 1, 1), open=100, high=101, low=99, close=100, volume=10_000)
+    broker.on_bar(MarketSnapshot(ts=datetime(2024, 1, 1), bars={"TESTFUT": bar, "TESTFUT2": bar}))
+    assert first.status is OrderStatus.FILLED
+    assert second.status is OrderStatus.REJECTED
+
+
+def test_fok_is_all_or_nothing():
+    """A participation-capped FOK books nothing; an IOC keeps the partial."""
+    from atr.backtest.broker import SimulatedBroker
+    from atr.core.enums import TimeInForce
+
+    portfolio = Portfolio(initial_cash=1_000_000)
+    broker = SimulatedBroker(portfolio, slippage=SlippageModel(bps=0), participation_rate=0.5)
+    bar = Bar(ts=datetime(2024, 1, 1), open=100, high=101, low=99, close=100, volume=100)
+    fok = Order(instrument=EQ, side=Side.BUY, quantity=100, order_type=OrderType.MARKET,
+                tif=TimeInForce.FOK)
+    ioc = Order(instrument=EQ, side=Side.BUY, quantity=100, order_type=OrderType.MARKET,
+                tif=TimeInForce.IOC)
+    broker.submit(fok, now=datetime(2024, 1, 1))
+    broker.submit(ioc, now=datetime(2024, 1, 1))
+    broker.on_bar(MarketSnapshot(ts=datetime(2024, 1, 1), bars={"TEST": bar}))
+    assert broker.fills == [] or all(f.order_id == ioc.order_id for f in broker.fills)
+    assert fok.status is OrderStatus.CANCELLED
+    assert fok.filled_quantity == 0
+    assert ioc.filled_quantity == pytest.approx(50.0)
+
+
+def test_stop_limit_cap_survives_a_gap():
+    """A triggered stop-limit that gapped past its cap rests; it is not filled."""
+    from atr.backtest.broker import SimulatedBroker
+
+    portfolio = Portfolio(initial_cash=1_000_000)
+    broker = SimulatedBroker(portfolio, slippage=SlippageModel(bps=0))
+    buy = Order(instrument=EQ, side=Side.BUY, quantity=10,
+                order_type=OrderType.STOP_LIMIT, stop_price=100, limit_price=101)
+    broker.submit(buy, now=datetime(2024, 1, 1))
+    # Triggered (high 112 >= stop 100) but the trigger price 110 is past the
+    # 101 cap: no fill.
+    broker.on_bar(MarketSnapshot(ts=datetime(2024, 1, 1), bars={"TEST": Bar(
+        ts=datetime(2024, 1, 1), open=110, high=112, low=99, close=111, volume=10_000)}))
+    assert broker.fills == []
+    assert buy.is_active
+    # The next bar (same session — DAY orders die overnight) trades through
+    # the cap normally: fills at the trigger.
+    broker.on_bar(MarketSnapshot(ts=datetime(2024, 1, 1, 9, 31), bars={"TEST": Bar(
+        ts=datetime(2024, 1, 1, 9, 31), open=100.5, high=101, low=100, close=100.8, volume=10_000)}))
+    assert len(broker.fills) == 1
+    assert broker.fills[0].price == pytest.approx(100.5)
+
+
+def test_market_order_without_a_price_cannot_dodge_notional_caps():
+    """A MARKET order on a never-marked symbol has unknowable notional."""
+    portfolio = Portfolio(initial_cash=1_000_000)
+    risk = RiskEngine(RiskLimits(max_order_notional=1_000))
+    order = Order(instrument=EQ, side=Side.BUY, quantity=10, order_type=OrderType.MARKET)
+    verdict = risk.check_order(order, portfolio)
+    assert not verdict.allowed
+    assert "reference price" in verdict.reason
+
+
+def test_position_notional_cap_uses_projected_exposure():
+    """90k held + 20k ordered must breach a 100k position cap."""
+    portfolio = Portfolio(initial_cash=1_000_000)
+    portfolio.apply_fill(Fill(order_id="1", instrument=EQ, side=Side.BUY,
+                              quantity=900, price=100, ts=datetime(2024, 1, 1)))
+    portfolio.position("TEST").mark(100, datetime(2024, 1, 1))
+    risk = RiskEngine(RiskLimits(max_position_notional=100_000))
+    order = Order(instrument=EQ, side=Side.BUY, quantity=200,
+                  order_type=OrderType.LIMIT, limit_price=100)
+    verdict = risk.check_order(order, portfolio)
+    assert not verdict.allowed
+    assert "projected" in verdict.reason
+
+
+def test_opened_at_resets_after_flatten():
+    """The second round-trip gets its own timestamp, not the first trade's."""
+    portfolio = Portfolio(initial_cash=100_000)
+    portfolio.apply_fill(Fill(order_id="1", instrument=EQ, side=Side.BUY,
+                              quantity=10, price=100, ts=datetime(2024, 1, 1)))
+    assert portfolio.position("TEST").opened_at == datetime(2024, 1, 1)
+    portfolio.apply_fill(Fill(order_id="2", instrument=EQ, side=Side.SELL,
+                              quantity=10, price=110, ts=datetime(2024, 1, 5)))
+    assert portfolio.position("TEST").is_flat
+    assert portfolio.position("TEST").opened_at is None
+    portfolio.apply_fill(Fill(order_id="3", instrument=EQ, side=Side.BUY,
+                              quantity=5, price=105, ts=datetime(2024, 1, 10)))
+    assert portfolio.position("TEST").opened_at == datetime(2024, 1, 10)
+
+
+def test_slippage_cost_scales_with_contract_multiplier():
+    """A 2-point slip on 50 futures lots is 2*50*100, not 2*50."""
+    portfolio = Portfolio(initial_cash=10_000_000)
+    portfolio.apply_fill(Fill(order_id="1", instrument=FUT, side=Side.BUY,
+                              quantity=50, price=100, ts=datetime(2024, 1, 1),
+                              slippage=2.0))
+    assert portfolio.slippage_cost == pytest.approx(2.0 * 50 * 100)

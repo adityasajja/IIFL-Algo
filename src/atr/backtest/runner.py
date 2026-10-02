@@ -503,11 +503,19 @@ class BacktestRunner:
         """
         from pathlib import Path
 
-        from atr.data import history as history_module
         from atr.instruments.service import DAILY_DIR, canonical_symbol
+        from atr.instruments.service import CACHE_ROOT as INSTRUMENTS_CACHE_ROOT
 
         master = self._instrument_master
-        root = Path(getattr(master, "cache_root", history_module.CACHE_ROOT))
+        # `master.cache_root` (when there is a master) already excludes
+        # `DAILY_DIR` — it's joined on below — so the no-master fallback must
+        # match that same base. `atr.data.history.CACHE_ROOT` looks like the
+        # obvious fallback but is a *different* constant that already *includes*
+        # `iifl_daily`; using it here silently doubled the path to
+        # `data/iifl_daily/iifl_daily/<exchange>`, which never exists, so any
+        # backtest run without an instrument master (e.g. `get_instrument_master()`
+        # raising) always failed with "no data" regardless of what was cached.
+        root = Path(getattr(master, "cache_root", INSTRUMENTS_CACHE_ROOT))
         outdir = root / DAILY_DIR / self.config.exchange.upper()
 
         wanted = {s.upper() for s in symbols}
@@ -569,6 +577,8 @@ class BacktestRunner:
         window; `warmup_bars` on the engine config is what tells the engine
         which leading bars to run without letting the strategy act.
         """
+        import polars as pl
+
         from atr.core.enums import Timeframe
         from atr.core.models import Instrument
         from atr.data.base import ListFeed, pivot_to_snapshots
@@ -580,12 +590,14 @@ class BacktestRunner:
         # `index_by_ts` moved `ts` into the index; `pivot_to_snapshots` wants it
         # back as a column. Both representations are needed, so the conversion is
         # explicit at each boundary rather than one side assuming the other's.
-        combined = pd.concat(
+        combined = pl.concat(
             [
-                frame.reset_index().rename(columns={"index": "ts"}).assign(symbol=symbol)
+                pl.from_pandas(frame.reset_index().rename(columns={"index": "ts"})).with_columns(
+                    pl.lit(symbol).alias("symbol")
+                )
                 for symbol, frame in frames.items()
             ],
-            ignore_index=True,
+            how="diagonal_relaxed",
         )
         snapshots = pivot_to_snapshots(combined, Timeframe.DAY_1)
         return ListFeed(snapshots, wanted_instruments)

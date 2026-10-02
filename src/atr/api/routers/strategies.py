@@ -326,6 +326,9 @@ class SizingPreviewRequest(BaseModel):
     current_sector_exposure: float = 0.0
     max_sector_exposure: float | None = None
     sizing: dict[str, Any] = Field(default_factory=dict)
+    #: Contract multiplier (1 for equity, e.g. 75 for NIFTY options). Rupee
+    #: notionals buy exposure at ``entry_price * multiplier``.
+    multiplier: float = Field(default=1.0, gt=0)
 
 
 @router.post("/sizing/preview", dependencies=[_READ])
@@ -348,6 +351,7 @@ def preview_position_sizing(body: SizingPreviewRequest) -> dict[str, Any]:
         max_total_portfolio_exposure=body.max_total_portfolio_exposure,
         current_sector_exposure=body.current_sector_exposure,
         max_sector_exposure=body.max_sector_exposure,
+        multiplier=body.multiplier,
     )
     return result.as_dict()
 

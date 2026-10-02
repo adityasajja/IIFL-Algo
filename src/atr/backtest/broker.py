@@ -3,8 +3,10 @@
 Two rules keep the backtest honest:
   * Market orders signalled on bar *i* fill at the open of bar *i+1*. Filling
     at the signal bar's close is look-ahead bias and inflates every result.
-  * Limit orders fill at the *worse* of the limit price and the open, so a
-    limit that gapped through still fills at the open, not at the limit.
+  * Limit orders fill at the limit price or better, never worse than the
+    limit: the open when the market opened in your favour, the limit price
+    when it gapped against you but still touched. A fill price outside
+    ``[low, high]`` would be a price the market never offered.
 """
 
 from __future__ import annotations
@@ -109,11 +111,27 @@ class SimulatedBroker:
         if order.order_type in (OrderType.STOP, OrderType.STOP_LIMIT):
             if order.stop_price is None:
                 return None
-            if order.side is Side.BUY and bar.high >= order.stop_price:
-                return max(order.stop_price, bar.open)
-            if order.side is Side.SELL and bar.low <= order.stop_price:
-                return min(order.stop_price, bar.open)
-            return None
+            if order.side is Side.BUY:
+                if bar.high < order.stop_price:
+                    return None
+                px = max(order.stop_price, bar.open)
+                # A stop-limit caps the chase: once triggered it is a limit
+                # order, and a bar that never traded at or below the limit
+                # cannot have filled it.
+                if order.order_type is OrderType.STOP_LIMIT and order.limit_price is not None:
+                    if px > order.limit_price:
+                        return None
+                    return min(px, order.limit_price)
+                return px
+            else:
+                if bar.low > order.stop_price:
+                    return None
+                px = min(order.stop_price, bar.open)
+                if order.order_type is OrderType.STOP_LIMIT and order.limit_price is not None:
+                    if px < order.limit_price:
+                        return None
+                    return max(px, order.limit_price)
+                return px
         return None
 
     def _execute(self, order: Order, raw_price: float, ts: datetime, bar: Bar):
@@ -126,6 +144,13 @@ class SimulatedBroker:
             qty = min(qty, bar.volume * self.participation_rate)
         qty = self._round_quantity(order.instrument, qty)
         if qty <= 0:
+            return []
+
+        # FOK is atomic: a partial fill is not a fill. Without this a
+        # participation-capped FOK books shares and cancels the rest,
+        # which is exactly what FOK forbids (IOC may keep the partial).
+        if order.tif is TimeInForce.FOK and qty < order.remaining_quantity - 1e-9:
+            self.cancel(order, "FOK could not fill in full")
             return []
 
         # Affordability: if the account can't fund the intended size we reject
@@ -170,7 +195,16 @@ class SimulatedBroker:
         existing = self.portfolio.position(inst.symbol).quantity
         new_qty = existing + order.side.sign * order.remaining_quantity
         required = self.portfolio.margin_for_order(inst, new_qty, price)
-        return required <= self.portfolio.equity + 1e-6
+        # Margin is a portfolio constraint, not a per-symbol one: the other
+        # symbols' margin stays used while this order is evaluated. Checking
+        # one symbol against the whole equity lets N positions of 60% each
+        # pass a 100% limit.
+        held_elsewhere = sum(
+            self.portfolio.margin_required(p)
+            for sym, p in self.portfolio.positions.items()
+            if sym != inst.symbol
+        )
+        return held_elsewhere + required <= self.portfolio.equity + 1e-6
 
     # ------------------------------------------------------------------
     def cancel_all(self) -> None:
