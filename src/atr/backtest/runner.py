@@ -627,6 +627,14 @@ class BacktestRunner:
                 "trip by roughly 0.25% of turnover."
             )
 
+        from atr.backtest.validity import validity_warnings
+
+        self.warnings.extend(
+            validity_warnings(
+                frames, allow_short=bool(self.config.allow_short), cost_model=str(costs.model)
+            )
+        )
+
         cash = self.config.initial_cash
         engine_config = BacktestConfig(
             initial_cash=cash,
