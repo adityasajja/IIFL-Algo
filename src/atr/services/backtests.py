@@ -104,6 +104,7 @@ class BacktestService:
 
         labels = {
             "india_delivery": "Indian delivery — STT, stamp duty, GST (realistic)",
+            "india_intraday": "Indian intraday (MIS) — STT on sell only, no DP charge",
             "flat_per_share": "IBKR-style flat per share (understates Indian costs)",
             "none": "No costs (A/B comparison only)",
         }

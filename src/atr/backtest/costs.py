@@ -121,6 +121,31 @@ class IndianDeliveryCosts(CommissionModel):
 
 
 @dataclass
+class IndianIntradayCosts(IndianDeliveryCosts):
+    """NSE cash-equity **intraday** (MIS) costs. Differs from delivery in three places:
+    STT is 0.025% on the **sell** leg only, stamp duty is 0.003% on the buy leg, and there is
+    no DP charge (nothing is delivered to a demat account)."""
+
+    stt_pct: float = 0.00025
+    stamp_pct_buy: float = 0.00003
+    dp_per_sell: float = 0.0
+
+    def compute(self, quantity, price, instrument, side=None) -> float:
+        notional = abs(quantity * price * instrument.multiplier)
+        if notional <= 0:
+            return 0.0
+        brokerage = min(self.brokerage_per_order, self.brokerage_pct * notional)
+        exchange = self.exchange_pct * notional
+        sebi = self.sebi_pct * notional
+        total = brokerage + exchange + sebi + self.gst_pct * (brokerage + exchange + sebi)
+        if side is Side.SELL:
+            total += self.stt_pct * notional
+        else:
+            total += self.stamp_pct_buy * notional
+        return total
+
+
+@dataclass
 class SlippageModel:
     """Adverse price movement between signal and fill.
 

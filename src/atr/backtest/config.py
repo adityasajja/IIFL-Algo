@@ -39,7 +39,7 @@ MIN_CAPITAL = 10_000.0
 MAX_CAPITAL = 1_000_000_000.0
 
 #: Cost models a run may select. Keys are the wire values.
-COST_MODELS = ("india_delivery", "flat_per_share", "none")
+COST_MODELS = ("india_delivery", "india_intraday", "flat_per_share", "none")
 
 #: Position sizing modes. `fixed_fraction` is the default because the other two
 #: answer different questions: `fixed_quantity` ignores capital entirely (so its
@@ -240,6 +240,9 @@ class BacktestRunConfig:
     # --- engine knobs that change results ------------------------------
     allow_short: bool = False
     square_off_eod: bool = False
+    #: Largest share of a bar's volume one order may take. 5% is a common conservative cap;
+    #: 1.0 disables it and lets an illiquid stock fill any size.
+    participation_rate: float = 0.05
     risk_free_rate: float = 0.0
     benchmark: str | None = "NIFTYBEES"
     warmup_bars: int | None = None
@@ -249,6 +252,11 @@ class BacktestRunConfig:
         """Raise :class:`ConfigError` if this cannot be run as written."""
         if not self.strategy and not self.engine_key:
             raise ConfigError("a run needs a strategy", code="missing_strategy", field="strategy")
+
+        if not 0 < self.participation_rate <= 1:
+            raise ConfigError(
+                "participation_rate must be in (0, 1]", code="bad_participation", field="participation_rate"
+            )
 
         if self.timeframe not in KNOWN_TIMEFRAMES:
             raise ConfigError(

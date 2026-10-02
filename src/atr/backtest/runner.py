@@ -605,7 +605,7 @@ class BacktestRunner:
     # ------------------------------------------------------------------
     def execute(self) -> RunOutcome:
         """Run the engine and derive everything the results page needs."""
-        from atr.backtest.costs import CommissionModel, IndianDeliveryCosts, SlippageModel
+        from atr.backtest.costs import CommissionModel, IndianDeliveryCosts, IndianIntradayCosts, SlippageModel
         from atr.backtest.engine import BacktestConfig, BacktestEngine
         from atr.execution.risk import RiskLimits
 
@@ -615,6 +615,8 @@ class BacktestRunner:
         costs = self.config.costs
         if costs.model == "india_delivery":
             commission = IndianDeliveryCosts()
+        elif costs.model == "india_intraday":
+            commission = IndianIntradayCosts()
         elif costs.model == "flat_per_share":
             commission = CommissionModel()
         else:
@@ -643,6 +645,7 @@ class BacktestRunner:
             allow_short=self.config.allow_short,
             risk_free_rate=self.config.risk_free_rate,
             square_off_eod=self.config.square_off_eod,
+            participation_rate=float(self.config.participation_rate),
             warmup_bars=warmup,
             # Same discipline as the CLI: a daily loss limit proportionate to
             # the account, so a run cannot quietly lose everything.
