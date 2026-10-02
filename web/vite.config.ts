@@ -71,11 +71,14 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          "vendor-react": ["react", "react-dom"],
-          "vendor-charts": ["lightweight-charts"],
-          "vendor-motion": ["motion/react"],
-          "vendor-icons": ["lucide-react"],
+        // A function, not an object: Vite 8's bundler (Rolldown) only takes the function form.
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\/]node_modules[\/](react|react-dom|scheduler)[\/]/.test(id)) return "vendor-react";
+          if (id.includes("lightweight-charts") || id.includes("fancy-canvas")) return "vendor-charts";
+          if (/[\/]node_modules[\/](motion|framer-motion|motion-dom|motion-utils)[\/]/.test(id)) return "vendor-motion";
+          if (id.includes("lucide-react")) return "vendor-icons";
+          return undefined;
         },
       },
     },
