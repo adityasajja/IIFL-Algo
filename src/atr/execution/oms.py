@@ -434,6 +434,9 @@ class LimitsRiskGate:
         daily = self._daily_loss_check(draft, order, limits)
         if daily is not None:
             return daily
+        book = self._book_check(draft, order, limits)
+        if book is not None:
+            return book
         needs_price = _has_finite_limit(
             getattr(limits, "max_order_notional", None)
         ) or _has_finite_limit(getattr(limits, "max_position_notional", None))
@@ -463,6 +466,51 @@ class LimitsRiskGate:
                 f"limit price {float(draft.limit_price):,.2f} is {gap:.0%} away from the last "
                 f"price {last:,.2f} (allowed {self.price_band_pct:.0%}) — check for a typo",
                 "price_band",
+            )
+        return None
+
+    def _book_check(self, draft: OrderDraft, order: Any, limits: Any) -> RiskDecision | None:
+        """Whole-book limits for orders that add risk: total exposure and number of open names.
+        Exits are never blocked; an unreadable book with a limit set is refused."""
+        gross_cap = getattr(limits, "max_gross_exposure", None)
+        open_cap = getattr(limits, "max_open_positions", None)
+        if not (_has_finite_limit(gross_cap) or open_cap is not None):
+            return None
+        try:
+            if self.engine._is_risk_reducing(order, self.portfolio):
+                return None
+        except Exception:  # noqa: BLE001 - cannot classify, so treat as new risk
+            pass
+        if getattr(self.portfolio, "readable", True) is False:
+            return RiskDecision.reject(
+                "the broker's positions could not be read, so exposure limits cannot be checked "
+                "— refusing new risk",
+                "book_unknown",
+            )
+        try:
+            held = float(self.portfolio.position(draft.symbol).quantity)
+            positions = getattr(self.portfolio, "positions", None)
+            if open_cap is not None and abs(held) < 1e-9 and positions is not None:
+                open_now = sum(1 for p in positions.values() if abs(float(p.quantity)) > 1e-9)
+                if open_now + 1 > int(open_cap):
+                    return RiskDecision.reject(
+                        f"{open_now} positions are already open (limit {int(open_cap)})",
+                        "max_open_positions",
+                    )
+            if _has_finite_limit(gross_cap):
+                price = float(draft.limit_price or self._last_price(draft))
+                if price > 0:
+                    added = (abs(held + order.signed_quantity) - abs(held)) * price
+                    gross = float(getattr(self.portfolio, "gross_exposure", 0.0))
+                    if gross + added > float(gross_cap):
+                        return RiskDecision.reject(
+                            f"total exposure would be {gross + added:,.0f}, over the limit "
+                            f"{float(gross_cap):,.0f}",
+                            "max_gross_exposure",
+                        )
+        except Exception:  # noqa: BLE001 - unknown is not zero
+            return RiskDecision.reject(
+                "could not evaluate exposure limits — refusing new risk", "book_unknown"
             )
         return None
 

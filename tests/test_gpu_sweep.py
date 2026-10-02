@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+pytest.importorskip("torch", reason="the tensor sweep needs torch (gpu dependency group)")
+
 from atr.compute.sweep import reference_sma_cross, sma_cross_sweep
 
 

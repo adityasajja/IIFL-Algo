@@ -225,3 +225,47 @@ class TestPriceBand:
         r = _gate(_Book(), None)(far)
         assert not r.allowed and r.code == "price_band"
         assert _gate(_Book(), None)(_d()).allowed
+
+
+class _Multi(_Book):
+    def __init__(self, held_map, gross=0.0):
+        super().__init__()
+        self.held_map, self.gross_exposure = held_map, gross
+
+    @property
+    def positions(self):
+        return {s: self.position(s) for s in self.held_map}
+
+    def position(self, symbol):
+        from atr.core.models import Instrument, Position
+
+        return Position(instrument=Instrument(symbol=symbol), quantity=self.held_map.get(symbol, 0.0), avg_price=100.0, last_price=100.0)
+
+
+def _gate2(book, **limits):
+    from atr.execution.oms import LimitsRiskGate
+    from atr.execution.risk import RiskEngine, RiskLimits
+
+    return LimitsRiskGate(engine=RiskEngine(RiskLimits(**limits)), portfolio=book, instruments=_instruments)
+
+
+class TestBookLimits:
+    def test_open_positions_cap(self):
+        book = _Multi({"A": 1, "B": 1})
+        r = _gate2(book, max_open_positions=2)(_d())
+        assert not r.allowed and r.code == "max_open_positions"
+        assert _gate2(_Multi({"A": 1}), max_open_positions=2)(_d()).allowed
+
+    def test_adding_to_existing_name_is_not_a_new_position(self):
+        assert _gate2(_Multi({"INFY": 5, "B": 1}), max_open_positions=2)(_d()).allowed
+
+    def test_gross_exposure_cap_and_exit(self):
+        r = _gate2(_Multi({"A": 1}, gross=99_950.0), max_gross_exposure=100_000.0)(_d())
+        assert not r.allowed and r.code == "max_gross_exposure"
+        assert _gate2(_Multi({"INFY": 5}, gross=99_950.0), max_gross_exposure=100_000.0)(_d("SELL")).allowed
+
+    def test_unreadable_book_fails_closed(self):
+        book = _Multi({})
+        book.readable = False
+        r = _gate2(book, max_open_positions=3)(_d())
+        assert not r.allowed and r.code == "book_unknown"
