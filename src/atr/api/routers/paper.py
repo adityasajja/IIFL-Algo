@@ -21,13 +21,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from atr.api.deps import require_permission
 from atr.auth.models import Principal
 from atr.auth.rbac import Permission
 from atr.services.paper import DeploymentError, DeploymentService, PaperLedger
+from atr.services.track_record import DEFAULT_DAYS, MAX_DAYS, TrackRecordService
 
 logger = logging.getLogger("atr.api.paper")
 
@@ -246,6 +247,20 @@ def compare_champion_challenger(
         raise _fail(exc) from exc
 
 
+@router.get("/track-record")
+def track_record(
+    days: int = Query(DEFAULT_DAYS, ge=1, le=MAX_DAYS), principal: Principal = Depends(_READ)
+) -> dict[str, Any]:
+    """What the whole paper book did, day by day, against the Nifty 50.
+
+    A replay of the recorded fills, valued at each day's close, net of the costs the paper
+    venue charged. ``provenance`` states plainly that the fills are simulated and where the
+    prices came from and how recent they are. ``has_data`` is false until a deployment has
+    traded; the response then carries no curve rather than a flat line.
+    """
+    return TrackRecordService().build(principal.user_id, days=days)
+
+
 @router.get("/deployments", dependencies=[Depends(_READ)])
 def list_deployments(
     principal: Principal = Depends(_READ), status_filter: str | None = None
@@ -262,6 +277,20 @@ def get_deployment(
         return _service().get(principal.user_id, deployment_id)
     except DeploymentError as exc:
         raise _fail(exc) from exc
+
+
+@router.get("/deployments/{deployment_id}/track-record")
+def deployment_track_record(
+    deployment_id: str,
+    days: int = Query(DEFAULT_DAYS, ge=1, le=MAX_DAYS),
+    principal: Principal = Depends(_READ),
+) -> dict[str, Any]:
+    """The same record for one deployment. Another account's deployment is a 404."""
+    try:
+        _service().get(principal.user_id, deployment_id)
+    except DeploymentError as exc:
+        raise _fail(exc) from exc
+    return TrackRecordService().build(principal.user_id, deployment_id=deployment_id, days=days)
 
 
 @router.post("/deployments/{deployment_id}/start")

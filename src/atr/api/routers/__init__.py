@@ -14,6 +14,7 @@ from atr.api.routers import (
     audit,
     auth,
     backtests,
+    data_status,
     experiments,
     insights,
     instruments,
@@ -58,6 +59,7 @@ ROUTERS: tuple[APIRouter, ...] = (
     # rather than anything the trading path writes — so including it cannot alter
     # the behaviour of a single order, gate or strategy.
     analytics.router,
+    data_status.router,
 )
 
 
