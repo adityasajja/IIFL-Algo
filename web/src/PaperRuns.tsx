@@ -3,6 +3,7 @@ import { getRunnerStatus, listSavedStrategies, monitorPnl, type Deployment, type
 import { Card } from "./components/ui/card";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
+import { ForwardCheck } from "./ForwardCheck";
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${inr(Math.abs(n))}`;
@@ -82,6 +83,8 @@ function RunCard({ d, name, pnl, runner, onManage }: {
           <Stat label="Holding" value={pnl ? `${held.length} stock${held.length === 1 ? "" : "s"}` : "—"} />
           <Stat label="Practice money" value={inr(d.capital)} />
         </div>
+
+        <ForwardCheck strategyId={d.strategy_id} version={d.strategy_version} />
 
         {pnl && held.length === 0 ? (
           <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">{total !== 0 ? "No open positions." : "No trades yet."}</div>

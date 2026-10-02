@@ -127,6 +127,19 @@ def _fail(exc: DeploymentError) -> HTTPException:
 
 
 # --------------------------------------------------------------------- routes
+@router.get("/forward-check")
+def forward_check(
+    strategy_id: str, version: int | None = None, principal: Principal = Depends(_READ)
+) -> dict[str, Any]:
+    """Paper trading set beside the backtest, per trade: win rate, average trade, profit factor.
+
+    Your own strategies and trades only. Under 20 closed paper trades the verdict is "too early".
+    """
+    from atr.services.forward_check import compare
+
+    return compare(_service().db, principal.user_id, strategy_id, version)
+
+
 @router.get("/runner", dependencies=[Depends(_READ)])
 def runner_status() -> dict[str, Any]:
     """What the continuous paper loop is doing right now.

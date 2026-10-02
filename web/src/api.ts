@@ -5070,3 +5070,20 @@ export interface ReconcileRun {
 export const getLatestReconcile = () => v1<ReconcileRun>("/reconciliation/runs/latest");
 export const runReconcile = () =>
   v1<ReconcileRun>("/reconciliation/run", { method: "POST", body: JSON.stringify({}) });
+
+// --- Paper trading vs the backtest (per trade) ---
+export interface TradeStats {
+  trades: number;
+  win_rate_pct: number | null;
+  avg_trade_pct: number | null;
+  profit_factor: number | null;
+}
+export interface ForwardCheck {
+  verdict: "no_backtest" | "too_early" | "holding_up" | "weaker";
+  message: string;
+  min_paper_trades: number;
+  backtest: TradeStats & { run_id: string | null };
+  paper: TradeStats;
+}
+export const getForwardCheck = (strategyId: string, version: number) =>
+  v1<ForwardCheck>(`/paper/forward-check?strategy_id=${encodeURIComponent(strategyId)}&version=${version}`);
