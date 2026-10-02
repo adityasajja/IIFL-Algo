@@ -14,7 +14,7 @@ describe("navigation map", () => {
     for (const p of Object.values(PAGES)) {
       expect(p.name.length).toBeGreaterThan(0);
       expect(p.title.length).toBeGreaterThan(0);
-      expect(p.blurb.endsWith(".")).toBe(true);
+      expect(/[.?]$/.test(p.blurb)).toBe(true);
     }
   });
 
@@ -33,12 +33,15 @@ describe("old links still land in the right place", () => {
     ["#scanner", "markets", "scanner"],
     ["#optimization", "evidence", "improve"],
     ["#analytics", "learning", "attribution"],
-    ["#risk", "trading", "control-center"],
+    ["#risk", "paper", "risk"],
+    ["#trading", "paper", "runs"],
+    ["#portfolio", "paper", "runs"],
+    ["#trading/control-center", "paper", "risk"],
     ["#alerts", "signals", "alerts"],
     ["#briefing", "signals", "brief"],
-    ["#deployments", "paper", undefined],
+    ["#deployments", "paper", "runs"],
     ["#markets/custom", "labs", "custom-scan"],
-    ["#trading/mode", "trading", "portfolio"],
+    ["#trading/mode", "paper", "runs"],
   ])("%s", (hash, tab, sub) => {
     expect(parseRoute(hash)).toEqual({ tab, sub });
   });
@@ -60,7 +63,7 @@ describe("old links still land in the right place", () => {
 });
 
 describe("journey", () => {
-  const none: JourneyFacts = { strategies: 0, deployable: 0, paperRuns: 0, executionMode: "paper", brokerConnected: false };
+  const none: JourneyFacts = { strategies: 0, deployable: 0, paperRuns: 0 };
 
   it("starts at build for a new user", () => {
     expect(nextStep(journeySteps(none))?.id).toBe("build");
@@ -69,17 +72,14 @@ describe("journey", () => {
   it("moves forward as each fact becomes true", () => {
     expect(nextStep(journeySteps({ ...none, strategies: 1 }))?.id).toBe("test");
     expect(nextStep(journeySteps({ ...none, strategies: 1, deployable: 1 }))?.id).toBe("paper");
-    expect(nextStep(journeySteps({ ...none, strategies: 1, deployable: 1, paperRuns: 1 }))?.id).toBe("live");
   });
 
-  it("is finished only when live with a broker connected, and Review never blocks", () => {
-    const done = journeySteps({ strategies: 1, deployable: 1, paperRuns: 2, executionMode: "live", brokerConnected: true });
-    expect(nextStep(done)).toBeNull();
+  it("is finished once a strategy has been paper traded, and Review never blocks", () => {
+    expect(nextStep(journeySteps({ strategies: 1, deployable: 1, paperRuns: 1 }))).toBeNull();
   });
 
-  it("sends the live step to the broker page until a broker is connected", () => {
-    const f = { ...none, strategies: 1, deployable: 1, paperRuns: 1 };
-    expect(journeySteps(f).find((s) => s.id === "live")?.sub).toBe("portfolio");
-    expect(journeySteps({ ...f, brokerConnected: true }).find((s) => s.id === "live")?.sub).toBe("control-center");
+  it("has no live step: the product never places a real order", () => {
+    expect(journeySteps(none).map((s) => s.id)).toEqual(["build", "test", "paper", "review"]);
+    expect(Object.keys(PAGES)).not.toContain("trading");
   });
 });

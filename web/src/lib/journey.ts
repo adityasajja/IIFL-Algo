@@ -11,13 +11,10 @@ export type JourneyFacts = {
   deployable: number;
   /** Paper deployments that exist (running or not). */
   paperRuns: number;
-  /** The execution mode the platform is in. */
-  executionMode: "paper" | "live" | null;
-  brokerConnected: boolean;
 };
 
 export type JourneyStep = {
-  id: "build" | "test" | "paper" | "live" | "review";
+  id: "build" | "test" | "paper" | "review";
   title: string;
   /** One word for the rail. */
   short: string;
@@ -31,7 +28,6 @@ export type JourneyStep = {
 };
 
 export function journeySteps(f: JourneyFacts): JourneyStep[] {
-  const live = f.executionMode === "live";
   return [
     {
       id: "build",
@@ -56,20 +52,10 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
       id: "paper",
       title: "Paper trade it",
       short: "Paper",
-      what: "Run it on live prices with practice money for a few weeks.",
+      what: "Run it on live prices with practice money. No real order is ever sent.",
       done: f.paperRuns > 0,
       tab: "paper",
       action: f.paperRuns > 0 ? "Open paper runs" : "Start paper trading",
-    },
-    {
-      id: "live",
-      title: "Go live",
-      short: "Live",
-      what: "Connect your broker, set your limits, and let it place real orders.",
-      done: live && f.brokerConnected,
-      tab: "trading",
-      sub: f.brokerConnected ? "control-center" : "portfolio",
-      action: f.brokerConnected ? "Set limits" : "Connect broker",
     },
     {
       id: "review",
@@ -83,7 +69,7 @@ export function journeySteps(f: JourneyFacts): JourneyStep[] {
   ];
 }
 
-/** The first step that is not done, in order; `null` once every step before Review is done. */
+/** The first step that is not done, in order; `null` once a strategy has been paper traded. */
 export function nextStep(steps: JourneyStep[]): JourneyStep | null {
   return steps.find((s) => !s.done && s.id !== "review") ?? null;
 }

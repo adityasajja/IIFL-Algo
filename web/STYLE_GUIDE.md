@@ -317,10 +317,11 @@ container; do not add your own max-width.
 
 ### 4.1a Navigation: one story
 
-The product tells one story, **prove a strategy, then trade it**, and the sidebar is that story:
+The product is **paper trading and information only**: it never places a real order. It tells one
+story, **prove a strategy on paper**, and the sidebar is that story:
 
 ```
-PROVE, THEN TRADE   Home -> Strategies -> Test -> Paper -> Live -> Performance
+PROVE IT ON PAPER   Home -> Strategies -> Test -> Paper -> Performance
 MARKET              Markets, Signals, Watchlist
 EXPERIMENTAL        Labs
 ```
@@ -330,7 +331,10 @@ EXPERIMENTAL        Labs
 - Every page has a **name** (sidebar, one word where possible), a **title** and **one plain sentence**
   under it saying what it is for. The path pages start with "Step N".
 - Sidebar names are what the user would say, not what the code calls it: Test, not Evidence or
-  Validate; Live, not Trading; Performance, not Learning.
+  Validate; Performance, not Learning.
+- **No live-trading surface.** No order buttons, no live/real toggle, no broker account page, no
+  real-portfolio figures on Home. Old links to them land on Paper. If the server reports a live mode
+  the header says so in red rather than showing a calm "paper" badge.
 - A tool that is not part of the tested path goes in **Labs**, and Labs says so. Do not add a top-level page
   for an experiment.
 - Home always shows where the user is on the path and the one next step (`lib/journey.ts`).
@@ -350,7 +354,7 @@ The first answer to "is this working?" is a picture, not a paragraph.
   flat line; an unpriced day is flagged, never smoothed.
 - **Charts follow the dataviz rules:** one axis, thin marks, the accent for the thing that matters
   and gray for its yardstick, direct end labels, a crosshair readout, a table view, keyboard access.
-- The limits (practice money, not advice, live orders are yours) are icons with a hover, always on
+- The limits (practice money, not advice, no real orders) are icons with a hover, always on
   Home. Legal wording is for a lawyer; the product's plain version lives in `DataTrust`.
 
 ### 4.2 Showing market numbers

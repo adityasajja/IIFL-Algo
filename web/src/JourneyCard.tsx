@@ -1,4 +1,4 @@
-import { Briefcase, Check, ChartPie, FlaskConical, Layers, Radio, type LucideIcon } from "lucide-react";
+import { Check, ChartPie, FlaskConical, Layers, Radio, type LucideIcon } from "lucide-react";
 import { Tooltip } from "./components/motion/tooltip";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
@@ -10,12 +10,11 @@ const ICON: Record<JourneyStep["id"], LucideIcon> = {
   build: Layers,
   test: FlaskConical,
   paper: Radio,
-  live: Briefcase,
   review: ChartPie,
 };
 
 /**
- * The path from idea to live trading as a rail: a node per step, a line that fills as steps are
+ * The path from idea to a paper track record as a rail: a node per step, a line that fills as steps are
  * done, and one button on the step that is next. The sentence behind each step is a hover, not
  * a paragraph: the picture carries the order and the progress.
  */
@@ -31,7 +30,7 @@ export function JourneyCard({
   const nextIndex = next ? steps.findIndex((s) => s.id === next.id) : steps.length;
   return (
     <Card padding="md">
-      <ol className="flex items-start" aria-label="Path to live trading">
+      <ol className="flex items-start" aria-label="Path from idea to track record">
         {steps.map((s, i) => {
           const Icon = ICON[s.id];
           const isNext = next?.id === s.id;
