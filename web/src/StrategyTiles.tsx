@@ -18,10 +18,10 @@ import { cn } from "./lib/utils";
         <span>
         <span className="font-semibold tabular-nums text-foreground">{running}</span>
         {" "}
-          {running === 1 ? "strategy" : "strategies"} running on paper
+          {running === 1 ? "strategy" : "strategies"} running
         </span>
       </div>
-      <span className="text-xs text-muted-foreground">Open Paper →</span>
+      <span className="text-xs text-muted-foreground">Paper →</span>
     </button>
   );
 }

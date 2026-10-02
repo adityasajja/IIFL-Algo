@@ -43,7 +43,7 @@ export default function EpisodicPivotPanel() {
   if (error) {
     return (
       <Card>
-        <CardHeader title="Episodic Pivot" sub="Pradeep Bonde's playbook" />
+        <CardHeader title="Episodic Pivot" />
         <div className="px-4 pb-4 text-sm text-muted-foreground">{error}</div>
       </Card>
     );
@@ -52,8 +52,8 @@ export default function EpisodicPivotPanel() {
   if (!report) {
     return (
       <Card>
-        <CardHeader title="Episodic Pivot" sub="Loading…" />
-        <div className="px-4 pb-4 text-sm text-muted-foreground">Reading measured results…</div>
+        <CardHeader title="Episodic Pivot" />
+        <div className="px-4 pb-4 text-sm text-muted-foreground">Loading…</div>
       </Card>
     );
   }
@@ -61,10 +61,10 @@ export default function EpisodicPivotPanel() {
   if (!report.available) {
     return (
       <Card>
-        <CardHeader title="Episodic Pivot" sub="Not measured yet" />
+        <CardHeader title="Episodic Pivot" />
         <div className="px-4 pb-4">
           <Callout tone="warn">
-            Produce real numbers first:
+            Not run yet:
             <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               {report.hint ??
                 ".venv/Scripts/python.exe scripts/validate_episodic_pivot.py"}
@@ -86,7 +86,6 @@ export default function EpisodicPivotPanel() {
       <Card>
         <CardHeader
           title="Episodic Pivot — measured"
-          sub="Neglect + catalyst + rapid repricing, on daily bars"
           action={
             <Badge tone={passed > 0 ? "good" : "warn"}>
               {passed}/{scored.length} passed
@@ -94,24 +93,13 @@ export default function EpisodicPivotPanel() {
           }
         />
         <div className="space-y-3 px-4 pb-4">
-          <Callout tone={passed > 0 ? "info" : "warn"}>
-            <span className="font-medium">
-              A daily bar cannot read an earnings release, so the catalyst is
-              proxied by the market's own reaction:
-            </span>{" "}
-            an abnormal gap plus abnormal volume. That is the playbook's own
-            concession in its EP&nbsp;9&nbsp;Million variant — <em>“the volume
-            itself is the clue.”</em> No news feed, no sector tag, no market-cap
-            filter is used.
-            {passed === 0 && scored.length > 0 && (
-              <>
-                {" "}
-                None cleared the bar. Entry fills at the next open and stops are
-                resting sell-stops, so the numbers below are what a daily-bar
-                implementation would actually have paid.
-              </>
-            )}
-          </Callout>
+          {passed === 0 && scored.length > 0 && (
+            <Callout tone="warn">
+              <span title="A daily bar cannot read an earnings release, so the catalyst is proxied by an abnormal gap plus abnormal volume. Entry fills at the next open and stops are resting sell-stops, so these numbers are what a daily-bar implementation would have paid.">
+                None cleared the bar
+              </span>
+            </Callout>
+          )}
 
           {premise.length > 0 && <PremiseTable rows={premise} />}
 
@@ -149,18 +137,15 @@ export default function EpisodicPivotPanel() {
           ))}
 
           <Hint>
-            <span className="font-medium">vs control</span> is a matched control:
-            the same symbols, the same holding periods and the same position
-            sizes, with only the <em>entry date</em> randomised. That is the sharp
-            version of the question, because the playbook's claim is specifically
-            about timing — that the catalyst day is the moment to be long.
-            Anything near or below zero means the timing added nothing.
+            <span title="vs control: same symbols, holding periods and sizes, with only the entry date randomised. Near or below zero means the timing added nothing.">
+              vs control: random entry dates
+            </span>
           </Hint>
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="Per-variant detail" sub="Every check, including the failures" />
+        <CardHeader title="Every check" />
         <div className="space-y-3 px-4 pb-4">
           {universes.flatMap(([uname, u]) =>
             Object.entries(u.variants ?? {}).map(([v, r]) => (
@@ -219,9 +204,7 @@ function PremiseTable({ rows }: { rows: EpisodicPivotPremise[] }) {
     <div className="rounded-lg border border-border/60">
       <div className="border-b border-border/60 px-3 py-2">
         <span className="text-[12.5px] font-medium">Does the pond hold the fish?</span>
-        <span className="ml-2 text-caption text-muted-foreground">
-          measured before any rule was scored
-        </span>
+
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-[12.5px]">

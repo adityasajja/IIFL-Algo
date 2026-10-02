@@ -559,8 +559,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             <ListChecks className="size-7" />
         </span>
         <div>
-            <div className="text-heading text-foreground">Follow the stocks you care about</div>
-            <p className="mt-2 text-sm font-light text-muted-foreground">Make a list and watch live prices.</p>
+            <div className="text-heading text-foreground">Watchlist</div>
         </div>
         {mayWrite ? (
           <div className="flex w-full items-center gap-2">
@@ -579,7 +578,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             </Button>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Ask an owner to create one.</p>
+          <p className="text-sm text-muted-foreground">Ask an owner</p>
         )}
       </Card>
       </div>
@@ -640,7 +639,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
         {lists && lists.length === 0 && !renaming ? (
           <div className="grid justify-items-center gap-2.5 px-2 py-6 text-center">
             <Hint>
-              {mayWrite ? "Group the symbols you follow." : "Ask an owner to create one."}
+              {mayWrite ? "No lists" : "Ask an owner"}
             </Hint>
             {mayWrite ? (
               <Button
@@ -689,8 +688,8 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             {error
               ? error
               : lists && lists.length === 0
-                ? "Your watchlists and their live quotes appear here."
-                : "Select a watchlist. Every list is scoped to your account."}
+                ? "No lists"
+                : "Select a list"}
           </Hint>
         ) : (
           <>

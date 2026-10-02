@@ -813,20 +813,33 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
         </p>
       ) : null}
 
-      {analysis.breakdowns.map((bd) => (
-        <div key={bd.axis} className="mt-4">
-          <div className="flex items-center justify-between">
+      {analysis.breakdowns.map((bd) => {
+        // One summary line per condition. The table opens only when some bucket is big enough to
+        // judge; with a small sample nearly every bucket is "suppressed" and the tables are noise.
+        const views = bucketViews(bd.buckets, analysis.metric);
+        const judgeable = views.filter((b) => !b.suppressed && b.enoughToJudge).length;
+        return (
+        <details key={bd.axis} className="mt-3 rounded-lg border border-border/60" open={judgeable > 0 && views.length > 1}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
             <h4 className="text-body font-medium">{bd.label}</h4>
             <span className="text-caption text-muted-foreground">
-              coverage {coverageLabel(bd)}
+              {bd.buckets.length === 0
+                ? "no data"
+                : views.length === 1
+                  ? "1 group"
+                  : judgeable > 0
+                    ? `${judgeable} of ${views.length} judgeable`
+                    : "too few trades"}
+              {" · "}
+              {coverageLabel(bd)}
             </span>
-          </div>
+          </summary>
           {bd.buckets.length === 0 ? (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="px-3 pb-2 text-xs text-muted-foreground">
               No data
             </p>
           ) : (
-            <div className="mt-2 overflow-x-auto">
+            <div className="overflow-x-auto border-t border-border/60">
               <table className="w-full text-xs">
                 <thead className="text-left text-muted-foreground">
                   <tr className="border-b border-border/60">
@@ -843,7 +856,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {bucketViews(bd.buckets, analysis.metric).map((b) => (
+                  {views.map((b) => (
                     <tr key={b.label} className="border-b border-border/30 last:border-0">
                       <td className="px-3 py-1.5 font-medium">{b.label}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{b.n}</td>
@@ -894,8 +907,9 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
               </table>
             </div>
           )}
-        </div>
-      ))}
+        </details>
+        );
+      })}
 
       {starved.length ? (
         <p

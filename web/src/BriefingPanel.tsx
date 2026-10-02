@@ -90,9 +90,9 @@ export default function BriefingPanel() {
               : `Sent via ${res.sent_on}`,
         description:
           res.sent_on === "none"
-            ? "Configure Telegram first."
+            ? "Set up Telegram"
             : res.sent_on === "disabled"
-              ? "Flip the sending toggle below."
+              ? "Turn on sending"
               : "Check Telegram.",
         status: res.sent_on !== "none" && res.sent_on !== "disabled" ? "success" : "info",
       });
@@ -199,29 +199,25 @@ export default function BriefingPanel() {
           className="flex w-full items-center justify-between px-5 py-4 text-left"
         >
           <span>
-            <span className="block text-sm font-semibold tracking-tight">Send it every morning</span>
-            <span className="mt-0.5 block text-xs text-muted-foreground">One-time setup on Windows</span>
+            <span className="block text-sm font-semibold tracking-tight">Automate (Windows)</span>
+            
           </span>
           <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", showAutomation && "rotate-180")} />
         </button>
         {showAutomation ? (
           <div className="space-y-3 border-t border-border p-5 text-body">
             <div>
-              <Hint>1 · Refresh data after the market closes (4 PM):</Hint>
+              <Hint><span title="Run each once in an admin terminal and keep the computer on. The 4 PM refresh needs a broker login.">1 · Refresh, 4 PM</span></Hint>
               <code className="mt-1 block overflow-x-auto rounded-lg border border-border bg-background p-3 font-mono text-xs">
                 {SYNC_CMD}
               </code>
             </div>
             <div>
-              <Hint>2 · Send the brief before the market opens (8:45 AM):</Hint>
+              <Hint>2 · Send brief, 8:45 AM</Hint>
               <code className="mt-1 block overflow-x-auto rounded-lg border border-border bg-background p-3 font-mono text-xs">
                 {BRIEF_CMD}
               </code>
             </div>
-            <Hint>
-              Run each once in an admin terminal, and keep the computer on. The morning brief needs no
-              broker login. The 4 PM refresh does, so log in once each morning.
-            </Hint>
           </div>
         ) : null}
       </Card>

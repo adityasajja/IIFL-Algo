@@ -136,8 +136,8 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
         title: res.count > 0 ? `🚨 ${res.count} Signal(s) Triggered!` : "Evaluation Finished",
         description:
           res.count > 0
-            ? "Actionable signals dispatched to Telegram and logged below."
-            : "All monitored stocks healthy; no sell/buy triggers met right now.",
+            ? "Sent to Telegram"
+            : "All clear",
         status: res.count > 0 ? "success" : "info",
       });
       await refresh();
@@ -218,7 +218,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             : `Test sent via ${res.sent_on}`,
         description:
           res.sent_on === "none" || res.sent_on === "log"
-            ? "Add TELEGRAM_BOT_TOKEN + CHAT_ID to .env to receive notifications."
+            ? "Telegram not set up"
             : "Check your Telegram channel/chat.",
         status: res.sent_on === "none" || res.sent_on === "log" ? "info" : "success",
       });
@@ -242,7 +242,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold text-foreground tracking-wide">
+                <h2 className="text-base font-semibold text-foreground tracking-wide" title="Watches your stocks and messages you on Telegram when something needs attention.">
                   Smart alerts
                 </h2>
                 <span
@@ -262,9 +262,6 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
                   {intelConfig?.enabled ? "On" : "Paused"}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Watches your stocks and messages you on Telegram when something needs attention.
-              </p>
             </div>
           </div>
 
@@ -285,7 +282,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {evaluating ? (
                 <>
                   <RotateCw size={13} className="mr-1.5 animate-spin" />
-                  Evaluating Market…
+                  Checking…
                 </>
               ) : (
                 <>
@@ -303,8 +300,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             {/* Master Switch */}
             <div className="flex items-center justify-between rounded-md bg-card/70 p-3 border border-border/60">
               <div>
-                <div className="text-xs font-semibold text-foreground">Run automatically</div>
-                <div className="text-caption text-muted-foreground">During market hours</div>
+                <div className="text-xs font-semibold text-foreground" title="During market hours">Run automatically</div>
               </div>
               <Switch
                 checked={intelConfig.enabled}
@@ -371,16 +367,14 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-foreground">When to sell</h3>
-                <p className="text-caption text-muted-foreground">Warnings that it may be time to exit</p>
-              </div>
+                              </div>
             </div>
 
             <div className="mt-3 divide-y divide-border/60">
               {/* Trend Breakdown (SMA 20) */}
               <div className="flex items-center justify-between py-2.5">
                 <div>
-                  <div className="text-xs font-semibold text-foreground">Falls below its 20-day average</div>
-                  <div className="text-caption text-muted-foreground">The trend may be turning down</div>
+                  <div className="text-xs font-semibold text-foreground" title="The trend may be turning down">Falls below its 20-day average</div>
                 </div>
                 <Switch
                   checked={intelConfig.sell_sma_breakdown}
@@ -391,8 +385,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* RSI Overbought Reversal */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-foreground">Looks overbought</div>
-                  <div className="text-caption text-muted-foreground">Price has run up hard and may pull back</div>
+                  <div className="text-xs font-semibold text-foreground" title="Price has run up hard and may pull back">Looks overbought</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-caption text-muted-foreground">RSI ≥</span>
@@ -412,8 +405,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Trailing Stop Drop from Peak */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-foreground">Drops from its recent high</div>
-                  <div className="text-caption text-muted-foreground">Falls this much from its 20-day high</div>
+                  <div className="text-xs font-semibold text-foreground" title="Falls this much from its 20-day high">Drops from its recent high</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-caption text-muted-foreground">Drop %</span>
@@ -433,8 +425,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Take-Profit Target */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-foreground">Profit target reached</div>
-                  <div className="text-caption text-muted-foreground">A holding is up this much</div>
+                  <div className="text-xs font-semibold text-foreground" title="A holding is up this much">Profit target reached</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-caption text-muted-foreground">+%</span>
@@ -454,8 +445,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Stop-Loss Cut */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-foreground">Loss limit reached</div>
-                  <div className="text-caption text-muted-foreground">A holding is down this much</div>
+                  <div className="text-xs font-semibold text-foreground" title="A holding is down this much">Loss limit reached</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-caption text-muted-foreground">-%</span>
@@ -475,10 +465,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Capital Rotation: a winner that stopped moving */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                <div className="text-xs font-semibold text-foreground">Gone quiet after a run-up</div>
-                  <div className="text-caption text-muted-foreground">
-                  Up, then flat for a while — names something else moving now to rotate into instead
-                  </div>
+                <div className="text-xs font-semibold text-foreground" title="Up, then flat for a while — names something else moving now to rotate into instead">Gone quiet after a run-up</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Switch
@@ -533,16 +520,14 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-foreground">When to buy</h3>
-                <p className="text-caption text-muted-foreground">Signs of a possible entry</p>
-              </div>
+                              </div>
             </div>
 
             <div className="mt-3 divide-y divide-border/60">
               {/* Golden Cross */}
               <div className="flex items-center justify-between py-2.5">
                 <div>
-                  <div className="text-xs font-semibold text-foreground">Short-term average crosses above long-term</div>
-                  <div className="text-caption text-muted-foreground">The 20-day average just moved above the 50-day</div>
+                  <div className="text-xs font-semibold text-foreground" title="The 20-day average just moved above the 50-day">Short-term average crosses above long-term</div>
                 </div>
                 <Switch
                   checked={intelConfig.buy_golden_cross}
@@ -553,8 +538,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Oversold Dip Bounce */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-foreground">Looks oversold</div>
-                  <div className="text-caption text-muted-foreground">Price has dropped hard and may bounce</div>
+                  <div className="text-xs font-semibold text-foreground" title="Price has dropped hard and may bounce">Looks oversold</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-caption text-muted-foreground">RSI ≤</span>
@@ -574,8 +558,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Breakout with Volume */}
               <div className="flex items-center justify-between py-2.5">
                 <div>
-                  <div className="text-xs font-semibold text-foreground">Breakout on heavy trading</div>
-                  <div className="text-caption text-muted-foreground">Hits a 20-day high on unusually heavy volume</div>
+                  <div className="text-xs font-semibold text-foreground" title="Hits a 20-day high on unusually heavy volume">Breakout on heavy trading</div>
                 </div>
                 <Switch
                   checked={intelConfig.buy_breakout_vol}
@@ -586,8 +569,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
               {/* Alert Cooldown */}
               <div className="flex items-center justify-between py-2.5">
                 <div className="pr-3">
-                  <div className="text-xs font-semibold text-foreground">Don't repeat within</div>
-                  <div className="text-caption text-muted-foreground">Avoids repeat messages about the same stock</div>
+                  <div className="text-xs font-semibold text-foreground" title="Avoids repeat messages about the same stock">Don't repeat within</div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <input
@@ -668,7 +650,7 @@ export default function AlertsPanel({ onOpenChart }: { onOpenChart?: (tab: strin
             })
           ) : (
             <div className="py-6 text-center text-xs text-muted-foreground">
-              No alerts yet.
+              None yet
             </div>
           )}
         </div>

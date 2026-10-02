@@ -186,10 +186,7 @@ function PendingRow({
               {sig.symbol.replace("-EQ", "")}
             </Button>
             </Tooltip>
-            <span className="text-xs text-muted-foreground">{sig.setup}</span>
-          </div>
-          <div className="mt-1 truncate text-xs text-muted-foreground" title={sig.reason}>
-            {sig.reason}
+            <span className="text-xs text-muted-foreground" title={sig.reason}>{sig.setup}</span>
           </div>
         </div>
 
@@ -225,13 +222,13 @@ function PendingRow({
 
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>
-          <span className="font-medium text-foreground">{sig.quantity}</span> shares
+          <span className="font-medium text-foreground">{sig.quantity}</span> qty
         </span>
         <span>
-          Risking <span className="font-medium text-destructive">₹{fmt(sig.risk_amount, 0)}</span>
+          Risk <span className="font-medium text-destructive">₹{fmt(sig.risk_amount, 0)}</span>
         </span>
         <span>
-        Reward is <span className="font-medium text-gain">{sig.rr_ratio.toFixed(1)}x</span> the risk
+        <span className="font-medium text-gain">{sig.rr_ratio.toFixed(1)}x</span> reward
         </span>
         {sig.setup_median_days_to_target != null ? (
           <span
@@ -241,9 +238,8 @@ function PendingRow({
                 : undefined
             }
           >
-          Target in <span className="font-medium text-foreground">~{sig.setup_median_days_to_target}</span>{" "}
-            sessions historically
-            {sig.setup_hit_rate_pct != null ? ` (${sig.setup_hit_rate_pct}% hit rate)` : ""}
+          <span className="font-medium text-foreground">~{sig.setup_median_days_to_target}</span> days to target
+            {sig.setup_hit_rate_pct != null ? ` · ${sig.setup_hit_rate_pct}% hit` : ""}
           </span>
         ) : null}
         <span className="ml-auto flex items-center gap-3">
@@ -626,7 +622,7 @@ export default function TradeSignalsPanel({
             onChange={(patch) => setLocalSettings((s) => s ? { ...s, ...patch } : s)}
           />
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
-            <span className="text-xs text-muted-foreground">Changes apply to new signals only.</span>
+            <span className="text-xs text-muted-foreground" title="Changes apply to new signals only.">New signals only</span>
             <Tooltip content="Retrain the signal model on the stock history" side="top" delay={400}>
             <Button
               variant="outline"
@@ -669,7 +665,7 @@ export default function TradeSignalsPanel({
           ) : null}
         </div>
         {pending.length === 0 ? (
-          <Hint>Nothing waiting. Press Scan now to look for setups.</Hint>
+          <Hint>Nothing waiting</Hint>
         ) : (
           <>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
@@ -705,10 +701,8 @@ export default function TradeSignalsPanel({
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gain px-1.5 text-caption font-semibold text-white">
               {active.length}
             </span>
-            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-            <span className="text-xs text-muted-foreground">
-              Stop-loss and target orders are live in IIFL
-            </span>
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" aria-label="Stop-loss and target orders are live in IIFL" />
+            <span className="sr-only">Stop-loss and target orders are live in IIFL</span>
           </div>
           <div className="space-y-2">
             {active.map((s) => <ActiveRow key={s.id} sig={s} />)}

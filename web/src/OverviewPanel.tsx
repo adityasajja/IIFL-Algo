@@ -188,7 +188,7 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
   // (which links to Risk), and a disconnected broker is in the status strip
   // with Log in in the app bar, so neither gets its own row here.
   if (health?.session_active && feedStatus === "ERROR") {
-    todo.push({ id: "prices", tone: "warn", text: "Live prices are off right now." });
+    todo.push({ id: "prices", tone: "warn", text: "Live prices off" });
   }
 
   const steps = journeySteps({
@@ -322,9 +322,7 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
               </span>
             ) : null}
           </div>
-          <Hint className="mt-2">
-            {runningDeployments.length > 0 ? "Practising with live prices" : "None yet"}
-          </Hint>
+          {runningDeployments.length === 0 ? <Hint className="mt-2">None</Hint> : null}
         </Card>
 
         {/* Signals: who is waiting for a decision. */}
@@ -357,14 +355,14 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
               ))}
             </div>
           ) : (
-            <Hint className="mt-2">Nothing waiting</Hint>
+            <Hint className="mt-2">None</Hint>
           )}
         </Card>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
-        <PnlCalendar scope="paper" title="Paper trades, all strategies" note="Some paper results are sized at ₹1,00,000 a trade." />
-        <PnlCalendar scope="real" title="My portfolio" note="Daily change in what you hold." />
+        <PnlCalendar scope="paper" title="Paper trades, all strategies" note="₹1,00,000 a trade" />
+        <PnlCalendar scope="real" title="My portfolio" />
       </div>
 
     </div>

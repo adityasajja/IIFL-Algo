@@ -195,7 +195,6 @@ function EmptyRecord({
             <Button onClick={onStartStarter} disabled={starting}>
               {starting ? "Starting\u2026" : "Try a ready-made strategy"}
             </Button>
-            <div className="text-caption text-muted-foreground">{"\u20B95,00,000 of practice money, no signup, no real orders"}</div>
             <Button size="inline" variant="link" className="text-xs" onClick={onBuild}>
               Or build your own
             </Button>
@@ -343,7 +342,9 @@ function Filled({ data, view, refreshing }: { data: TrackRecord; view: "chart" |
 
       {thin ? (
         <Callout tone="info">
-          {days} {days === 1 ? "day" : "days"} so far. A few weeks is luck as much as skill; it starts to mean something after {MIN_MEANINGFUL_DAYS}.
+          <span title={`A few weeks is luck as much as skill; it starts to mean something after ${MIN_MEANINGFUL_DAYS} days.`}>
+            Too early to judge: {days} of {MIN_MEANINGFUL_DAYS} days
+          </span>
         </Callout>
       ) : null}
     </div>

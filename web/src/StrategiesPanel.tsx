@@ -613,7 +613,7 @@ function ConditionGroup({
   return (
     <div className="space-y-2.5 rounded-lg border border-border p-3.5">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-medium text-foreground">{title}</div>
+        <div className="text-sm font-medium text-foreground" title={hint}>{title}</div>
         {conditions.length > 1 && (
           <Tabs value={join} onValueChange={(v) => onJoinChange(v as "and" | "or")} variant="segment">
             <TabsList>
@@ -624,8 +624,7 @@ function ConditionGroup({
           </Tabs>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">{hint}</p>
-      <div className="space-y-2">
+            <div className="space-y-2">
         {conditions.map((c, i) => (
           <ConditionRow
             key={c.id}
@@ -814,7 +813,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                     </div>
                   ))}
                   {versions.length === 0 && (
-                    <div className="px-4 py-3 text-xs text-muted-foreground">No versions yet.</div>
+                    <div className="px-4 py-3 text-xs text-muted-foreground">No versions</div>
                   )}
                 </div>
 
@@ -906,21 +905,11 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                       ))}
                     </div>
                     {rules.kind === "triple" && (
-              <p className="mt-2.5 text-xs text-muted-foreground">
-                        Buys after three falling days, in a stock above its 200-day average. Decides in the last 15 minutes of the day. Sells when the 5-day RSI recovers.
-                      </p>
+              <p className="mt-2.5 text-xs text-muted-foreground">3 down days, above 200-day average · sells on RSI recovery</p>
                     )}
                     {rules.kind === "gap" && (
-              <p className="mt-2.5 text-xs text-muted-foreground">
-                        Mondays only, within 15 minutes of the open. Sells at the target or stop, else at Friday's close. Needs the broker login for live prices.
-                      </p>
+              <p className="mt-2.5 text-xs text-muted-foreground">Mondays at the open · target, stop, else Friday</p>
                     )}
-            {rules.kind === "custom" && (
-              <p className="mt-2.5 text-xs text-muted-foreground">
-              Build buy/sell conditions from indicators and chart patterns — no code. Runs on the same rule
-              engine as every other strategy here.
-              </p>
-            )}
           </div>
 
           {rules.kind === "custom" ? (
@@ -1001,12 +990,8 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                   onChange={(e) => setRules({ ...rules, customBlendBuiltins: e.target.checked })}
                   className="mt-0.5 size-4 rounded-md border-border accent-primary"
                 />
-                <span>
-                Also fire on the built-in setups (trend pullback, breakout, RSI oversold, triple RSI, Monday
-                gap) at their own default settings, independent of "Buy when" above.
-                  <span className="block text-xs text-muted-foreground">
-                  Off means "Buy when" is the entire entry condition — nothing else can open a position.
-                  </span>
+                <span title={`Built-in setups (trend pullback, breakout, RSI oversold, triple RSI, Monday gap) fire at their own defaults, independent of "Buy when". Off means "Buy when" is the entire entry condition.`}>
+                  Also use built-in setups
                 </span>
               </label>
 
@@ -1034,10 +1019,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
                   className="flex w-full items-center justify-between px-3.5 py-3 text-left"
                 >
                   <div>
-                  <div className="text-sm font-medium text-foreground">Advanced exit &amp; sizing</div>
-                    <div className="text-xs text-muted-foreground">
-                    Take-profit, trailing stop, RSI/trend exits, ATR chandelier, allocation, position count — every knob "Sell when" doesn't cover.
-                    </div>
+                  <div className="text-sm font-medium text-foreground" title="Take-profit, trailing stop, RSI/trend exits, ATR chandelier, allocation, position count">Advanced exit &amp; sizing</div>
                   </div>
                   <ChevronDown
                   className={cn("size-4 shrink-0 text-muted-foreground transition-transform", rules.customShowAdvancedExit && "rotate-180")}
@@ -1283,7 +1265,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
             <SummaryStat
               label="Paper P&L"
               value={hasPnl ? totalPnl : null}
-              sub={hasPnl ? (totalPnl === 0 ? "flat since start" : "since start, after costs") : "no data yet"}
+              sub={hasPnl ? (totalPnl === 0 ? "flat since start" : "since start") : "none"}
               accent={hasPnl && totalPnl > 0}
               bad={hasPnl && totalPnl < 0}
               isMoney
@@ -1292,7 +1274,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
             <SummaryStat
               label="Never deployed"
               value={neverDeployedCount}
-              sub={neverDeployedCount === 0 ? "all tested on paper" : "untested strategies"}
+              sub={neverDeployedCount === 0 ? "none" : "not on paper"}
               accent={false}
             />
           </div>
@@ -1302,10 +1284,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
         {noVersionCount > 0 && (
           <div className="flex items-start gap-2.5 rounded-xl border border-warning/20 bg-warning/5 px-3.5 py-2.5 text-xs text-warning">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-            <span>
-            <span className="font-medium">{noVersionCount} {noVersionCount === 1 ? "strategy has" : "strategies have"} no version yet</span>
-              {" — "}set rules and save a version before you can deploy or backtest.
-            </span>
+            <span className="font-medium">{noVersionCount} without a saved version</span>
           </div>
         )}
 
@@ -1315,7 +1294,7 @@ function Authoring({ deployments, onOpenPaper }: { deployments: Deployment[]; on
         )}
 
         {saved.length === 0 ? (
-          <div className="py-4 text-center text-sm text-muted-foreground">No strategy of your own yet.</div>
+          <div className="py-4 text-center text-sm text-muted-foreground">No strategies</div>
         ) : (
           <>
 
@@ -1510,11 +1489,10 @@ function ValidationReport({ report }: { report: StrategyValidation }) {
 
       {report.paper.default_fields && report.paper.default_fields.length > 0 && (
         <div className="mt-2 text-[11.5px] text-muted-foreground">
-          {report.paper.default_fields.length} rule fields left at their defaults
-          {report.paper.authored_fields?.length
-            ? `; you set ${report.paper.authored_fields.length}`
-            : ""}
-          . Those defaults are the module's starting points, not findings.
+          <span title="Defaults are starting points, not findings.">
+            {report.paper.default_fields.length} fields at default
+            {report.paper.authored_fields?.length ? ` · ${report.paper.authored_fields.length} set` : ""}
+          </span>
         </div>
       )}
 

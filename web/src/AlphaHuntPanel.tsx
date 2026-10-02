@@ -36,7 +36,7 @@ export default function AlphaHuntPanel() {
   if (error) {
     return (
       <Card>
-        <CardHeader title="Candidate edges" sub="Pre-registered hypotheses" />
+        <CardHeader title="Candidate edges" />
         <div className="px-4 pb-4 text-sm text-muted-foreground">{error}</div>
       </Card>
     );
@@ -45,8 +45,8 @@ export default function AlphaHuntPanel() {
   if (!report) {
     return (
       <Card>
-        <CardHeader title="Candidate edges" sub="Loading…" />
-        <div className="px-4 pb-4 text-sm text-muted-foreground">Reading results…</div>
+        <CardHeader title="Candidate edges" />
+        <div className="px-4 pb-4 text-sm text-muted-foreground">Loading…</div>
       </Card>
     );
   }
@@ -54,10 +54,10 @@ export default function AlphaHuntPanel() {
   if (!report.available) {
     return (
       <Card>
-        <CardHeader title="Candidate edges" sub="Not measured yet" />
+        <CardHeader title="Candidate edges" />
         <div className="px-4 pb-4">
           <Callout tone="warn">
-            Run the harness first:
+            Not run yet:
             <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               {report.hint ?? ".venv/Scripts/python.exe scripts/research_alpha_hunt.py"}
             </code>
@@ -78,7 +78,6 @@ export default function AlphaHuntPanel() {
       <Card>
         <CardHeader
           title="Candidate edges — pre-registered"
-          sub="Priors and parameter grids fixed before any result was seen"
           action={
             <Badge tone={passed > 0 ? "good" : "warn"}>
               {passed}/{scored.length} passed
@@ -86,22 +85,13 @@ export default function AlphaHuntPanel() {
           }
         />
         <div className="space-y-3 px-4 pb-4">
-          <Callout tone={passed > 0 ? "info" : "warn"}>
-            <span className="font-medium">
-              Every candidate is scored against a null that removes only its signal.
-            </span>{" "}
-            Reversal is compared to the same universe and cadence with{" "}
-            <em>random names</em>; the exposure overlays to the same exposure
-            sequence with the <em>dates shifted</em> — same sizing, wrong days.
-            {passed === 0 && scored.length > 0 && (
-              <>
-                {" "}
-                None cleared the bar. Two of them are directionally positive but
-                under-powered at this sample size, which is a different verdict
-                from "wrong" — see the note underneath.
-              </>
-            )}
-          </Callout>
+          {passed === 0 && scored.length > 0 && (
+            <Callout tone="warn">
+              <span title="Each candidate is scored against a null that removes only its signal. Two are directionally positive but under-powered at this sample size, which is a different verdict from wrong.">
+                None cleared the bar
+              </span>
+            </Callout>
+          )}
 
           {universes.map(([name, u]) => (
             <div key={name} className="space-y-2">
@@ -140,12 +130,11 @@ export default function AlphaHuntPanel() {
 
       {Object.keys(priors).length > 0 && (
         <Card>
-          <CardHeader title="Why these three" sub="The prior, and the condition that falsifies it" />
+          <CardHeader title="Why these three" />
           <div className="space-y-3 px-4 pb-4">
             {Object.entries(priors).map(([name, spec]) => (
               <div key={name} className="rounded-lg border border-border/60 p-3">
-                <div className="text-body font-medium">{prettyName(name)}</div>
-                <div className="mt-0.5 text-[12.5px] text-muted-foreground">{spec.prior}</div>
+                <div className="text-body font-medium" title={spec.prior}>{prettyName(name)}</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {Object.entries(spec.grid).map(([param, values]) => (
                     <span
@@ -163,7 +152,7 @@ export default function AlphaHuntPanel() {
       )}
 
       <Card>
-        <CardHeader title="Every check, including the failures" sub="Per candidate and universe" />
+        <CardHeader title="Every check" />
         <div className="space-y-3 px-4 pb-4">
           {universes.flatMap(([uname, u]) =>
             Object.entries(u.hypotheses ?? {}).map(([h, r]) => (
@@ -208,13 +197,11 @@ export default function AlphaHuntPanel() {
       </Card>
 
       <Hint>
-        <span className="font-medium">vs control</span> is a t-statistic, not a
-        z-score: the control&apos;s spread is estimated from a handful of runs, so
-        the threshold is the one-sided 95% t value at that many degrees of freedom
-        — <span className="font-medium">2.92</span> at 3 runs,{" "}
-        <span className="font-medium">1.90</span> at 8. A flat "2 sigma" would
-        pass comparisons the data cannot support. The first run of this harness
-        reported +2.51σ off three control runs; with eight it was +0.56σ.
+        <span
+          title="vs control is a t-statistic, not a z-score: the control's spread comes from a handful of runs, so the threshold is the one-sided 95% t value at that many degrees of freedom (2.92 at 3 runs, 1.90 at 8)."
+        >
+          vs control: t-statistic
+        </span>
       </Hint>
 
       <Hint>

@@ -124,8 +124,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               </span>
               <span className="text-xs text-muted-foreground">market</span>
             </div>
-            <p className="mt-3 max-w-xl text-sm">{m.headline}</p>
-            <Hint className="mt-1 max-w-xl">{m.context}</Hint>
+            <p className="mt-3 max-w-xl text-sm" title={m.context}>{m.headline}</p>
           </div>
           {m.nifty_close != null && (
             <div className="text-right">
@@ -152,7 +151,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
         )}
         {digest.stale && digest.data_as_of && (
           <div className="mt-3 text-xs text-warning">
-            Stock data is from {dateLabel(digest.data_as_of)} ({digest.stale_days} days old), so the lists below describe that day.
+            Data from {dateLabel(digest.data_as_of)} ({digest.stale_days}d old)
           </div>
         )}
       </Card>
@@ -160,13 +159,10 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
       <div className="grid gap-4 xl:grid-cols-2">
         {/* Things worth considering buying, only setups that held up in history. */}
         <Card>
-          <CardHeader
-            title="Worth a look"
-            sub="backed by history · beat the average in both halves"
-          />
-          {marketNote && <div className="px-5 pt-2 text-xs text-warning">{marketNote}</div>}
+          <CardHeader title="Worth a look" />
+          {marketNote && <div className="px-5 pt-2 text-xs text-warning" title={marketNote}>Market caution</div>}
           {digest.ideas.length === 0 ? (
-            <div className="px-5 py-8 text-sm text-muted-foreground">Nothing matches today.</div>
+            <div className="px-5 py-8 text-sm text-muted-foreground">Nothing today</div>
           ) : (
             <div className="mt-3 divide-y divide-border">
               {digest.ideas.map((i) => (
@@ -183,7 +179,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
             sub={held.source === "snapshot" && held.as_of ? `as of ${formatIst(held.as_of)}` : undefined}
           />
           {held.items.length === 0 ? (
-            <div className="px-5 py-8 text-sm text-muted-foreground">No holdings on record yet.</div>
+            <div className="px-5 py-8 text-sm text-muted-foreground">No holdings</div>
           ) : (
             <div className="mt-3 divide-y divide-border">
               {flagged.map((h) => (
@@ -217,7 +213,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               ))}
               {calm > 0 && (
                 <div className="px-5 py-3 text-xs text-muted-foreground">
-                  {calm} {calm === 1 ? "holding looks" : "holdings look"} fine.
+                  {calm} fine
                 </div>
               )}
             </div>
@@ -247,7 +243,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
         </Card>
       )}
 
-      <Hint className="px-1 text-caption">{digest.disclaimer}</Hint>
+      <Hint className="px-1 text-caption"><span title={digest.disclaimer}>Not advice</span></Hint>
     </div>
   );
 }
@@ -305,25 +301,24 @@ function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onO
   return (
     <Card className="p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-sm font-semibold">Live test</span>
-        <AnimatedBadge status={animStatus} pulse={t.state === "working"} size="sm">
-          {t.verdict}
-        </AnimatedBadge>
+        <span className="text-sm font-semibold" title={`${t.description}. Each Friday's picks are written down, then graded a week later on whether they gained 2% or more.`}>Live test</span>
+        <span title={t.verdict}>
+          <AnimatedBadge status={animStatus} pulse={t.state === "working"} size="sm">
+            {t.graded < t.needed ? "Too early" : t.verdict}
+          </AnimatedBadge>
+        </span>
       </div>
-      <Hint className="mt-1">
-        {t.description}. Each Friday's picks are written down, then graded a week later on whether they gained 2% or more.
-      </Hint>
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Stat
           label="Hit rate"
           value={t.hit_rate_pct == null ? "—" : `${t.hit_rate_pct}%`}
-          sub={t.range_pct ? `likely ${t.range_pct[0]}–${t.range_pct[1]}%` : "no graded picks yet"}
+          sub={t.range_pct ? `${t.range_pct[0]}–${t.range_pct[1]}%` : undefined}
         />
         <Stat
         label="Any stock"
         value={`${t.base_rate_pct}%`}
-        sub="ordinary rate"
+        
         />
         <Stat
           label="Avg week"
@@ -335,8 +330,8 @@ function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onO
 
       <div className="mt-4">
         <div className="mb-1 flex justify-between text-caption text-muted-foreground">
-          <span>{t.graded} of {t.needed} picks graded</span>
-          <span>{t.open.length} waiting on this week</span>
+          <span>{t.graded} / {t.needed} graded</span>
+          <span>{t.open.length} open</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
@@ -345,7 +340,7 @@ function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onO
 
       {t.open.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">This week's picks</span>
+          <span className="text-xs text-muted-foreground">This week</span>
           {t.open.map((s) => (
             <Tooltip key={`${s.entry_date}-${s.symbol}`} content={`Picked ${s.entry_date} at ${inr(s.entry_close)}`} side="top" delay={400}>
             <Button
@@ -372,7 +367,7 @@ function PlanStat({ label, stats }: { label: string; stats: GapPlanStats }) {
     <Stat
       label={label}
       value={stats.graded === 0 ? "No trades" : `${signed(stats.avg_net_pct ?? 0, 2)}`}
-      sub={stats.graded === 0 ? "Waiting on data" : `${stats.win_rate_pct}% hit target · ${stats.graded} trades`}
+      sub={stats.graded === 0 ? undefined : `${stats.win_rate_pct}% hit · ${stats.graded} trades`}
       tone={stats.graded === 0 ? "neutral" : good ? "good" : "bad"}
     />
   );
@@ -385,32 +380,37 @@ function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (s
   return (
     <Card className="p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-sm font-semibold">Monday gap plan</span>
-        <Badge tone="flat">paper trades, no money at risk</Badge>
+        <span
+          className="text-sm font-semibold"
+          title={`After a rising week, buy stocks that open more than ${Math.abs(p.plan.gap_pct)}% below Friday's close. Sell at +${p.plan.target_pct}%, stop at −${p.plan.stop_pct}%, otherwise sell Friday.`}
+        >
+          Monday gap plan
+        </span>
+        <Badge tone="flat">Paper</Badge>
       </div>
-      <Hint className="mt-1">
-        After a rising week, buy stocks that open more than {Math.abs(p.plan.gap_pct)}% below Friday's close. Sell at +{p.plan.target_pct}%, stop at −{p.plan.stop_pct}%, otherwise sell Friday.
-      </Hint>
+      <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+        gap −{Math.abs(p.plan.gap_pct)}% · target +{p.plan.target_pct}% · stop −{p.plan.stop_pct}%
+      </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <span className={cn("rounded-full px-3 py-1 text-sm font-semibold", CALL_TONE[w.status])}>
           {w.status === "trade" ? "This week: trade" : w.status === "skip" ? "This week: skip" : "This week: no reading"}
         </span>
         {w.median_pct != null && (
-          <span className="text-xs text-muted-foreground">
-            Last week the typical stock moved {signed(w.median_pct, 2)}; the plan needs more than +{w.needed_pct}%.
+          <span className="text-xs tabular-nums text-muted-foreground">
+            Last week {signed(w.median_pct, 2)} · needs +{w.needed_pct}%
           </span>
         )}
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <PlanStat label={`Live since ${p.live_from ?? "—"}`} stats={p.live} />
-        <PlanStat label="Replay of recent weeks" stats={p.replay} />
+        <PlanStat label="Replay" stats={p.replay} />
       </div>
       <div className="mt-3">
         <div className="mb-1 flex justify-between text-caption text-muted-foreground">
-          <span>{p.live.graded} of {p.needed} live trades graded</span>
-          <span>{p.verdict}</span>
+          <span>{p.live.graded} / {p.needed} graded</span>
+          <span title={p.verdict}>{p.live.graded < p.needed ? "Too early" : p.verdict}</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />

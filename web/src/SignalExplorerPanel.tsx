@@ -323,9 +323,7 @@ function SignalsPanel() {
         <PageLoader label="Loading signals" />
       ) : items.length === 0 ? (
         <Card padding="md" className="text-xs text-muted-foreground">
-          No enriched signal matches these filters yet. Contexts are written when a
-          paper/live bar fires or when a backtest completes — an empty panel means
-          none has happened, not that scoring failed.
+          No signals match
         </Card>
       ) : (
         <div className="overflow-x-auto">
@@ -449,11 +447,10 @@ function AnalyticsPanel() {
               className="w-[160px]"
             />
           </div>
-          <Button id="analytics-run" size="xs" onClick={run} disabled={loading}>
+          <Button id="analytics-run" size="xs" title={desc} onClick={run} disabled={loading}>
             {loading ? "Analyzing…" : "Analyze"}
           </Button>
         </div>
-        <div className="mt-1.5 text-caption text-muted-foreground">{desc}</div>
       </Card>
 
       {error && <ErrorBanner msg={error} />}
@@ -613,11 +610,6 @@ function EffectivenessPanel() {
             {loading ? "Measuring…" : "Measure"}
           </Button>
         </div>
-        <div className="mt-1.5 text-caption text-muted-foreground">
-          Bands are compared to their complement within the same evidence class — never to
-          zero. The score is the share of conditions met, not a probability of profit, and
-          nothing here changes it.
-        </div>
       </Card>
 
       {error && <ErrorBanner msg={error} />}
@@ -651,9 +643,7 @@ function EffectivenessPanel() {
               ))}
             </div>
             {verdict && !verdict.monotonic && verdict.bands.length > 1 && (
-              <div className="mt-1.5 text-caption text-warning">
-                Band means do not fall monotonically from high to low score.
-              </div>
+              <div className="mt-1.5 text-caption text-warning">Bands not in order</div>
             )}
           </Card>
 
@@ -663,9 +653,7 @@ function EffectivenessPanel() {
             </SectionTitle>
             {supported.length === 0 ? (
               <div className="text-xs text-muted-foreground">
-                Nothing clears the bar yet: no forward bucket is both above the{" "}
-                {result.min_sample}-trade floor and significant after the correction. The
-                scoring model is unchanged.
+                Nothing significant yet
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -710,10 +698,7 @@ function EffectivenessPanel() {
 
           {suggestive.length > 0 && (
             <Card padding="md">
-              <SectionTitle>Suggestive, not supported ({suggestive.length})</SectionTitle>
-              <div className="text-caption text-muted-foreground mb-2">
-                Weak after correction: worth watching as the sample grows, not worth acting on.
-              </div>
+              <SectionTitle><span title="Weak after correction: worth watching as the sample grows, not worth acting on.">Suggestive, not supported ({suggestive.length})</span></SectionTitle>
               {suggestive.map((f) => (
                 <div key={`${f.axisLabel}-${f.bucketLabel}`} className="text-xs text-foreground py-0.5 px-0">
                   {f.axisLabel} · <strong>{f.bucketLabel}</strong> — n={f.n}, lift {f.lift},{" "}
@@ -805,12 +790,7 @@ function EffectivenessPanel() {
           </div>
 
           <Card padding="md">
-            <SectionTitle>Forward vs in-sample — {axis?.label}</SectionTitle>
-            <div className="text-caption text-muted-foreground mb-2">
-              The same buckets measured on backtests sit beside the forward ones. They are
-              shown, never merged: an in-sample mean is a measurement of the past the rule
-              was chosen on, not evidence about the future.
-            </div>
+            <SectionTitle><span title="Shown side by side, never merged: an in-sample mean is a measurement of the past the rule was chosen on, not evidence about the future.">Forward vs in-sample — {axis?.label}</span></SectionTitle>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-xs">
                 <thead>
@@ -881,10 +861,7 @@ function ModelPanel() {
     <div className="flex flex-col gap-4">
       <Card padding="md">
         <div className="text-caption text-muted-foreground">ACTIVE CONTEXT MODEL</div>
-        <div className="text-lg font-semibold text-primary-soft">{model.version}</div>
-        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-          {model.description}
-        </p>
+        <div className="text-lg font-semibold text-primary-soft" title={model.description}>{model.version}</div>
       </Card>
 
       <div className="overflow-x-auto">
@@ -915,7 +892,7 @@ function ModelPanel() {
               <TD bold>
                 {total}
               </TD>
-              <TD>A score is the share of these conditions met — not a probability.</TD>
+              <TD>Share met, not a probability</TD>
             </tr>
           </tbody>
         </table>

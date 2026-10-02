@@ -30,18 +30,18 @@ export const NAV_GROUPS: NavGroup[] = [
   { label: "Experimental", tabs: ["labs"] },
 ];
 
-/** `name` is the sidebar label; `title` the page heading; `blurb` one plain sentence under it. */
+/** `name` is the sidebar label; `title` the page heading; `blurb` a few words under it. */
 export const PAGES: Record<Tab, { name: string; title: string; blurb: string }> = {
-  dashboard: { name: "Home", title: "Home", blurb: "Where you are on the path from idea to live trading, and what needs you." },
-  strategies: { name: "Strategies", title: "Strategies", blurb: "Step 1. Build or pick a strategy: the rules for when to buy and sell." },
-  evidence: { name: "Test", title: "Test", blurb: "Step 2. Does it hold up on prices it has never seen? Only strategies that pass go on to paper trading." },
-  paper: { name: "Paper", title: "Paper trading", blurb: "Step 3. Run it on live prices with practice money for a few weeks before risking any." },
-  trading: { name: "Live", title: "Live trading", blurb: "Step 4. Your broker account, your limits and the kill switch." },
-  learning: { name: "Performance", title: "Performance", blurb: "Step 5. What actually happened, what it cost, and where the results came from." },
-  markets: { name: "Markets", title: "Markets", blurb: "What the market is doing: mood, sectors, leaders, scans and charts." },
-  signals: { name: "Signals", title: "Signals", blurb: "What your strategies are telling you to do right now." },
-  watchlist: { name: "Watchlist", title: "Watchlist", blurb: "The stocks you follow, with live prices." },
-  labs: { name: "Labs", title: "Labs", blurb: "Experimental tools. They are not part of the tested path above, so treat their output as ideas, not evidence." },
+  dashboard: { name: "Home", title: "Home", blurb: "Where you stand, and what needs you." },
+  strategies: { name: "Strategies", title: "Strategies", blurb: "Build or pick your rules." },
+  evidence: { name: "Test", title: "Test", blurb: "Does it hold up on unseen prices?." },
+  paper: { name: "Paper", title: "Paper trading", blurb: "Practice money, live prices." },
+  trading: { name: "Live", title: "Live trading", blurb: "Broker, limits, kill switch." },
+  learning: { name: "Performance", title: "Performance", blurb: "What happened, and why." },
+  markets: { name: "Markets", title: "Markets", blurb: "Mood, sectors, leaders, charts." },
+  signals: { name: "Signals", title: "Signals", blurb: "What to do right now." },
+  watchlist: { name: "Watchlist", title: "Watchlist", blurb: "Stocks you follow." },
+  labs: { name: "Labs", title: "Labs", blurb: "Ideas, not evidence." },
 };
 
 export type SubPage = { id: string; label: string };

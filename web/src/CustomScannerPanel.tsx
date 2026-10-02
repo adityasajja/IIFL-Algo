@@ -674,7 +674,7 @@ export default function CustomScannerPanel({
       )}
 
       {result && result.rows.length === 0 && (
-        <Hint>No stocks matched your conditions. Try relaxing a threshold.</Hint>
+        <Hint>No matches</Hint>
       )}
     </div>
   );
