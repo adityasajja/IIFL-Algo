@@ -3,8 +3,8 @@
  *
  * The screen for the loop the whole system exists to close:
  *
- *   Strategy → Version → Deploy Paper → Live market data → Signal → Risk →
- *   OMS → Fill → Position → P&L
+ * Strategy → Version → Deploy Paper → Live market data → Signal → Risk →
+ * OMS → Fill → Position → P&L
  *
  * Three things about this panel are deliberate and worth reading before
  * changing it.
@@ -31,6 +31,7 @@
  */
 
 import { PaperRuns } from "./PaperRuns";
+import { useLiveTicks } from "./lib/useLiveTicks";
 import {
   Activity,
   ArrowRight,
@@ -68,10 +69,12 @@ import {
   type SizingPreviewResult,
 } from "./api";
 import { Button } from "./components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
+import { Tooltip } from "./components/motion/tooltip";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
 import { Stat, Badge, Callout, fmtMoney } from "./components/ui/stat";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
@@ -99,12 +102,13 @@ import {
   unpricedOf,
 } from "./lib/paper-monitor";
 import { setVisibleInterval } from "./lib/visibleInterval";
+import { useSmoothScroll } from "./components/motion/smooth-scroll";
 
 const selectClass =
   "h-11 w-full rounded-full border border-border bg-transparent px-3.5 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 disabled:cursor-not-allowed disabled:opacity-50 [&>option]:bg-card";
 
 /** How often the monitor re-reads while the tab is open. One second is far
- *  finer than the daily rules can distinguish, and the overview is one request. */
+ * finer than the daily rules can distinguish, and the overview is one request. */
 const POLL_MS = 4000;
 
 type View = "deploy" | "monitor" | "compare";
@@ -152,18 +156,28 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
   const [launchVersion, setLaunchVersion] = useState("");
   const [launchBusy, setLaunchBusy] = useState(false);
 
+  // Options are static for the session, load once on mount
+  useEffect(() => {
+    backtestOptions()
+      .then(setOptions)
+      .catch(() => null);
+  }, []);
+
   const loadList = useCallback(async () => {
     try {
-      const [list, opts, run] = await Promise.all([
+      const [list, run] = await Promise.all([
         listDeployments(),
-        backtestOptions().catch(() => null),
         getRunnerStatus().catch(() => null),
       ]);
       setDeployments(list.deployments);
-      if (opts) setOptions(opts);
       setRunner(run);
       setError(null);
-      setSelectedId((prev) => prev ?? list.deployments[0]?.deployment_id ?? null);
+      setSelectedId((prev) => {
+        if (prev && list.deployments.some((d) => d.deployment_id === prev)) {
+          return prev;
+        }
+        return list.deployments[0]?.deployment_id ?? null;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -181,10 +195,16 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
     const load = () => {
       if (inFlight || document.visibilityState !== "visible") return;
       inFlight = true;
-      getForwardEvidenceCounts()
+      // The server rebuilds the learning dataset per call (~30s cold). Bound
+      // the wait so one slow response cannot wedge `inFlight` and silence
+      // every later poll — a timeout settles the promise and retries resume.
+      const ctrl = new AbortController();
+      const killer = setTimeout(() => ctrl.abort(), 25000);
+      getForwardEvidenceCounts(undefined, undefined, ctrl.signal)
         .then(setEvidenceCounts)
         .catch(() => undefined)
         .finally(() => {
+          clearTimeout(killer);
           inFlight = false;
         });
     };
@@ -219,16 +239,18 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
     }
     setOverview(null);
     void loadOverview(selectedId);
+    let pollCount = 0;
     const t = setVisibleInterval(() => {
       void loadOverview(selectedId);
-      // The deployments list (status labels, the Start/Pause/Stop gates) was
-      // only ever refreshed right after an action, one time — if that single
-      // refresh failed (rate limiting, a momentary DB lock), it stayed stale
-      // indefinitely with no way to self-correct short of a full reload.
+      pollCount++;
+      // Only refresh the deployment list every 3rd cycle (12s) to prevent backend thrashing
+      if (pollCount % 3 === 0) {
       void loadList();
+      } else {
       void getRunnerStatus()
         .then(setRunner)
         .catch(() => undefined);
+      }
     }, POLL_MS);
     return () => clearInterval(t);
   }, [selectedId, loadOverview, loadList]);
@@ -238,6 +260,15 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
     () => (options?.strategies ?? []).filter((s) => s.kind === "saved"),
     [options],
   );
+  // strategy_id -> its saved name, so a deployment picker can read "Triple RSI"
+  // instead of a hex id nobody can tell apart from any other hex id.
+  const strategyNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of options?.strategies ?? []) {
+      if (s.strategy_id) map[s.strategy_id] = s.name;
+    }
+    return map;
+  }, [options]);
   const chosen = useMemo<StrategyOption | undefined>(
     () => deployable.find((s) => s.strategy_id === strategyId),
     [deployable, strategyId],
@@ -459,36 +490,27 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex overflow-hidden rounded-lg border border-border/60 text-sm font-semibold">
-          {(["deploy", "monitor", "compare"] as View[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              className={cn(
-                "px-4 py-1.5 transition-colors",
-                view === v
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-background text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {v === "deploy" ? "New deployment" : v === "monitor" ? "Monitor" : "Compare"}
-            </button>
-          ))}
-        </div>
+        <Tabs value={view} onValueChange={(v) => setView(v as View)} variant="pill">
+          <TabsList>
+            <TabsTrigger value="deploy">New deployment</TabsTrigger>
+            <TabsTrigger value="monitor">Monitor</TabsTrigger>
+            <TabsTrigger value="compare">Compare</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {/* The runner is a platform process, not a user's resource, so its state
             is shown on every view: "no signals fired" and "nothing is watching
             for signals" look identical from the timeline alone. */}
+            <Tooltip content={runner?.running ? "The paper runner is watching for signals." : "The paper runner is not running, so nothing will trade."} side="bottom" delay={400}>
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
-          title={runner?.running ? "The paper runner is watching for signals." : "The paper runner is not running, so nothing will trade."}
         >
-          <span className={cn("h-2 w-2 rounded-full", runner?.running ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+        <span className={cn("h-1.5 w-1.5 rounded-full ring-2 ring-gain/20", runner?.running ? "bg-gain" : "bg-muted-foreground/40")} />
           {runner?.running ? "Runner on" : "Runner off"}
           <span className="text-border">·</span>
           {runner?.in_market_hours ? "Market open" : "Market closed"}
         </div>
+        </Tooltip>
       </div>
 
       {error && <ErrorBox>{error}</ErrorBox>}
@@ -496,6 +518,7 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
       {view === "compare" ? (
         <CompareView
           strategies={[...cmpRunningByStrategy.keys()]}
+          strategyNames={strategyNames}
           deployments={deployments}
           cmpStrategyId={cmpStrategyId}
           cmpChampion={cmpChampion}
@@ -546,10 +569,12 @@ export default function PaperDeploymentPanel({ onOpenStrategies }: { onOpenStrat
             setView("monitor");
           }}
           deployments={deployments}
+          strategyNames={strategyNames}
         />
       ) : (
         <MonitorView
           deployments={deployments}
+          strategyNames={strategyNames}
           selectedId={selectedId}
           overview={overview}
           evidenceCounts={evidenceCounts}
@@ -754,7 +779,7 @@ function PositionSizingSection({
 
         {/* Live Preview Card */}
         {preview && (
-          <div className="rounded-2xl border border-border/70 bg-primary/[0.02] p-4 text-sm">
+          <div className="rounded-lg border border-border/70 bg-primary/[0.02] p-4 text-sm">
             <div className="flex items-center justify-between border-b border-border/50 pb-2">
               <span className="font-semibold text-foreground">Sizing Preview & Budget Impact</span>
               {loading && <span className="text-xs text-muted-foreground">Calculating...</span>}
@@ -791,10 +816,10 @@ function PositionSizingSection({
 
               <div className="space-y-1">
                 <span className="text-muted-foreground">Calculated Qty</span>
-                <p className="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                <p className="font-mono text-sm font-semibold text-gain">
                   {preview.final_quantity} shares
                   {preview.raw_quantity !== preview.final_quantity && (
-                    <span className="ml-1 text-[11px] text-muted-foreground line-through">
+                    <span className="ml-1 text-caption text-muted-foreground line-through">
                       ({preview.raw_quantity})
                     </span>
                   )}
@@ -815,7 +840,7 @@ function PositionSizingSection({
             </div>
 
             {preview.rejection_reason && (
-              <div className="mt-2.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-400">
+              <div className="mt-2.5 rounded-md border border-destructive/20 bg-destructive/[0.08] px-3 py-1.5 text-xs text-loss">
                 {preview.rejection_reason}
               </div>
             )}
@@ -855,6 +880,7 @@ function DeployForm({
   onDeploy,
   onOpen,
   deployments,
+  strategyNames,
   onOpenStrategies,
 }: {
   options: BacktestOptions | null;
@@ -883,6 +909,7 @@ function DeployForm({
   onDeploy: () => void;
   onOpen: (id: string) => void;
   deployments: Deployment[];
+  strategyNames: Record<string, string>;
   onOpenStrategies?: () => void;
 }) {
   const [pickedUniverse, setPickedUniverse] = useState(false);
@@ -1035,7 +1062,7 @@ function DeployForm({
                 placeholder="RELIANCE-EQ,INFY-EQ,TCS-EQ"
                 rightIcon={
                   parseSymbols(symbols).length ? (
-                    <span className="pr-3.5 text-[11px] font-semibold text-muted-foreground">
+                    <span className="pr-3.5 text-caption font-semibold text-muted-foreground">
                       {parseSymbols(symbols).length}
                     </span>
                   ) : null
@@ -1054,22 +1081,22 @@ function DeployForm({
             <div className="grid gap-3.5 sm:grid-cols-3">
               <Field
                 label="Timeframe"
-                hint={(() => {
-                  const tf = (options?.timeframes ?? []).find((t) => t.value === timeframe);
-                  return tf?.available === false ? (tf.reason ?? "unavailable") : undefined;
-                })()}
-                warn={
-                  (options?.timeframes ?? []).find((t) => t.value === timeframe)?.available ===
-                  false
+                hint={
+                  timeframe === "1d"
+                    ? "Evaluates on daily close / live forming candle."
+                    : `Intraday: aggregates real-time ticks into ${timeframe} bars.`
                 }
               >
                 <Select
                   value={timeframe}
                   onChange={onTimeframe}
-                  options={(options?.timeframes ?? [{ value: "1d", label: "1d" }]).map((t) => ({
-                    value: t.value,
-                    label: `${t.label}${t.available === false ? " — unavailable" : ""}`,
-                  }))}
+                  options={[
+                    { value: "1d", label: "1d (Daily)" },
+                    { value: "1h", label: "1h (Hourly)" },
+                    { value: "15m", label: "15m (15 Minutes)" },
+                    { value: "5m", label: "5m (5 Minutes)" },
+                    { value: "1m", label: "1m (1 Minute)" },
+                  ]}
                 />
               </Field>
 
@@ -1110,9 +1137,12 @@ function DeployForm({
       </Card>
 
       <div className="space-y-4">
-        <Card>
+        <Card className="overflow-hidden">
+          <div className="relative z-10 bg-card">
           <CardHeader title="Existing deployments" sub={undefined} />
-          <div className="max-h-[420px] space-y-2 overflow-y-auto p-4 pt-3">
+            <div className="h-3" />
+          </div>
+          <div data-lenis-prevent className="max-h-[420px] space-y-2 overflow-y-auto px-4 pb-4 pt-1 [scrollbar-width:thin] [mask-image:linear-gradient(to_bottom,transparent,black_14px,black_calc(100%_-_14px),transparent)] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-button]:hidden">
             {deployments.length === 0 ? (
               <Hint>None yet. Everything you deploy appears here.</Hint>
             ) : (
@@ -1121,15 +1151,15 @@ function DeployForm({
                   key={d.deployment_id}
                   type="button"
                   onClick={() => onOpen(d.deployment_id)}
-                  className="w-full rounded-xl border border-border/60 px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-primary/[0.03]"
+                  className="w-full rounded-xl border border-border/70 bg-card/40 px-3.5 py-3 text-left transition-all hover:border-border/90 hover:bg-muted/30 shadow-xs"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[12.5px] font-semibold">
-                      {d.strategy_id.slice(0, 8)} · v{d.strategy_version}
+                    {strategyNames[d.strategy_id] ?? d.strategy_id.slice(0, 8)} · v{d.strategy_version}
                     </span>
                     <StatusPill status={d.status} />
                   </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                  <div className="mt-1 flex items-center justify-between gap-2 text-caption text-muted-foreground">
                     <span className="truncate">{fmtMoney(d.capital)}</span>
                     <span className="tabular-nums">
                       {d.pnl ? fmtMoneyOrDash(d.pnl.equity - d.capital) : "—"}
@@ -1149,6 +1179,7 @@ function DeployForm({
 
 function MonitorView({
   deployments,
+  strategyNames,
   selectedId,
   overview,
   evidenceCounts,
@@ -1165,6 +1196,7 @@ function MonitorView({
   onConfirm,
 }: {
   deployments: Deployment[];
+  strategyNames: Record<string, string>;
   selectedId: string | null;
   overview: MonitorOverview | null;
   evidenceCounts: ForwardEvidenceCounts | null;
@@ -1180,7 +1212,20 @@ function MonitorView({
   onStart: (id: string) => void;
   onConfirm: (kind: "pause" | "stop" | "reset", id: string, why: string) => void;
 }) {
-  const [details, setDetails] = useState(false);
+  const [details, setDetails] = useState(true);
+
+  // `overview` (and the "Latest signals" block it unlocks) arrives on a poll
+  // well after the page's first paint. Lenis measures scrollable height once
+  // at mount via ResizeObserver on its own wrapper, which does not always
+  // catch content added to a *sibling* card below the fold — the symptom is
+  // exactly this: the page appears to stop scrolling short of the real
+  // bottom. Nudging it to remeasure whenever the data that grows the page
+  // changes is cheap and correct even when it turns out to be a no-op.
+  const { lenis } = useSmoothScroll();
+  useEffect(() => {
+    lenis?.resize();
+  }, [lenis, overview]);
+
   if (deployments.length === 0) {
     return (
       <Card>
@@ -1201,6 +1246,14 @@ function MonitorView({
 
   return (
     <div className="space-y-4">
+      {/* 1. The prominent Forward Evidence Counter */}
+      <ForwardEvidenceCounterCard
+        counts={evidenceCounts}
+        strategyNames={strategyNames}
+        selectedStrategyId={status?.strategy_id}
+        selectedVersion={status?.strategy_version}
+      />
+
       <PaperRuns
         deployments={deployments}
         onManage={(id) => {
@@ -1216,13 +1269,6 @@ function MonitorView({
         {details ? "Hide details and controls" : "Details and controls"}
       </button>
       {details && (<>
-      {/* 1. The prominent Forward Evidence Counter */}
-      <ForwardEvidenceCounterCard
-        counts={evidenceCounts}
-        selectedStrategyId={status?.strategy_id}
-        selectedVersion={status?.strategy_version}
-      />
-
       {/* the picker + the four controls */}
       <Card>
         <div className="flex flex-wrap items-end justify-between gap-3 p-5">
@@ -1233,7 +1279,7 @@ function MonitorView({
               onChange={onSelect}
               options={deployments.map((d) => ({
                 value: d.deployment_id,
-                label: `${d.deployment_id.slice(0, 8)} · v${d.strategy_version} · ${d.status} · ${fmtMoney(d.capital)}`,
+                    label: `${strategyNames[d.strategy_id] ?? d.deployment_id.slice(0, 8)} · v${d.strategy_version} · ${d.status} · ${fmtMoney(d.capital)}`,
               }))}
             />
           </div>
@@ -1279,7 +1325,7 @@ function MonitorView({
         {/* The reason prompt */}
         {pendingAction && (
           <div className="border-t border-border/60 p-5 pt-4">
-            <div className="mb-2 text-[13px] font-semibold">
+                <div className="mb-2 text-body font-semibold">
               Why are you {pendingAction.kind === "reset" ? "resetting" : `${pendingAction.kind}ing`}{" "}
               this deployment?
             </div>
@@ -1300,7 +1346,7 @@ function MonitorView({
                   if (e.key === "Escape") onCancelAsk();
                 }}
                 placeholder="e.g. testing the breakout entry after the param change"
-                className={cn(selectClass, "flex-1 min-w-[240px] rounded-xl")}
+                    className={cn(selectClass, "flex-1 min-w-[240px]")}
               />
               <Button
                 size="sm"
@@ -1320,10 +1366,25 @@ function MonitorView({
       </Card>
 
       {/* the header: running vs trading, and why not */}
+          {/* the header: running vs trading, and why not */}
       {status && (
-        <Card>
-          <div className="flex flex-wrap items-start justify-between gap-4 p-5">
+            <Card className="relative overflow-hidden border-border/80 transition-all duration-300">
+              {/* Subtle live radar ping in card background when running */}
+              {status.status === "RUNNING" && (
+                <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-gain/[0.04] blur-2xl animate-pulse" />
+              )}
+
+              <div className="relative z-10 flex flex-wrap items-start justify-between gap-4 p-5">
             <div className="min-w-0">
+                  <div className="mb-1.5 truncate text-base font-semibold text-foreground flex items-center gap-2">
+                    <span>{strategyNames[status.strategy_id] ?? "Unnamed strategy"}</span>
+                    {status.status === "RUNNING" && (
+                      <span className="flex h-2 w-2 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gain opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-gain" />
+                      </span>
+                    )}
+                  </div>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusPill
                   status={status.status}
@@ -1331,20 +1392,31 @@ function MonitorView({
                   diagnosticState={status.diagnostic_state}
                 />
                 <TradingPill trading={status.trading} reason={status.not_trading_because} />
-                <Badge tone="flat">{status.mode}</Badge>
-                <Badge tone="flat">v{status.strategy_version}</Badge>
-                <span className="font-mono text-[11px] text-muted-foreground">
+                <Badge tone="flat" className="border-border/60 bg-muted/40">{status.mode}</Badge>
+                <Badge tone="flat" className="border-border/60 bg-muted/40">v{status.strategy_version}</Badge>
+                    <span className="font-mono text-caption text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded-md">
                   {status.deployment_id.slice(0, 8)}
                 </span>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-muted-foreground">
-                <span>{status.symbols.length} symbol(s)</span>
-                <span>{status.exchange}</span>
-                <span>{status.timeframe}</span>
-                <span>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-muted-foreground/60" />
+                      {status.symbols.length} symbol(s)
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-muted-foreground/60" />
+                      {status.exchange}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-muted-foreground/60" />
+                      {status.timeframe}
+                    </span>
+                    <span className="flex items-center gap-1">
+                    <span className={cn("h-1.5 w-1.5 rounded-full", status.in_market_hours ? "bg-gain animate-pulse" : "bg-warning")} />
                   session {status.in_market_hours ? "open" : "closed"}
                 </span>
-                <span>
+                    <span className="flex items-center gap-1">
+                    <span className={cn("h-1.5 w-1.5 rounded-full", status.loop_attached ? "bg-gain animate-pulse" : "bg-muted-foreground/40")} />
                   loop {status.loop_attached ? "attached" : "not attached"}
                 </span>
                 {status.started_at && <span>started {istDate(status.started_at)}</span>}
@@ -1355,35 +1427,42 @@ function MonitorView({
           {/* The honesty block */}
           {(!status.trading || idle) && (
             <div className="px-5 pb-5">
-              <Callout
-                tone={status.blocked_reason || status.diagnostic_state === "system_error" || status.diagnostic_state === "stale_tick" ? "bad" : "warn"}
-                title={
-                  status.blocked_reason
+                  <div className="relative overflow-hidden rounded-xl border border-border/80 bg-muted/[0.08] p-3.5 ">
+                    <div className="relative z-10 flex items-start gap-3">
+                      <div className="mt-0.5 relative flex h-4 w-4 shrink-0">
+                        <span className="relative inline-flex h-4 w-4 rounded-full border border-border/80 bg-muted/30 text-muted-foreground grid place-items-center text-micro font-semibold">
+                          !
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-body font-semibold text-foreground flex items-center gap-2">
+                          <span>
+                            {status.blocked_reason
                     ? "Not trading — rules could not be resolved"
                     : status.diagnostic_state === "stale_tick"
                     ? "Not trading — stale price feed"
                     : status.diagnostic_state === "no_live_tick"
-                    ? "Not trading — waiting for fresh ticks"
+                                  ? "Listening for ticks"
                     : status.diagnostic_state === "market_closed"
-                    ? "Not trading — cash market session is closed"
-                    : "Not trading"
-                }
-              >
+                                    ? "Cash market session is closed"
+                                    : "Not trading"}
+                          </span>
+                          <span className="inline-flex items-center rounded-lg border border-border/60 bg-muted/30 px-2 py-0.5 text-micro font-medium text-muted-foreground">
+                            Scanning
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground leading-relaxed">
                 {status.not_trading_because || idle || status.skipped_reason}
-                {status.blocked_reason && (
-                  <span className="mt-1 block text-[12px] opacity-90">
-                    The runner refuses to trade on a guessed default rather than
-                    silently using generic entry/exit rules and attributing the
-                    resulting orders to v{status.strategy_version}.
-                  </span>
+                        </div>
+                        {status.diagnostic_state === "no_live_tick" && (
+                          <div className="mt-1.5 flex items-center gap-1.5 text-caption text-muted-foreground/80">
+                            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+                            <span>Runner active on background loop. Fires immediately upon arrival of next tick stream.</span>
+                          </div>
                 )}
-                {status.diagnostic_state === "stale_tick" && (
-                  <span className="mt-1 block text-[12px] opacity-90">
-                    Received tick age exceeds the maximum freshness threshold.
-                    Orders are strictly gated to avoid filling against old session prices.
-                  </span>
-                )}
-              </Callout>
+                      </div>
+                    </div>
+                  </div>
             </div>
           )}
 
@@ -1411,7 +1490,7 @@ function MonitorView({
             value={fmtMoneyOrDash(pnl.today_pnl)}
             sub={
               pnl.today_pnl === null ? (
-                <span className="text-amber-600 dark:text-amber-400">
+                    <span className="text-warning">
                   not measured — no fill before the session boundary
                 </span>
               ) : (
@@ -1451,57 +1530,60 @@ function MonitorView({
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         {/* the chain */}
-        <Card>
+            <Card className="flex h-full flex-col">
           <CardHeader
             title="Signal → Risk → Order → Fill → Position"
             sub="Every step in the causal chain, newest first within each stage."
           />
-          <div className="p-5 pt-4">
-            <div className="mb-4 flex flex-wrap items-stretch gap-1.5">
+              <div className="flex min-h-0 flex-1 flex-col p-5 pt-4">
+                <div className="mb-4 flex flex-wrap items-stretch gap-2">
               {STAGES.map((stage, i) => {
                 const link = chain.find((c) => c.stage === stage);
                 const hit = reached.has(stage);
                 return (
-                  <div key={stage} className="flex items-center gap-1.5">
+                      <div key={stage} className="flex items-center gap-1.5 sm:gap-2">
                     <div
                       title={STAGE_BLURB[stage]}
                       className={cn(
-                        "rounded-lg border px-3 py-2",
+                            "relative overflow-hidden rounded-xl border px-3 py-2 transition-all duration-300",
                         hit
-                          ? "border-emerald-500/40 bg-emerald-500/[0.07]"
-                          : "border-border/60 bg-muted/20",
+                              ? "border-border/90 bg-card hover:border-foreground/20"
+                              : "border-border/40 bg-muted/10 opacity-50",
                       )}
                     >
-                      <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="relative flex h-2 w-2">
+                            {hit && <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-foreground/30 opacity-75" />}
                         <span
                           className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            hit ? "bg-emerald-500" : "bg-muted-foreground/30",
+                                  "relative inline-flex h-2 w-2 rounded-full",
+                                  hit ? "bg-foreground/80" : "bg-muted-foreground/30",
                           )}
                         />
+                            </span>
                         <span
                           className={cn(
-                            "text-[11px] font-bold uppercase tracking-[0.04em]",
+                                "text-[10.5px] font-semibold uppercase tracking-[0.06em]",
                             hit ? "text-foreground" : "text-muted-foreground",
                           )}
                         >
                           {STAGE_LABEL[stage]}
                         </span>
                       </div>
-                      <div className="mt-0.5 text-[10.5px] tabular-nums text-muted-foreground">
+                          <div className="mt-1 text-micro font-mono tabular-nums text-muted-foreground">
                         {link ? istClock(link.ts) : "—"}
                         {link && link.count > 1 ? ` · ${link.count}` : ""}
                       </div>
                     </div>
                     {i < STAGES.length - 1 && (
+                          <div className="relative flex items-center justify-center px-0.5">
                       <ArrowRight
                         className={cn(
-                          "size-3.5 shrink-0",
-                          reached.has(STAGES[i + 1]) || hit
-                            ? "text-muted-foreground"
-                            : "text-muted-foreground/25",
+                                "size-3.5 shrink-0 transition-colors",
+                                hit ? "text-foreground/40" : "text-muted-foreground/20",
                         )}
                       />
+                          </div>
                     )}
                   </div>
                 );
@@ -1517,7 +1599,10 @@ function MonitorView({
                 will be.
               </Hint>
             ) : (
-              <div className="max-h-[440px] space-y-1.5 overflow-y-auto pr-1">
+                  <div
+                    data-lenis-prevent
+                    className="min-h-[220px] flex-1 space-y-1.5 overflow-y-auto pr-1"
+                  >
                 {[...overview.timeline]
                   .reverse()
                   .map((e, i) => (
@@ -1553,40 +1638,57 @@ function MonitorView({
               {positions.length === 0 ? (
                 <Hint>Flat. No open positions in this deployment.</Hint>
               ) : (
-                <div className="space-y-1.5">
-                  {positions.map((p) => (
+                    <div className="space-y-2">
+                      {positions.map((p) => {
+                        const isProfit = (p.unrealized_pnl ?? 0) >= 0;
+                        return (
                     <div
                       key={p.symbol}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2"
+                            className={cn(
+                              "flex items-center justify-between gap-3 rounded-md border p-3 transition-all duration-200 hover:scale-[1.01]",
+                              isProfit
+                                ? "border-gain/25 bg-gradient-to-r from-gain/[0.04] to-card/60 -[0_0_12px_rgba(16,185,129,0.03)]"
+                                : "border-loss/25 bg-gradient-to-r from-loss/[0.04] to-card/60 -[0_0_12px_rgba(244,63,94,0.03)]"
+                            )}
                     >
                       <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-semibold">{p.symbol}</div>
-                        <div className="text-[11px] text-muted-foreground tabular-nums">
-                          {p.quantity} @ {fmtMoney(p.avg_price)}
-                          {p.priced && p.last_price !== null && (
-                            <> → {fmtMoney(p.last_price)}</>
+                              <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-body tracking-tight text-foreground">{p.symbol}</span>
+                                <span className="rounded-md bg-muted/60 px-1.5 py-0.2 font-mono text-micro font-semibold text-muted-foreground">
+                                  {p.quantity} qty
+                                </span>
+                              </div>
+                              <div className="mt-1 text-caption text-muted-foreground tabular-nums flex items-center gap-2 flex-wrap">
+                              <span>Avg <strong className="font-semibold text-foreground/90">{fmtMoney(p.avg_price, 2)}</strong></span>
+                                <span className="text-border">·</span>
+                                {p.priced && p.last_price !== null ? (
+                                  <span>LTP <strong className="font-semibold text-foreground/90">{fmtMoney(p.last_price, 2)}</strong></span>
+                                ) : (
+                                  <span className="text-warning font-medium">Unpriced</span>
                           )}
                         </div>
                       </div>
                       <div className="text-right">
                         <div
                           className={cn(
-                            "text-[12.5px] font-bold tabular-nums",
+                                  "text-body font-black tabular-nums tracking-tight",
                             p.unrealized_pnl === null
                               ? "text-muted-foreground"
-                              : p.unrealized_pnl >= 0
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : "text-destructive",
+                                    : isProfit
+                                      ? "text-gain"
+                                      : "text-loss",
                           )}
                         >
-                          {fmtMoneyOrDash(p.unrealized_pnl)}
+                                {p.unrealized_pnl !== null && p.unrealized_pnl > 0 ? "+" : ""}
+                                {fmtMoneyOrDash(p.unrealized_pnl, 2)}
                         </div>
-                        <div className="text-[10.5px] text-muted-foreground">
+                              <div className="text-micro font-semibold uppercase tracking-wider text-muted-foreground/80 mt-0.5">
                           {p.priced ? "unrealised" : "unpriced"}
                         </div>
                       </div>
                     </div>
-                  ))}
+                        );
+                      })}
                 </div>
               )}
             </div>
@@ -1608,7 +1710,7 @@ function MonitorView({
                   )
                 }
               />
-              <div className="space-y-2 p-4 pt-3 text-[12px]">
+                  <div className="space-y-2 p-4 pt-3 text-xs">
                 <RiskRow label="Open positions" value={String(overview.risk.observed.open_positions)} />
                 <RiskRow
                   label="Gross exposure"
@@ -1643,7 +1745,7 @@ function MonitorView({
           {overview && (
             <Card>
               <CardHeader title="Log" sub="Counts; the timeline above is the detail" />
-              <div className="grid grid-cols-2 gap-2 p-4 pt-3 text-[12px]">
+                  <div className="grid grid-cols-2 gap-2 p-4 pt-3 text-xs">
                 <LogCount label="Orders" value={overview.orders.length} />
                 <LogCount label="Fills" value={overview.fills.length} />
                 <LogCount label="Signals" value={overview.signals.length} />
@@ -1659,7 +1761,7 @@ function MonitorView({
               </div>
               {overview.signals.length > 0 && (
                 <div className="border-t border-border/60 p-4">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+                      <div className="mb-2 text-caption font-semibold uppercase tracking-[0.05em] text-muted-foreground">
                     Latest signals
                   </div>
                   <div className="space-y-1.5">
@@ -1703,8 +1805,8 @@ function TimelineRow({ event }: { event: MonitorOverview["timeline"][number] }) 
         className={cn(
           "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
           tone === "bad" && "bg-destructive/12 text-destructive",
-          tone === "good" && "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
-          tone === "warn" && "bg-amber-500/12 text-amber-600 dark:text-amber-400",
+          tone === "good" && "border border-gain/20 bg-gain/[0.08] text-gain",
+          tone === "warn" && "border border-warning/20 bg-warning/[0.08] text-warning",
           tone === "flat" && "bg-muted text-muted-foreground",
         )}
       >
@@ -1712,13 +1814,25 @@ function TimelineRow({ event }: { event: MonitorOverview["timeline"][number] }) 
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">
+          <span className="text-micro font-semibold uppercase tracking-[0.05em] text-muted-foreground">
             {STAGE_LABEL[event.stage as TimelineStage] ?? event.stage}
           </span>
+          {event.side && (
+            <span
+              className={cn(
+                "rounded-md px-1.5 py-[1px] text-[9.5px] font-semibold uppercase tracking-wider",
+                event.side === "SELL"
+                  ? "border border-destructive/20 bg-destructive/[0.08] text-destructive"
+                  : "border border-gain/20 bg-gain/[0.08] text-gain",
+              )}
+            >
+              {event.side}
+            </span>
+          )}
           <span className="text-[11.5px] text-foreground">{event.summary}</span>
         </div>
         {event.reason && event.reason !== event.summary && (
-          <div className="mt-0.5 text-[11px] text-muted-foreground">{event.reason}</div>
+          <div className="mt-0.5 text-caption text-muted-foreground">{event.reason}</div>
         )}
       </div>
       <span className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground">
@@ -1730,12 +1844,23 @@ function TimelineRow({ event }: { event: MonitorOverview["timeline"][number] }) 
 
 // ─── small pieces & telemetry cards ──────────────────────────────────────────
 
+function EvCell({ label, value, sub, tone }: { label: string; value: React.ReactNode; sub: string; tone?: "muted" }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/60 p-3.5">
+    <div className="text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</div>
+    <div className={cn("mt-1 text-3xl font-semibold tabular-nums tracking-tight leading-none", tone === "muted" ? "text-muted-foreground" : "text-foreground")}>{value}</div>
+      <div className="mt-0.5 text-[10.5px] text-muted-foreground">{sub}</div>
+    </div>
+  );
+}
 function ForwardEvidenceCounterCard({
   counts,
+  strategyNames,
   selectedStrategyId,
   selectedVersion,
 }: {
   counts: ForwardEvidenceCounts | null;
+  strategyNames: Record<string, string>;
   selectedStrategyId?: string | null;
   selectedVersion?: number | null;
 }) {
@@ -1749,103 +1874,33 @@ function ForwardEvidenceCounterCard({
   const liveForward = counts?.by_class?.LIVE_FORWARD?.total ?? 0;
 
   return (
-    <Card className="border-primary/25 bg-gradient-to-br from-card via-card to-primary/[0.03] shadow-sm">
+    <Card>
       <div className="flex flex-wrap items-start justify-between gap-4 p-5 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/20" />
-            <h3 className="text-base font-bold tracking-tight text-foreground">
-              Genuine Forward Observations
+            <span className="size-2 rounded-full bg-gain" />
+            <h3 className="text-base font-semibold tracking-tight text-foreground">
+              Forward track record
             </h3>
-            <Badge tone="good" className="text-[10.5px]">Evidence Grade</Badge>
+            <Badge tone="good" className="text-[10.5px]">Live</Badge>
           </div>
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            Strict forward trading data accumulated without backfilled rows or cached price leakage.
-          </p>
         </div>
 
         {counts?.as_of && (
-          <div className="text-right text-[11px] text-muted-foreground">
-            As of {istClock(counts.as_of)} IST
+          <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1 text-caption text-muted-foreground">
+            Live sync: {istClock(counts.as_of)} IST
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 p-5 pt-0 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.07] p-3.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-            Total Forward
+      <div className="grid grid-cols-2 gap-3 px-5 pb-5 sm:grid-cols-3 lg:grid-cols-6">
+        <EvCell label="Total" value={totalForward} sub="all-time" />
+        <EvCell label="Today" value={todayForward} sub="today" />
+        <EvCell label="Last 7 days" value={last7dForward} sub="rolling 7 days" />
+        <EvCell label="Paper" value={paperForward} sub={`${counts?.by_class?.PAPER_FORWARD?.today ?? 0} today · ${counts?.by_class?.PAPER_FORWARD?.last_7d ?? 0} 7d`} />
+        <EvCell label="Live" value={liveForward} sub={`${counts?.by_class?.LIVE_FORWARD?.today ?? 0} today · ${counts?.by_class?.LIVE_FORWARD?.last_7d ?? 0} 7d`} />
+        <EvCell label="Backtest" value={inSample} sub="historical tests" tone="muted" />
           </div>
-          <div className="mt-1 text-2xl font-extrabold tabular-nums text-foreground">
-            {totalForward}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">all-time observations</div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-3.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Today
-          </div>
-          <div className="mt-1 text-2xl font-extrabold tabular-nums text-foreground">
-            {todayForward}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">session forward</div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-3.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Last 7 Days
-          </div>
-          <div className="mt-1 text-2xl font-extrabold tabular-nums text-foreground">
-            {last7dForward}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">rolling 7 trading days</div>
-        </div>
-
-        <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-500">
-              Paper forward
-            </span>
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          </div>
-          <div className="mt-1 text-2xl font-extrabold tabular-nums text-foreground">
-            {paperForward}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-            {counts?.by_class?.PAPER_FORWARD?.today ?? 0} today · {counts?.by_class?.PAPER_FORWARD?.last_7d ?? 0} 7d
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-blue-500">
-              Live forward
-            </span>
-            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-          </div>
-          <div className="mt-1 text-2xl font-extrabold tabular-nums text-foreground">
-            {liveForward}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-            {counts?.by_class?.LIVE_FORWARD?.today ?? 0} today · {counts?.by_class?.LIVE_FORWARD?.last_7d ?? 0} 7d
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              In sample
-            </span>
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-          </div>
-          <div className="mt-1 text-2xl font-extrabold tabular-nums text-muted-foreground">
-            {inSample}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">backtest/pre-live</div>
-        </div>
-      </div>
-
       {counts && counts.by_strategy && counts.by_strategy.length > 0 && (
         <div className="border-t border-border/50 px-5 py-3">
           <button
@@ -1856,7 +1911,7 @@ function ForwardEvidenceCounterCard({
             <span>
               Breakdown by Strategy & Version ({counts.by_strategy.length} tracked)
             </span>
-            <span className="text-[11px] underline">
+            <span className="text-caption underline">
               {showTable ? "Hide details" : "Show details"}
             </span>
           </button>
@@ -1889,13 +1944,17 @@ function ForwardEvidenceCounterCard({
                           isSelected && "bg-primary/[0.04] font-semibold",
                         )}
                       >
-                        <td className="py-2 font-mono text-[11px]">
+                        <td className="py-2 text-[11.5px]">
+                          {strategyNames[s.strategy_id] ?? (
+                            <span className="font-mono text-caption text-muted-foreground">
                           {s.strategy_id.slice(0, 12)}
+                            </span>
+                          )}
                         </td>
                         <td className="py-2">
                           {s.strategy_version !== null ? `v${s.strategy_version}` : "—"}
                         </td>
-                        <td className="py-2 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        <td className="py-2 text-right font-semibold text-gain tabular-nums">
                           {s.total_genuine_forward}
                         </td>
                         <td className="py-2 text-right tabular-nums">{s.today_genuine_forward}</td>
@@ -1918,19 +1977,54 @@ function ForwardEvidenceCounterCard({
 }
 
 function TelemetryBar({ status }: { status: MonitorOverview["status"] }) {
-  const tickTime = status.last_tick_time ? istClock(status.last_tick_time) : "—";
-  const tickAge = status.last_tick_age_seconds;
+  const { ticks: wsTicks, connected: wsConnected } = useLiveTicks(status.symbols);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  // Sub-second precision ticker for real-time age calculation (100ms interval)
+  useEffect(() => {
+    const timer = setVisibleInterval(() => {
+      setNowMs(Date.now());
+    }, 100);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Compute live sub-second tick age across active websocket stream ticks
+  let liveTickAgeSec: number | null = null;
+  let liveTickTimeStr = status.last_tick_time ? istClock(status.last_tick_time) : "—";
+  let latestEpoch = 0;
+
+  for (const tick of Object.values(wsTicks)) {
+    if (tick && tick.epoch) {
+      if (tick.epoch > latestEpoch) {
+        latestEpoch = tick.epoch;
+        if (tick.ts) {
+          liveTickTimeStr = istClock(tick.ts);
+        }
+      }
+    }
+  }
+
+  if (latestEpoch > 0) {
+    liveTickAgeSec = Math.max(0, (nowMs / 1000) - latestEpoch);
+  } else if (status.last_tick_age_seconds !== null && status.last_tick_age_seconds !== undefined) {
+    liveTickAgeSec = status.last_tick_age_seconds;
+  }
+
+  const tickTime = liveTickTimeStr;
+  const tickAge = liveTickAgeSec;
   const evalTime = status.last_strategy_evaluation ? istClock(status.last_strategy_evaluation) : "—";
   const isStale = tickAge !== null && tickAge !== undefined && tickAge > 60;
+  const isSubSecond = tickAge !== null && tickAge < 1.0;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      <div className="rounded-xl border border-border/60 bg-card p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Market Status
+      <div className="relative overflow-hidden rounded-xl border border-border/70 bg-card p-3 transition-all hover:border-border">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+          <span>Market Status</span>
+          <span className={cn("h-1.5 w-1.5 rounded-full", status.in_market_hours ? "bg-gain animate-ping" : "bg-warning/80")} />
         </div>
-        <div className="mt-1 flex items-center gap-1.5 font-bold">
-          <span className={cn("h-2 w-2 rounded-full", status.in_market_hours ? "bg-emerald-500" : "bg-amber-500")} />
+        <div className="mt-1 flex items-center gap-1.5 font-semibold">
+        <span className={cn("h-2 w-2 rounded-full", status.in_market_hours ? "bg-gain -[0_0_8px_rgba(16,185,129,0.8)]" : "bg-warning")} />
           <span className="text-sm">
             {status.in_market_hours ? "Regular Session Open" : "Market Closed"}
           </span>
@@ -1940,14 +2034,26 @@ function TelemetryBar({ status }: { status: MonitorOverview["status"] }) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/60 bg-card p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Live Tick & Age
+      <div className="relative overflow-hidden rounded-xl border border-border/70 bg-card p-3 transition-all hover:border-border">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <span>Live Ticks</span>
+            {wsConnected && (
+              <span className="inline-flex items-center rounded-md bg-muted/40 border border-border/60 px-1 py-0.2 text-micro font-mono font-medium text-foreground">
+                WS
+              </span>
+            )}
+          </span>
+          <span className={cn("h-1.5 w-1.5 rounded-full", isStale || tickAge === null ? "bg-muted-foreground/40" : "bg-foreground/70 animate-ping-slow")} />
         </div>
-        <div className="mt-1 flex items-center gap-1.5 font-bold">
-          <span className={cn("h-2 w-2 rounded-full", isStale || !status.last_tick_time ? "bg-amber-500" : "bg-emerald-500 animate-pulse")} />
-          <span className={cn("text-sm tabular-nums", isStale && "text-destructive font-extrabold")}>
-            {tickAge !== null && tickAge !== undefined ? `${tickAge.toFixed(1)}s ago` : "No ticks"}
+        <div className="mt-1 flex items-center gap-1.5 font-semibold">
+        <span className={cn("h-2 w-2 rounded-full", isStale || tickAge === null ? "bg-muted-foreground/40" : "bg-foreground/80")} />
+        <span className={cn("text-sm tabular-nums", isStale && "text-muted-foreground", isSubSecond && "text-foreground font-semibold")}>
+            {tickAge !== null && tickAge !== undefined
+              ? tickAge < 1.0
+                ? `${Math.round(tickAge * 1000)}ms ago`
+                : `${tickAge.toFixed(1)}s ago`
+              : "No ticks"}
           </span>
         </div>
         <div className="mt-0.5 text-[10.5px] text-muted-foreground">
@@ -1955,11 +2061,12 @@ function TelemetryBar({ status }: { status: MonitorOverview["status"] }) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/60 bg-card p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Last Evaluation
+      <div className="relative overflow-hidden rounded-xl border border-border/70 bg-card p-3 transition-all hover:border-border">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+          <span>Engine Eval</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-pulse" />
         </div>
-        <div className="mt-1 text-sm font-bold text-foreground">
+        <div className="mt-1 text-sm font-semibold text-foreground">
           {evalTime} IST
         </div>
         <div className="mt-0.5 text-[10.5px] text-muted-foreground">
@@ -1967,11 +2074,11 @@ function TelemetryBar({ status }: { status: MonitorOverview["status"] }) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/60 bg-card p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="rounded-lg border border-border/60 bg-card p-3">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           Skipped Cycles
         </div>
-        <div className="mt-1 flex items-center gap-2 text-sm font-bold tabular-nums text-foreground">
+        <div className="mt-1 flex items-center gap-2 text-sm font-semibold tabular-nums text-foreground">
           <span>{status.skipped_evaluations_count ?? 0} eval</span>
           <span className="text-muted-foreground">/</span>
           <span>{status.skipped_fills_count ?? 0} fills</span>
@@ -1981,11 +2088,11 @@ function TelemetryBar({ status }: { status: MonitorOverview["status"] }) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/60 bg-card p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="rounded-lg border border-border/60 bg-card p-3">
+        <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           Genuine Trades
         </div>
-        <div className="mt-1 text-sm font-bold tabular-nums text-foreground">
+        <div className="mt-1 text-sm font-semibold tabular-nums text-foreground">
           {status.trade_count ?? 0} closed ({status.open_trades_count ?? 0} open)
         </div>
         <div className="mt-0.5 text-[10.5px] text-muted-foreground">
@@ -2002,136 +2109,237 @@ function PipelineInspectionCard({ status }: { status: MonitorOverview["status"] 
   const order = status.last_order;
   const fill = status.last_fill;
 
+  // Determine active symbol in transit across the causal pipeline
+  const activeSymbol = fill?.symbol || order?.symbol || risk?.symbol || signal?.symbol || null;
+
   return (
-    <Card>
-      <CardHeader
-        title="Live Execution Pipeline"
-        sub="Continuous causal link: Live Ticks → Strategy → Signal → Risk Decision → OMS Order → Paper Fill"
-      />
-      <div className="grid gap-3 p-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-        {/* 1. Last Signal */}
-        <div className="rounded-xl border border-border/60 bg-muted/10 p-3.5">
-          <div className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>1. Strategy Signal</span>
-            {signal ? <Badge tone="good">Emitted</Badge> : <Badge tone="flat">Idle</Badge>}
+    <Card className="relative overflow-hidden border-border/70 bg-card ">
+      {/* Header bar with subtle active trade transit tracker */}
+      <div className="flex flex-wrap items-center justify-between border-b border-border/50 px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-foreground/40 opacity-70" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/80" />
+          </span>
+          <h3 className="text-sm font-semibold tracking-tight text-foreground">
+            Causal Execution Pipeline
+          </h3>
+          <span className="rounded-md border border-border/80 bg-muted/30 px-2 py-0.5 text-micro font-medium text-muted-foreground">
+            Sequential Bucket Flow
+          </span>
           </div>
-          {signal ? (
-            <div className="mt-2 space-y-1 text-[12px]">
-              <div className="flex items-center gap-1.5 font-bold">
-                <Badge tone={signal.side === "BUY" ? "good" : "bad"}>{signal.side}</Badge>
-                <span>{signal.symbol}</span>
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                Rule: <span className="text-foreground">{signal.rule || "breakout"}</span>
-              </div>
-              {signal.reason && (
-                <div className="line-clamp-2 text-[10.5px] text-muted-foreground">{signal.reason}</div>
-              )}
-              {signal.at && (
-                <div className="text-[10px] text-muted-foreground/80">{istClock(signal.at)} IST</div>
-              )}
+
+        {activeSymbol ? (
+          <div className="flex items-center gap-2 text-caption text-muted-foreground">
+            <span className="text-micro uppercase tracking-wider">Active Transit:</span>
+            <span className="rounded-lg border border-border/80 bg-muted/20 px-2 py-0.5 font-mono text-caption font-semibold text-foreground">
+              {activeSymbol}
+            </span>
             </div>
           ) : (
-            <div className="mt-2 text-[11.5px] text-muted-foreground">
-              No signal generated yet on current ticks
+          <div className="text-caption text-muted-foreground">
+            Evaluating ticks across active universe
             </div>
           )}
         </div>
 
-        {/* 2. Last Risk Decision */}
-        <div className="rounded-xl border border-border/60 bg-muted/10 p-3.5">
-          <div className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>2. Risk Decision</span>
-            {risk ? (
-              <Badge tone={risk.approved ? "good" : "bad"}>
-                {risk.approved ? "Approved" : "Rejected"}
+      {/* Subtle Pipeline Motion Transit Channel */}
+      <div className="relative border-b border-border/40 bg-muted/[0.04] px-5 py-2">
+        <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted/40">
+          <div className="animate-dot-travel absolute top-0 h-full w-24 -translate-x-full rounded-full bg-gradient-to-r from-transparent via-foreground/30 to-transparent" />
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[9.5px] font-mono uppercase tracking-wider text-muted-foreground/70">
+          <span className={cn(signal ? "text-foreground font-semibold" : "")}>Stage 1: Signal</span>
+          <span className={cn(risk ? "text-foreground font-semibold" : "")}>Stage 2: Risk Gate</span>
+          <span className={cn(order ? "text-foreground font-semibold" : "")}>Stage 3: OMS Order</span>
+          <span className={cn(fill ? "text-foreground font-semibold" : "")}>Stage 4: Venue Fill</span>
+        </div>
+      </div>
+
+      {/* 4 Execution Buckets */}
+      <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 relative">
+        {/* Bucket 1: Strategy Signal */}
+        <div className={cn(
+            "group relative flex flex-col justify-between rounded-md border p-3.5 transition-all duration-300",
+            signal
+            ? "border-border/90 bg-card/90 "
+            : "border-border/40 bg-muted/[0.06] opacity-60"
+          )}>
+          <div>
+            <div className="flex items-center justify-between text-caption font-medium tracking-wide">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+              <span className="size-4 grid place-items-center rounded-full border border-border/80 bg-muted/30 text-micro font-mono text-muted-foreground">1</span>
+                <span className="font-semibold text-foreground/90">Strategy Signal</span>
+              </span>
+              <Badge tone="flat" className="text-micro px-1.5 py-0 border border-border/60">
+                {signal ? "Emitted" : "Idle"}
               </Badge>
-            ) : (
-              <Badge tone="flat">Awaiting</Badge>
-            )}
           </div>
-          {risk ? (
-            <div className="mt-2 space-y-1 text-[12px]">
-              <div className="font-semibold text-foreground">
-                {risk.approved ? "Passed Risk Check" : "Refused by Risk Gate"}
+
+            {signal ? (
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-lg border border-border px-1.5 py-0.5 text-[10.5px] font-semibold tracking-wide text-foreground bg-muted/40">
+                    {signal.side}
+                  </span>
+                  <span className="font-semibold text-body tracking-tight text-foreground">{signal.symbol}</span>
               </div>
-              <div className="line-clamp-2 text-[11px] text-muted-foreground">
-                {risk.reason}
+                <div className="text-caption text-muted-foreground">
+                Rule: <span className="font-mono text-foreground/80">{signal.rule || "reversion"}</span>
               </div>
-              {risk.symbol && (
-                <div className="text-[11px] text-muted-foreground">
-                  {risk.symbol} · {risk.quantity ? `${risk.quantity} qty` : ""}
+                {signal.reason && (
+                  <div className="rounded-lg border border-border/50 bg-muted/[0.12] p-2 text-[10.5px] text-muted-foreground leading-snug">
+                    {signal.reason}
                 </div>
               )}
-              {risk.at && (
-                <div className="text-[10px] text-muted-foreground/80">{istClock(risk.at)} IST</div>
-              )}
             </div>
           ) : (
-            <div className="mt-2 text-[11.5px] text-muted-foreground">
-              Evaluates immediately when signal is emitted
+              <div className="mt-3 text-caption text-muted-foreground/70 leading-relaxed">
+                Scanning universe for entry conditions...
             </div>
           )}
         </div>
 
-        {/* 3. Last OMS Order */}
-        <div className="rounded-xl border border-border/60 bg-muted/10 p-3.5">
-          <div className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>3. OMS Order</span>
-            {order ? (
-              <Badge tone={order.status === "FILLED" ? "good" : order.status === "REJECTED" ? "bad" : "info"}>
-                {order.status}
-              </Badge>
-            ) : (
-              <Badge tone="flat">Idle</Badge>
+          {signal?.at && (
+            <div className="mt-3 pt-2 border-t border-border/30 text-micro text-muted-foreground/60 font-mono">
+              {istClock(signal.at)} IST
+            </div>
             )}
           </div>
+
+        {/* Bucket 2: Risk Gate */}
+        <div className={cn(
+            "group relative flex flex-col justify-between rounded-md border p-3.5 transition-all duration-300",
+            risk
+            ? "border-border/90 bg-card/90 "
+            : "border-border/40 bg-muted/[0.06] opacity-60"
+          )}>
+          <div>
+            <div className="flex items-center justify-between text-caption font-medium tracking-wide">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+              <span className="size-4 grid place-items-center rounded-full border border-border/80 bg-muted/30 text-micro font-mono text-muted-foreground">2</span>
+                <span className="font-semibold text-foreground/90">Risk Gate</span>
+              </span>
+              <Badge tone={risk ? (risk.approved ? "flat" : "bad") : "flat"} className="text-micro px-1.5 py-0 border border-border/60">
+                {risk ? (risk.approved ? "Approved" : "Rejected") : "Awaiting"}
+              </Badge>
+            </div>
+
+            {risk ? (
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="text-xs font-semibold text-foreground">
+                  {risk.approved ? "Passed Risk Check" : "Refused by Guard"}
+                </div>
+                <div className="rounded-lg border border-border/50 bg-muted/[0.12] p-2 text-[10.5px] text-muted-foreground leading-snug">
+                  {risk.reason}
+                </div>
+                {risk.symbol && (
+                  <div className="text-caption text-muted-foreground">
+                    {risk.symbol} {risk.quantity ? `· ${risk.quantity} qty` : ""}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 text-caption text-muted-foreground/70 leading-relaxed">
+                Awaiting trade call for limits and exposure check...
+              </div>
+            )}
+          </div>
+
+          {risk?.at && (
+            <div className="mt-3 pt-2 border-t border-border/30 text-micro text-muted-foreground/60 font-mono">
+              {istClock(risk.at)} IST
+            </div>
+          )}
+        </div>
+
+        {/* Bucket 3: OMS Order */}
+        <div className={cn(
+            "group relative flex flex-col justify-between rounded-md border p-3.5 transition-all duration-300",
+            order
+            ? "border-border/90 bg-card/90 "
+            : "border-border/40 bg-muted/[0.06] opacity-60"
+          )}>
+          <div>
+            <div className="flex items-center justify-between text-caption font-medium tracking-wide">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+              <span className="size-4 grid place-items-center rounded-full border border-border/80 bg-muted/30 text-micro font-mono text-muted-foreground">3</span>
+                <span className="font-semibold text-foreground/90">OMS Order</span>
+              </span>
+              <Badge tone={order ? (order.status === "FILLED" ? "flat" : order.status === "REJECTED" ? "bad" : "flat") : "flat"} className="text-micro px-1.5 py-0 border border-border/60">
+                {order ? order.status : "Idle"}
+              </Badge>
+            </div>
+
           {order ? (
-            <div className="mt-2 space-y-1 text-[12px]">
-              <div className="font-semibold text-foreground">
-                {order.side} {order.symbol} x{order.quantity}
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="font-semibold text-body text-foreground tracking-tight">
+                {order.side} {order.symbol} <span className="font-mono text-muted-foreground text-caption">x{order.quantity}</span>
               </div>
               {order.order_id && (
-                <div className="font-mono text-[10.5px] text-muted-foreground">
-                  ID: {order.order_id.slice(0, 10)}
+                  <div className="font-mono text-micro text-muted-foreground/80">
+                  ID: <span className="text-foreground/80 font-medium">{order.order_id.slice(0, 10)}</span>
                 </div>
               )}
               {order.reason && (
-                <div className="line-clamp-2 text-[10.5px] text-muted-foreground">
+                  <div className="rounded-lg border border-border/50 bg-muted/[0.12] p-2 text-[10.5px] text-muted-foreground leading-snug">
                   {order.reason}
                 </div>
               )}
             </div>
           ) : (
-            <div className="mt-2 text-[11.5px] text-muted-foreground">
-              Submits through OMS upon risk approval
+              <div className="mt-3 text-caption text-muted-foreground/70 leading-relaxed">
+                Awaiting risk release to build broker order packet...
             </div>
           )}
         </div>
 
-        {/* 4. Last Paper Fill */}
-        <div className="rounded-xl border border-border/60 bg-muted/10 p-3.5">
-          <div className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>4. Paper Fill</span>
-            {fill ? <Badge tone="good">Filled</Badge> : <Badge tone="flat">No Fill</Badge>}
+          <div className="mt-3 pt-2 border-t border-border/30 text-micro text-muted-foreground/60 font-mono">
+            {order ? "Dispatched" : "—"}
           </div>
+        </div>
+
+        {/* Bucket 4: Paper Fill */}
+        <div className={cn(
+            "group relative flex flex-col justify-between rounded-md border p-3.5 transition-all duration-300",
+            fill
+            ? "border-border/90 bg-card/90 "
+            : "border-border/40 bg-muted/[0.06] opacity-60"
+          )}>
+          <div>
+            <div className="flex items-center justify-between text-caption font-medium tracking-wide">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+              <span className="size-4 grid place-items-center rounded-full border border-border/80 bg-muted/30 text-micro font-mono text-muted-foreground">4</span>
+                <span className="font-semibold text-foreground/90">Paper Fill</span>
+              </span>
+              <Badge tone="flat" className="text-micro px-1.5 py-0 border border-border/60">
+                {fill ? "Matched" : "No Fill"}
+              </Badge>
+            </div>
+
           {fill ? (
-            <div className="mt-2 space-y-1 text-[12px]">
-              <div className="font-semibold text-foreground">
-                {fill.side} {fill.symbol} x{fill.quantity}
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="font-semibold text-body text-foreground tracking-tight">
+                {fill.side} {fill.symbol} <span className="font-mono text-muted-foreground text-caption">x{fill.quantity}</span>
               </div>
-              <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                Paper Venue Matched
+                <div className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-muted/20 px-2 py-0.5 text-[10.5px] font-medium text-foreground/90">
+                  <span className="size-1.5 rounded-full bg-foreground/60" />
+                  Venue Fill Executed
               </div>
               <div className="text-[10.5px] text-muted-foreground">
-                Enters journal as <span className="font-semibold text-foreground">PAPER_FORWARD</span>
+              Recorded in journal as <strong className="font-medium text-foreground">PAPER_FORWARD</strong>
               </div>
             </div>
           ) : (
-            <div className="mt-2 text-[11.5px] text-muted-foreground">
-              Matches at live quote with modeled slippage
+              <div className="mt-3 text-caption text-muted-foreground/70 leading-relaxed">
+                Matches against live book quote with slippage model.
             </div>
           )}
+          </div>
+
+          <div className="mt-3 pt-2 border-t border-border/30 text-micro text-muted-foreground/60 font-mono">
+            {fill ? "Recorded" : "—"}
+          </div>
         </div>
       </div>
     </Card>
@@ -2153,94 +2361,107 @@ function StatusPill({
     return <Badge tone={tone}>{status}</Badge>;
   }
 
+  // Refined Stripe-style status pills: subdued tints, calm dots, elegant typography
   switch (diagnosticState) {
     case "market_closed":
       return (
-        <Badge tone="warn" className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400">
-          MARKET CLOSED
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-0.5 text-caption font-medium text-slate-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+          Market closed
+        </span>
       );
     case "no_live_tick":
       return (
-        <Badge tone="warn" className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400">
-          WAITING FOR TICKS
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-0.5 text-caption font-medium text-warning">
+          <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse" />
+          Waiting for ticks
+        </span>
       );
     case "stale_tick":
       return (
-        <Badge tone="bad" className="border-destructive/40 bg-destructive/10 text-destructive">
-          STALE TICK
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-loss/25 bg-loss/10 px-2.5 py-0.5 text-caption font-medium text-loss">
+          <span className="h-1.5 w-1.5 rounded-full bg-loss" />
+          Stale tick
+        </span>
       );
     case "system_error":
       return (
-        <Badge tone="bad" className="border-destructive/40 bg-destructive/10 text-destructive">
-          SYSTEM ERROR
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-loss/30 bg-loss/10 px-2.5 py-0.5 text-caption font-medium text-loss">
+          <span className="h-1.5 w-1.5 rounded-full bg-loss" />
+          System error
+        </span>
       );
     case "risk_rejected":
       return (
-        <Badge tone="warn" className="border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400">
-          RISK REJECTED
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-0.5 text-caption font-medium text-warning">
+          <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+          Risk rejected
+        </span>
       );
     case "order_rejected":
       return (
-        <Badge tone="bad" className="border-destructive/40 bg-destructive/10 text-destructive">
-          ORDER REJECTED
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-loss/25 bg-loss/10 px-2.5 py-0.5 text-caption font-medium text-loss">
+          <span className="h-1.5 w-1.5 rounded-full bg-loss" />
+          Order rejected
+        </span>
       );
     case "order_waiting_for_fill":
       return (
-        <Badge tone="info" className="border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400">
-          ORDER PENDING FILL
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/25 bg-indigo-500/10 px-2.5 py-0.5 text-caption font-medium text-indigo-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+          Order pending
+        </span>
       );
     case "paper_fill_completed":
       return (
-        <Badge tone="good" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-          FILL COMPLETED
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-gain/20 bg-gain/10 px-2.5 py-0.5 text-caption font-medium text-gain">
+          <span className="h-1.5 w-1.5 rounded-full bg-gain" />
+          Fill complete
+        </span>
       );
     case "no_signal":
       return (
-        <Badge tone="good" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-          ACTIVE (NO SIGNAL)
-        </Badge>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-0.5 text-caption font-medium text-slate-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+          Monitoring
+        </span>
       );
     case "running":
     default:
       if (trading === false) {
         return (
-          <Badge tone="warn" className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400">
-            NOT TRADING
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-0.5 text-caption font-medium text-warning">
+            <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+            Not trading
+          </span>
         );
       }
       return (
-        <Badge tone="good" className="border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-          <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-          RUNNING (LIVE FEED)
-        </Badge>
+        <Tooltip content="Receiving live feed" side="top" delay={400}>
+        <span role="img" aria-label="Live feed" className="relative grid size-5 shrink-0 place-items-center">
+            <span className="absolute inline-flex size-3 animate-ping rounded-full bg-gain/40" />
+            <span className="relative size-1.5 rounded-full bg-gain" />
+          </span>
+        </Tooltip>
       );
   }
 }
 
 function TradingPill({ trading, reason }: { trading: boolean; reason?: string | null }) {
+  if (trading) {
   return (
-    <span
-      title={reason ?? (trading ? "Deployment actively processing live ticks" : "Deployment not currently trading")}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold",
-        trading
-          ? "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400"
-          : "bg-muted text-muted-foreground",
-      )}
-    >
-      <span
-        className={cn("h-1.5 w-1.5 rounded-full", trading ? "bg-emerald-500" : "bg-muted-foreground/40")}
-      />
-      {trading ? "trading" : "not trading"}
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-gain/20 bg-gain/15/30 px-2 py-0.5 text-caption font-medium text-gain">
+        <span className="h-1.5 w-1.5 rounded-full bg-gain" />
+        Trading
+      </span>
+    );
+  }
+  return (
+    <span title={reason ?? undefined} className="inline-flex">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-caption font-medium text-slate-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+        Not trading
+      </span>
     </span>
   );
 }
@@ -2260,7 +2481,7 @@ function LogCount({ label, value, sub }: { label: string; value: number; sub?: s
       <div className="text-[10.5px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
         {label}
       </div>
-      <div className="text-[15px] font-bold tabular-nums">{value}</div>
+      <div className="text-sm font-semibold tabular-nums">{value}</div>
       {sub && <div className="text-[10.5px] text-muted-foreground">{sub}</div>}
     </div>
   );
@@ -2268,9 +2489,9 @@ function LogCount({ label, value, sub }: { label: string; value: number; sub?: s
 
 /** Render a risk limit from the loosely-typed limits map.
  *
- *  `null` in that map means *unbounded*, which the backend emits by collapsing
- *  an `inf` sentinel — `Infinity` is not valid JSON. So `null` prints as
- *  "unbounded", never as a number nobody set. */
+ * `null` in that map means *unbounded*, which the backend emits by collapsing
+ * an `inf` sentinel — `Infinity` is not valid JSON. So `null` prints as
+ * "unbounded", never as a number nobody set. */
 function limitText(limits: Record<string, unknown>, key: string): string {
   const raw = limits?.[key];
   if (raw === null || raw === undefined) return "unbounded";
@@ -2282,6 +2503,7 @@ function limitText(limits: Record<string, unknown>, key: string): string {
 
 function CompareView({
   strategies,
+  strategyNames,
   deployments,
   cmpStrategyId,
   cmpChampion,
@@ -2301,6 +2523,7 @@ function CompareView({
   onLaunch,
 }: {
   strategies: string[];
+  strategyNames: Record<string, string>;
   deployments: Deployment[];
   cmpStrategyId: string;
   cmpChampion: string;
@@ -2341,8 +2564,8 @@ function CompareView({
     <div className="space-y-4">
       <Card>
         <CardHeader
-          title="Champion vs challenger"
-          sub="Two versions, one market, two books. This screen reads readiness — it never declares a winner and cannot promote."
+          title="Compare versions"
+          sub="Pick a strategy and two versions to see which is doing better. Then launch the challenger below."
         />
         <div className="flex flex-wrap items-end gap-3 p-5 pt-3">
           <div className="min-w-[220px] flex-1">
@@ -2352,7 +2575,7 @@ function CompareView({
               onChange={onStrategy}
               options={[
                 { value: "", label: "Pick a strategy…" },
-                ...strategies.map((s) => ({ value: s, label: s.slice(0, 12) })),
+                ...strategies.map((s) => ({ value: s, label: strategyNames[s] ?? s.slice(0, 12) })),
               ]}
             />
           </div>
@@ -2373,16 +2596,10 @@ function CompareView({
             <ErrorBox>{cmpError}</ErrorBox>
           </div>
         )}
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Launch a challenger"
-          sub="Copies the champion's capital, universe and config — only the version differs, so parity is structural rather than typed correctly."
-        />
-        <div className="flex flex-wrap items-end gap-3 p-5 pt-3">
+        <div className="mx-5 border-t border-border/60" aria-hidden="true" />
+        <div className="flex flex-wrap items-end gap-3 p-5">
           <div className="min-w-[260px] flex-1">
-            <label className="mb-1.5 block px-1 text-sm font-medium">Champion deployment</label>
+            <label className="mb-1.5 block px-1 text-sm font-medium">Running deployment</label>
             <Select
               value={launchDepId}
               onChange={onLaunchDep}
@@ -2390,7 +2607,7 @@ function CompareView({
                 { value: "", label: "Pick a running PAPER deployment…" },
                 ...champions.map((d) => ({
                   value: d.deployment_id,
-                  label: `${d.deployment_id.slice(0, 8)} · ${d.strategy_id.slice(0, 8)} v${d.strategy_version} · ${fmtMoneyOrDash(d.capital)}`,
+                  label: `${strategyNames[d.strategy_id] ?? d.strategy_id.slice(0, 8)} v${d.strategy_version} · ${fmtMoneyOrDash(d.capital)}`,
                 })),
               ]}
             />
@@ -2417,7 +2634,7 @@ function CompareView({
                   {deltaSample(comparison.comparison.champion.n, comparison.comparison.challenger.n)} · metric {metric}
                 </span>
               </div>
-              <p className="mt-2 text-[12px] text-muted-foreground">
+              <p className="mt-2 text-xs text-muted-foreground">
                 {comparisonVerdictBlurb(comparison.comparison.verdict)}{" "}
                 {comparison.comparison.verdict_reasons.join(" ")}
               </p>
@@ -2430,9 +2647,9 @@ function CompareView({
               sub="Deltas are challenger-minus-champion descriptions, read beside both sample sizes."
             />
             <div className="overflow-x-auto p-5 pt-3">
-              <table className="w-full text-[12px]">
+              <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-border/60 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <tr className="border-b border-border/60 text-left text-micro uppercase tracking-wider text-muted-foreground">
                     <th className="px-2 py-1.5 font-medium">Figure</th>
                     <th className="px-2 py-1.5 font-medium">Champion V{comparison.champion_version}</th>
                     <th className="px-2 py-1.5 font-medium">Challenger V{comparison.challenger_version}</th>
@@ -2457,14 +2674,14 @@ function CompareView({
 
           <Card>
             <CardHeader title="Exact strategy difference" sub="Changed parameters between the two pinned definitions." />
-            <div className="p-5 pt-3 text-[12px]">
+            <div className="p-5 pt-3 text-xs">
               {comparison.definition_diff.identical ? (
                 <p className="text-muted-foreground">The pinned definitions are identical.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full table-fixed">
                     <thead>
-                      <tr className="border-b border-border/60 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <tr className="border-b border-border/60 text-left text-micro uppercase tracking-wider text-muted-foreground">
                         <th className="w-1/5 px-2 py-1.5 font-medium">Changed</th>
                         <th className="w-2/5 px-2 py-1.5 font-medium">Champion V{comparison.champion_version}</th>
                         <th className="w-2/5 px-2 py-1.5 font-medium">Challenger V{comparison.challenger_version}</th>
@@ -2472,7 +2689,7 @@ function CompareView({
                     </thead>
                     <tbody>
                       {comparison.definition_diff.changes.map((c) => (
-                        <tr key={c.parameter} className="border-b border-border/40 font-mono text-[11px] last:border-0">
+                        <tr key={c.parameter} className="border-b border-border/40 font-mono text-caption last:border-0">
                           <td className="break-words px-2 py-1.5">{c.parameter}</td>
                           <td className="break-words px-2 py-1.5">{fmtDiffValue(c.champion)}</td>
                           <td className="break-words px-2 py-1.5">{fmtDiffValue(c.challenger)}</td>
@@ -2487,7 +2704,7 @@ function CompareView({
 
           <Card>
             <CardHeader title="Version timeline" sub="Forward observations per version, with roles." />
-            <div className="p-5 pt-3 text-[12px]">
+            <div className="p-5 pt-3 text-xs">
               {comparison.timeline.map((t) => (
                 <div key={t.version} className="flex items-center gap-2 py-1">
                   <span className="font-semibold tabular-nums">V{t.version}</span>
@@ -2507,12 +2724,12 @@ function CompareView({
 
           <Card>
             <CardHeader title="Identical conditions" sub="Parity is reported, not assumed." />
-            <div className="space-y-1 p-5 pt-3 text-[12px]">
+            <div className="space-y-1 p-5 pt-3 text-xs">
               <ParityLine ok={comparison.parity.identical_capital} label="Capital" />
               <ParityLine ok={comparison.parity.identical_config} label="Universe & config" />
               <ParityLine ok={comparison.parity.venue_shared} label="Market data, costs, slippage (shared venue)" />
               {comparison.parity.mismatches.map((m) => (
-                <p key={m} className="text-amber-500">
+                <p key={m} className="text-warning">
                   • {m}
                 </p>
               ))}
@@ -2534,13 +2751,13 @@ function CompareView({
                       : ctx.statement || "No context finding."
                   }
                 />
-                <div className="space-y-2 p-5 pt-3 text-[12px]">
+                <div className="space-y-2 p-5 pt-3 text-xs">
                   <p className="text-muted-foreground">
                     Context score bands:{" "}
                     {(summary.score_bands || [])
                       .map((b) => `${b.band} ${b.forward_trades}`)
                       .join(" · ") || "—"}
-                    {"  "}· {ctx.forward_n} forward with context
+                      {" "}· {ctx.forward_n} forward with context
                   </p>
                   <p className="text-muted-foreground">
                     Regimes:{" "}
@@ -2583,7 +2800,7 @@ function pctOf(fraction: number | null | undefined): number | null {
 
 function ParityLine({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <p className={ok ? "text-emerald-500" : "text-amber-500"}>
+    <p className={ok ? "text-gain" : "text-warning"}>
       {ok ? "✓" : "•"} {label}
     </p>
   );
@@ -2601,13 +2818,13 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border/60 p-4">
+    <div className="rounded-lg border border-border/60 p-4">
       <div className="mb-3 flex items-start gap-2.5">
-        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-bold">
+        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 text-caption font-semibold">
           {n}
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold" title={note}>{title}</div>
+        <div className="text-body font-semibold" title={note}>{title}</div>
         </div>
       </div>
       {children}
@@ -2633,8 +2850,8 @@ function Field({
       {hint && (
         <span
           className={cn(
-            "px-1 text-[11px]",
-            warn ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+            "px-1 text-caption",
+            warn ? "text-warning" : "text-muted-foreground",
           )}
         >
           {hint}

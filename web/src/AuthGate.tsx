@@ -14,7 +14,7 @@ import {
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox } from "./components/ui/card";
 import { PageLoader } from "./components/ui/loading";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 
 type View = "setup" | "login" | "register" | "mfa";
@@ -149,11 +149,11 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
     return (
       <Shell>
         <div className="text-center">
-          <div className="mx-auto mb-4 grid size-11 place-items-center rounded-xl bg-amber-500/15 text-amber-500">
+          <div className="mx-auto mb-4 grid size-11 place-items-center rounded-lg bg-warning/15 text-warning">
             <AlertTriangle className="size-5" />
           </div>
-          <h2 className="text-lg font-semibold tracking-tight">Backend unreachable</h2>
-          <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
+          <h2 className="text-heading">Backend unreachable</h2>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm font-light leading-[1.4] text-muted-foreground">
             The dashboard could not reach the Forward API, so it cannot tell whether you are
             signed in. This is a connectivity problem, not a rejected login.
           </p>
@@ -223,8 +223,8 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
     <Shell>
       <div className="text-center">
         <BrandMark className="mx-auto mb-4 size-11" />
-        <h2 className="text-lg font-semibold tracking-tight">{heading}</h2>
-        <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
+        <h2 className="text-heading">{heading}</h2>
+        <p className="mx-auto mt-1.5 max-w-sm text-sm font-light leading-[1.4] text-muted-foreground">
           {blurb}
         </p>
       </div>
@@ -314,10 +314,10 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
       {error && errorCode ? (
         <p
           role="alert"
-          className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-destructive"
+          className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-destructive"
         >
           {error}
-          <span className="mt-1 block font-mono text-[10px] opacity-70">{errorCode}</span>
+          <span className="mt-1 block font-mono text-micro opacity-70">{errorCode}</span>
         </p>
       ) : null}
 
@@ -337,7 +337,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
         {isMfa ? (
           <button
             type="button"
-            className="text-[13px] font-medium text-primary hover:underline"
+            className="text-body font-medium text-primary hover:underline"
             onClick={() => {
               setTotp("");
               setView("login");
@@ -353,7 +353,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
         {!isSetup && status.allow_signup ? (
           <button
             type="button"
-            className="text-[13px] font-medium text-primary hover:underline"
+            className="text-body font-medium text-primary hover:underline"
             onClick={() => {
               setView(isRegister ? "login" : "register");
               setError(null);
@@ -366,14 +366,14 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
         ) : null}
 
         {!isSetup && !status.allow_signup ? (
-          <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-center text-caption leading-relaxed text-muted-foreground">
             Sign-up is disabled on this instance. Ask the owner to create an account for you.
           </p>
         ) : null}
       </div>
 
       {status.auth_required ? null : (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-600 dark:text-amber-400">
+        <p className="mt-4 rounded-md border border border-warning/20 bg-warning/[0.08] px-3 py-2 text-xs leading-relaxed text-warning">
           <strong>Auth is switched off</strong> on this instance, so reads work without
           signing in. Signing in is still the only way to write.
         </p>
@@ -385,7 +385,7 @@ export default function AuthGate({ offline, onAuthenticated }: Props) {
 function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="grid min-h-screen place-items-center bg-background px-4 py-10">
-      <Card className="w-full max-w-sm p-6">{children}</Card>
+      <Card className="w-full max-w-sm p-8">{children}</Card>
     </div>
   );
 }

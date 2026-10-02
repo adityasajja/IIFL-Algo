@@ -7,32 +7,32 @@
  * result" into one screen. Here the three states are distinct and the URL-ish
  * stepper says which one you are in:
  *
- *   Configuring  → no run selected, the form is the page
- *   Running      → a run is QUEUED/RUNNING, the page polls and shows progress
- *   Results      → a run is terminal, the page shows the numbers
+ * Configuring → no run selected, the form is the page
+ * Running → a run is QUEUED/RUNNING, the page polls and shows progress
+ * Results → a run is terminal, the page shows the numbers
  *
  * The honesty rules this panel enforces, all of which are the point of the
  * project rather than decoration:
  *
- *  1. **Ranking is not evidence.** Every strategy in the picker carries its
- *     walk-forward verdict, and the picker refuses to imply that an untested
- *     strategy is a good one. A backtest of an untested strategy is a number
- *     about the past, and the panel says so on the results page too.
- *  2. **A version is what makes a run reproducible.** Built-ins have no version
- *     history; saved strategies do. When you pick a saved version, its number
- *     is pinned into the run and shown on every trade, so "which version made
- *     this trade" is answerable a year later.
- *  3. **The monthly matrix must reconcile.** The panel compounds the twelve
- *     months of each year itself and shows the result next to the run's stated
- *     total return. If those disagree the matrix is wrong and the mismatch is
- *     rendered as an error, not smoothed over.
- *  4. **A stop is a trigger, not a fill.** Realised exits below the configured
- *     stop are labelled "gapped through" rather than presented as a rule
- *     failure — the engine fills on the next open, which is what actually
- *     happens.
- *  5. **Costs are stated.** The cost model and its round-trip estimate are on
- *     the results header, because a backtest is only as good as its cost
- *     assumption — the single most common way a backtest lies.
+ * 1. **Ranking is not evidence.** Every strategy in the picker carries its
+ * walk-forward verdict, and the picker refuses to imply that an untested
+ * strategy is a good one. A backtest of an untested strategy is a number
+ * about the past, and the panel says so on the results page too.
+ * 2. **A version is what makes a run reproducible.** Built-ins have no version
+ * history; saved strategies do. When you pick a saved version, its number
+ * is pinned into the run and shown on every trade, so "which version made
+ * this trade" is answerable a year later.
+ * 3. **The monthly matrix must reconcile.** The panel compounds the twelve
+ * months of each year itself and shows the result next to the run's stated
+ * total return. If those disagree the matrix is wrong and the mismatch is
+ * rendered as an error, not smoothed over.
+ * 4. **A stop is a trigger, not a fill.** Realised exits below the configured
+ * stop are labelled "gapped through" rather than presented as a rule
+ * failure — the engine fills on the next open, which is what actually
+ * happens.
+ * 5. **Costs are stated.** The cost model and its round-trip estimate are on
+ * the results header, because a backtest is only as good as its cost
+ * assumption — the single most common way a backtest lies.
  */
 import {
   AlertTriangle,
@@ -77,12 +77,12 @@ import { Button } from "./components/ui/button";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
 import { ButtonLoader, PageLoader } from "./components/ui/loading";
 import { EquityChart } from "./components/ui/equity-chart";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { MorphingModal } from "./components/ui/modal";
 import { Select } from "./components/ui/select";
 import { strategyLabel } from "./lib/format";
 import { Badge, Callout, Stat, fmtMoney, fmtNum, fmtPct } from "./components/ui/stat";
-import { Switch } from "./components/ui/switch";
+import { Switch } from "./components/motion/switch";
 import { cn } from "./lib/utils";
 import { RelativeTime } from "./lib/time";
 import {
@@ -96,18 +96,18 @@ import {
 } from "./lib/backtest-results";
 
 /** Poll interval while a run is in flight. The engine reports progress in
- *  coarse steps (0.0 → 0.35 → 1.0), so polling faster than this only adds load
- *  without adding information. */
+ * coarse steps (0.0 → 0.35 → 1.0), so polling faster than this only adds load
+ * without adding information. */
 const POLL_MS = 1500;
 
 /** Stop polling after this long and tell the user, rather than spinning
- *  forever on a worker that has silently died. */
+ * forever on a worker that has silently died. */
 const POLL_GIVE_UP_MS = 20 * 60 * 1000;
 
 type View = "configure" | "run" | "results";
 
 /** Newest version of a saved strategy. Written as a helper rather than
- *  `versions.at(-1)` because the TS lib target here predates `Array.at`. */
+ * `versions.at(-1)` because the TS lib target here predates `Array.at`. */
 const newestVersion = (
   versions: StrategyVersionOption[] | undefined,
 ): StrategyVersionOption | undefined =>
@@ -262,7 +262,7 @@ export default function BacktestWorkflowPanel() {
       )}
 
       {view === "results" && activeId && !active && (
-        <div className="grid place-items-center rounded-2xl border border-dashed border-border py-12">
+        <div className="grid place-items-center rounded-lg border border-dashed border-border py-12">
           <PageLoader label="Loading results" />
         </div>
       )}
@@ -280,7 +280,7 @@ function Stepper({ view }: { view: View }) {
     { id: "results", label: "Results", done: view === "results" },
   ];
   return (
-    <div className="flex flex-wrap items-center gap-x-1 gap-y-2 px-1 text-[12px]">
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-2 px-1 text-xs">
       {steps.map((s, i) => {
         const current = s.id === view;
         return (
@@ -297,7 +297,7 @@ function Stepper({ view }: { view: View }) {
               )}
             >
               {s.done && !current ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-gain" />
               ) : (
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
               )}
@@ -780,13 +780,13 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border/60 p-4">
+    <div className="rounded-lg border border-border/60 p-4">
       <div className="mb-3 flex items-start gap-2.5">
-        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-bold">
+        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 text-caption font-semibold">
           {n}
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold" title={note}>{title}</div>
+        <div className="text-body font-semibold" title={note}>{title}</div>
         </div>
       </div>
       {children}
@@ -812,8 +812,8 @@ function Field({
       {hint && (
         <span
           className={cn(
-            "px-1 text-[11px]",
-            warn ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+            "px-1 text-caption",
+            warn ? "text-warning" : "text-muted-foreground",
           )}
         >
           {hint}
@@ -855,7 +855,7 @@ function RunHistory({
         <div className="overflow-x-auto border-t border-border/60">
           <table className="w-full border-collapse text-[12.5px]">
             <thead>
-              <tr className="border-b border-border bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
                 <th className="px-3 py-2 font-semibold">Run</th>
                 <th className="px-3 py-2 font-semibold">Strategy</th>
                 <th className="px-3 py-2 font-semibold">Status</th>
@@ -917,8 +917,8 @@ function StatusBadge({ status }: { status: BacktestStatus }) {
 // ─── run progress ─────────────────────────────────────────────────────────────
 
 /** The engine reports progress in named steps, not a per-bar percentage. Stating
- *  the step is honest; a smooth animated bar would only be reporting that time
- *  is passing. See `lib/backtest-results.ts`. */
+ * the step is honest; a smooth animated bar would only be reporting that time
+ * is passing. See `lib/backtest-results.ts`. */
 function RunProgress({
   runId,
   run,
@@ -948,7 +948,7 @@ function RunProgress({
             </span>
             <StatusBadge status={status} />
           </div>
-          <div className="mt-2 text-[13px] text-muted-foreground">{progressLabel(progress)}</div>
+          <div className="mt-2 text-body text-muted-foreground">{progressLabel(progress)}</div>
           <div className="mt-1 font-mono text-[11.5px] text-muted-foreground">
             run {runId}
           </div>
@@ -972,7 +972,7 @@ function RunProgress({
         />
       </div>
 
-      <div className="mt-5 grid gap-x-6 gap-y-2 text-[12px]">
+      <div className="mt-5 grid gap-x-6 gap-y-2 text-xs">
         {run?.created_at && (
           <Row k="Submitted">
             <RelativeTime value={run.created_at} />
@@ -1019,9 +1019,9 @@ function Row({ k, children }: { k: string; children: React.ReactNode }) {
 
 /** Friendly names for the keys the engine actually emits.
  *
- *  Everything not listed here still renders — `prettyMetric` title-cases the
- *  raw key — so adding a metric on the backend does not require a frontend
- *  change to become visible. */
+ * Everything not listed here still renders — `prettyMetric` title-cases the
+ * raw key — so adding a metric on the backend does not require a frontend
+ * change to become visible. */
 const METRIC_LABELS: Record<string, string> = {
   total_return_pct: "Total return %",
   cagr_pct: "CAGR %",
@@ -1199,7 +1199,7 @@ function Results({
 
               {plottable(curves?.drawdown) && (
                 <div className="mt-5">
-                  <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="mb-1.5 px-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Drawdown from peak (%)
                   </div>
                   <EquityChart
@@ -1218,7 +1218,7 @@ function Results({
 
               {plottable(curves?.exposure) && (
                 <details className="mt-5">
-                  <summary className="cursor-pointer px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <summary className="cursor-pointer px-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Exposure — capital deployed per bar
                   </summary>
                   <div className="mt-2">
@@ -1250,10 +1250,10 @@ function Results({
                 <EmptyChart label="This run produced no closed trades." />
               ) : (
                 <>
-                  <div className="overflow-x-auto rounded-xl border border-border">
+                  <div className="overflow-x-auto rounded-lg border border-border">
                     <table className="w-full border-collapse text-[12.5px]">
                       <thead>
-                        <tr className="border-b border-border bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <tr className="border-b border-border bg-muted/40 text-left text-caption uppercase tracking-wide text-muted-foreground">
                           <th className="px-3 py-2 font-semibold">#</th>
                           <th className="px-3 py-2 font-semibold">Symbol</th>
                           <th className="px-3 py-2 font-semibold">Side</th>
@@ -1277,9 +1277,9 @@ function Results({
                             <td className="px-3 py-2">
                               <span
                                 className={cn(
-                                  "text-[11px] font-semibold",
+                                  "text-caption font-semibold",
                                   t.direction === "LONG"
-                                    ? "text-emerald-600 dark:text-emerald-400"
+                                  ? "text-gain"
                                     : "text-destructive",
                                 )}
                               >
@@ -1389,7 +1389,7 @@ function Results({
             {showAllMetrics && (
               <div className="border-t border-border/60 p-5">
                 <div className="overflow-hidden rounded-xl border border-border">
-                  <table className="w-full border-collapse text-[13px]">
+                  <table className="w-full border-collapse text-body">
                     <tbody>
                       {Object.entries(metrics)
                         .sort(([a], [b]) => a.localeCompare(b))
@@ -1431,7 +1431,7 @@ function Results({
 
 function ChartSkeleton() {
   return (
-    <div className="grid h-[230px] place-items-center rounded-xl border border-dashed border-border">
+    <div className="grid h-[230px] place-items-center rounded-lg border border-dashed border-border">
       <PageLoader label="Loading chart" />
     </div>
   );
@@ -1439,14 +1439,14 @@ function ChartSkeleton() {
 
 function EmptyChart({ label }: { label: string }) {
   return (
-    <div className="grid place-items-center rounded-xl border border-dashed border-border py-10 text-[13px] text-muted-foreground">
+    <div className="grid place-items-center rounded-lg border border-dashed border-border py-10 text-body text-muted-foreground">
       {label}
     </div>
   );
 }
 
 /** The summary strip. Kept to the metrics a trader actually decides on, with
- *  the full set one click below. */
+ * the full set one click below. */
 function Headline({
   metrics,
   run,
@@ -1535,15 +1535,15 @@ function Headline({
 }
 
 /** Reproducibility block. A run is only reproducible if the data it consumed is
- *  fingerprinted, and the panel says which of the two conditions hold. */
+ * fingerprinted, and the panel says which of the two conditions hold. */
 function Reproducibility({ run }: { run: BacktestRun }) {
   const cfg = run.config;
   if (!cfg) return null;
   return (
     <Card className="p-4">
-      <div className="flex flex-wrap items-start gap-x-8 gap-y-3 text-[12px]">
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-3 text-xs">
         <div className="min-w-0">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1 flex items-center gap-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             <Repeat className="h-3.5 w-3.5" />
             Reproducibility
           </div>
@@ -1576,7 +1576,7 @@ function Reproducibility({ run }: { run: BacktestRun }) {
         </div>
       </div>
       {run.data_fingerprint && (
-        <div className="mt-3 font-mono text-[11px] text-muted-foreground">
+        <div className="mt-3 font-mono text-caption text-muted-foreground">
           data {run.data_fingerprint.slice(0, 16)}…
         </div>
       )}
@@ -1587,15 +1587,15 @@ function Reproducibility({ run }: { run: BacktestRun }) {
 function KV({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</div>
+      <div className="text-caption uppercase tracking-wide text-muted-foreground">{k}</div>
       <div className={cn("font-medium", mono && "font-mono text-[11.5px]")}>{v}</div>
     </div>
   );
 }
 
 /** How a trade closed. A realised loss past the configured stop is labelled as
- *  a gap-through, because that is what happened: the engine fills on the next
- *  open, so a stop is a trigger and not a guaranteed price. */
+ * a gap-through, because that is what happened: the engine fills on the next
+ * open, so a stop is a trigger and not a guaranteed price. */
 function ExitReason({
   reason,
   stopPct,
@@ -1618,7 +1618,7 @@ function ExitReason({
           reason === "stop_loss" || reason === "trailing_stop"
             ? "text-destructive"
             : reason === "take_profit"
-              ? "text-emerald-600 dark:text-emerald-400"
+              ? "text-gain"
               : "text-muted-foreground",
         )}
       >
@@ -1627,7 +1627,7 @@ function ExitReason({
       {gapped && (
         <span
           title={`Closed at ${returnPct!.toFixed(2)}% against a ${stopPct}% stop — the engine fills on the next open, so the stop fired and the gap set the price.`}
-          className="cursor-help text-[10.5px] text-amber-600 dark:text-amber-400"
+          className="cursor-help text-[10.5px] text-warning"
         >
           gapped through
         </span>
@@ -1663,7 +1663,7 @@ function MonthlyMatrix({
         className={cn(
           "tabular-nums",
           v > 0.01
-            ? "text-emerald-600 dark:text-emerald-400"
+          ? "text-gain"
             : v < -0.01
               ? "text-destructive"
               : "text-muted-foreground",
@@ -1681,7 +1681,7 @@ function MonthlyMatrix({
         sub="Percentage return per calendar month. A dot means the series had no bars that month, which is not the same as a flat month."
       />
       <div className="p-5 pt-3">
-        <div className="overflow-x-auto rounded-xl border border-border">
+        <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full border-collapse text-[11.5px]">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-[10.5px] uppercase tracking-wide text-muted-foreground">
@@ -1707,7 +1707,7 @@ function MonthlyMatrix({
                     className={cn(
                       "px-2.5 py-2 text-right font-semibold tabular-nums",
                       (row.year_total ?? 0) < 0 && "text-destructive",
-                      (row.year_total ?? 0) > 0 && "text-emerald-600 dark:text-emerald-400",
+                      (row.year_total ?? 0) > 0 && "text-gain",
                     )}
                   >
                     {row.year_total === null ? "·" : `${row.year_total.toFixed(2)}%`}
@@ -1718,10 +1718,10 @@ function MonthlyMatrix({
           </table>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px]">
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
           {reconciled ? (
             <>
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-gain" />
               <span className="text-muted-foreground">
                 Compounding the months gives{" "}
                 <span className="font-medium tabular-nums text-foreground">
@@ -1736,7 +1736,7 @@ function MonthlyMatrix({
             </>
           ) : compounded !== null ? (
             <>
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
               <span className="text-muted-foreground">
                 Compounding the months gives{" "}
                 <span className="font-medium tabular-nums">{fmtPct(compounded, 3)}</span> but the
@@ -1761,12 +1761,12 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-base font-bold">{t.symbol}</span>
+            <span className="text-base font-semibold">{t.symbol}</span>
             <span
               className={cn(
-                "text-[11px] font-bold uppercase tracking-wide",
+                "text-caption font-semibold uppercase tracking-wide",
                 t.direction === "LONG"
-                  ? "text-emerald-600 dark:text-emerald-400"
+                ? "text-gain"
                   : "text-destructive",
               )}
             >
@@ -1780,8 +1780,8 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
         <div className="text-right">
           <div
             className={cn(
-              "text-lg font-bold tabular-nums",
-              win ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
+              "text-lg font-semibold tabular-nums",
+              win ? "text-gain" : "text-destructive",
             )}
           >
             {fmtMoney(t.net_pnl)}
@@ -1804,7 +1804,7 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
       </div>
 
       {/* P&L breakdown */}
-      <div className="rounded-xl border border-border">
+      <div className="rounded-lg border border-border">
         <table className="w-full border-collapse text-[12.5px]">
           <tbody>
             <DetailRow k="Gross P&L" v={fmtMoney(t.gross_pnl)} />
@@ -1829,7 +1829,7 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
             returnPct={t.return_pct}
           />
         </div>
-        <div className="mt-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2.5 text-[12px]">
+        <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-xs">
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
             <span>
               stop loss{" "}
@@ -1861,11 +1861,11 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
       <div>
         <DetailLabel>Signal conditions</DetailLabel>
         {t.signal_reason ? (
-          <div className="mt-1.5 rounded-xl border border-border bg-muted/30 px-3 py-2.5 font-mono text-[12px] leading-relaxed">
+          <div className="mt-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed">
             {t.signal_reason}
           </div>
         ) : (
-          <div className="mt-1.5 rounded-xl border border-dashed border-border px-3 py-2.5 text-[12px] text-muted-foreground">
+          <div className="mt-1.5 rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
             Not recorded. This strategy does not report why it opened a position, so the
             reason cannot be reconstructed after the fact — it is not stored anywhere else.
           </div>
@@ -1875,14 +1875,14 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
       {/* strategy version */}
       <div>
         <DetailLabel>Strategy that produced this trade</DetailLabel>
-        <div className="mt-1.5 grid grid-cols-2 gap-2 text-[12px]">
-          <div className="rounded-xl border border-border px-3 py-2">
+        <div className="mt-1.5 grid grid-cols-2 gap-2 text-xs">
+          <div className="rounded-lg border border-border px-3 py-2">
             <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
               Engine
             </div>
-            <div className="font-mono text-[12px]">{t.strategy?.engine_key ?? "—"}</div>
+            <div className="font-mono text-xs">{t.strategy?.engine_key ?? "—"}</div>
           </div>
-          <div className="rounded-xl border border-border px-3 py-2">
+          <div className="rounded-lg border border-border px-3 py-2">
             <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
               Version
             </div>
@@ -1896,10 +1896,10 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
           </div>
         </div>
         {t.strategy?.params && Object.keys(t.strategy.params).length > 0 && (
-          <div className="mt-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 font-mono text-[11.5px]">
+          <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 font-mono text-[11.5px]">
             {Object.entries(t.strategy.params)
               .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-              .join("  ")}
+              .join(" ")}
           </div>
         )}
         {t.strategy?.strategy_id && (
@@ -1909,7 +1909,7 @@ function TradeDetail({ t }: { t: BacktestTradeDetail }) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-[11.5px] text-muted-foreground">
+      <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-[11.5px] text-muted-foreground">
         <Info className="h-3.5 w-3.5 shrink-0" />
         <span>
           Cost model <span className="font-medium">{t.costs?.model ?? "—"}</span> at{" "}
@@ -1933,13 +1933,13 @@ function Leg({
   qty: number;
 }) {
   return (
-    <div className="rounded-xl border border-border px-3 py-2.5">
+    <div className="rounded-lg border border-border px-3 py-2.5">
       <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
-      <div className="mt-1 text-[13px] font-semibold tabular-nums">{fmtNum(price, 2)}</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground">{longDate(ts)}</div>
-      <div className="mt-1 text-[11px] tabular-nums text-muted-foreground">
+      <div className="mt-1 text-body font-semibold tabular-nums">{fmtNum(price, 2)}</div>
+      <div className="mt-0.5 text-caption text-muted-foreground">{longDate(ts)}</div>
+      <div className="mt-1 text-caption tabular-nums text-muted-foreground">
         {fmtNum(qty, 0)} shares
       </div>
     </div>
@@ -1948,7 +1948,7 @@ function Leg({
 
 function DetailLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="flex items-center gap-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
       <Layers className="h-3.5 w-3.5" />
       {children}
     </div>
@@ -1972,7 +1972,7 @@ function DetailRow({
       <td
         className={cn(
           "px-3 py-1.5 text-right tabular-nums",
-          strong ? "font-bold" : "font-medium",
+          strong ? "font-semibold" : "font-medium",
           tone === "bad" && "text-destructive",
         )}
       >

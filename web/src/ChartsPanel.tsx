@@ -1,7 +1,11 @@
+import { chartColor, chartSurface } from "./lib/chart-theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CandlestickSeries,
   ColorType,
   CrosshairMode,
+  HistogramSeries,
+  LineSeries,
   createChart,
   type IChartApi,
   type ISeriesApi,
@@ -28,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { API_URL, getCandles, getTickCandles, placeOrder, type Candle } from "./api";
+import { Tooltip } from "./components/motion/tooltip";
 import { Button } from "./components/ui/button";
 import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
@@ -469,10 +474,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     if (!candles || candles.length === 0 || !model || !priceChartRef.current) return;
 
     const isDark = theme === "dark";
-    const bg = isDark ? "#131722" : "#ffffff";
-    const text = isDark ? "#787b86" : "#6a6d78";
-    const border = isDark ? "#2a2e39" : "#e0e3eb";
-    const grid = isDark ? "#1e222d" : "#f0f3fa";
+    const surf = chartSurface(isDark);
+    const { bg, text, border, grid } = surf;
 
     // Create Main Price Chart
     const priceChart = createChart(priceChartRef.current, {
@@ -487,8 +490,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
-        horzLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
+        vertLine: { color: chartSurface(isDark).crosshair, width: 1, style: 3 },
+        horzLine: { color: chartSurface(isDark).crosshair, width: 1, style: 3 },
       },
       rightPriceScale: {
         borderColor: border,
@@ -505,11 +508,11 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     chartApiRef.current = priceChart;
 
     // TradingView Candlestick series
-    const candleSeries = priceChart.addCandlestickSeries({
-      upColor: "#089981",
-      downColor: "#f23645",
-      wickUpColor: "#089981",
-      wickDownColor: "#f23645",
+    const candleSeries = priceChart.addSeries(CandlestickSeries, {
+      upColor: chartColor("up"),
+      downColor: chartColor("down"),
+      wickUpColor: chartColor("up"),
+      wickDownColor: chartColor("down"),
       borderVisible: false,
     });
     candleSeriesRef.current = candleSeries;
@@ -525,8 +528,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
     // EMA Ribbon (9, 21, 50)
     if (showRibbon) {
-      const e9Series = priceChart.addLineSeries({
-        color: "#2962ff",
+      const e9Series = priceChart.addSeries(LineSeries, {
+        color: chartColor("blue"),
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -537,8 +540,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         ),
       );
 
-      const e21Series = priceChart.addLineSeries({
-        color: "#ff6d00",
+      const e21Series = priceChart.addSeries(LineSeries, {
+        color: chartColor("orange"),
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -549,8 +552,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         ),
       );
 
-      const e50Series = priceChart.addLineSeries({
-        color: "#9c27b0",
+      const e50Series = priceChart.addSeries(LineSeries, {
+        color: chartColor("purple"),
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -564,8 +567,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
     // 200 EMA
     if (showEMA200) {
-      const e200Series = priceChart.addLineSeries({
-        color: "#ffeb3b",
+      const e200Series = priceChart.addSeries(LineSeries, {
+        color: chartColor("yellow"),
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: true,
@@ -579,7 +582,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
     // Bollinger Bands
     if (showBB) {
-      const bbUpper = priceChart.addLineSeries({
+      const bbUpper = priceChart.addSeries(LineSeries, {
         color: "rgba(33, 150, 243, 0.4)",
         lineWidth: 1,
         priceLineVisible: false,
@@ -591,7 +594,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         ),
       );
 
-      const bbLower = priceChart.addLineSeries({
+      const bbLower = priceChart.addSeries(LineSeries, {
         color: "rgba(33, 150, 243, 0.4)",
         lineWidth: 1,
         priceLineVisible: false,
@@ -606,7 +609,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
     // Volume Histogram (overlaid at bottom of price chart like TradingView)
     if (showVolume) {
-      const volSeries = priceChart.addHistogramSeries({
+      const volSeries = priceChart.addSeries(HistogramSeries, {
         priceScaleId: "volume_scale",
         priceFormat: { type: "volume" },
       });
@@ -626,13 +629,13 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     let pineSubChart: IChartApi | null = null;
     let pineFirstSeries: ISeriesApi<any> | null = null;
     try {
-      const allPinePlots = evaluatePineScript(pineScript, candles, true, "#2962ff", pineInputs, pineStyles);
+      const allPinePlots = evaluatePineScript(pineScript, candles, true, chartColor("blue"), pineInputs, pineStyles);
       const overlayPlots = allPinePlots.filter((p) => p.isOverlay);
       const panePlots = allPinePlots.filter((p) => !p.isOverlay);
 
       // 1. Overlay plots on main price chart
       overlayPlots.forEach((p) => {
-        const line = priceChart.addLineSeries({
+        const line = priceChart.addSeries(LineSeries, {
           color: p.color,
           lineWidth: (p.lineWidth as 1 | 2 | 3 | 4) ?? 2,
           priceLineVisible: false,
@@ -660,8 +663,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           },
           crosshair: {
             mode: CrosshairMode.Normal,
-            vertLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
-            horzLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
+            vertLine: { color: chartSurface(isDark).crosshair, width: 1, style: 3 },
+            horzLine: { color: chartSurface(isDark).crosshair, width: 1, style: 3 },
           },
           rightPriceScale: {
             borderColor: border,
@@ -679,7 +682,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         pineChartApiRef.current = pineSubChart;
 
         panePlots.forEach((p, plotIdx) => {
-          const s = pineSubChart!.addLineSeries({
+          const s = pineSubChart!.addSeries(LineSeries, {
             color: p.color,
             lineWidth: (p.lineWidth as 1 | 2 | 3 | 4) ?? 2,
             priceLineVisible: false,
@@ -780,8 +783,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         },
         crosshair: {
           mode: CrosshairMode.Normal,
-          vertLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
-          horzLine: { color: isDark ? "#50535e" : "#b2b5be", width: 1, style: 3 },
+          vertLine: { color: chartSurface(isDark).crosshair, width: 1, style: 3 },
+          horzLine: { color: chartSurface(isDark).crosshair, width: 1, style: 3 },
         },
         rightPriceScale: {
           borderColor: border,
@@ -798,8 +801,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       });
       rsiApiRef.current = rsiChart;
 
-      rsiLineSeries = rsiChart.addLineSeries({
-        color: "#7e57c2",
+      rsiLineSeries = rsiChart.addSeries(LineSeries, {
+        color: chartColor("violet"),
         lineWidth: 1,
         priceLineVisible: false,
       });
@@ -967,39 +970,39 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     <div
       ref={containerRef}
       className={cn(
-        "flex flex-col bg-[#131722] text-[#d1d4dc] font-sans antialiased overflow-hidden select-none",
-        isFullscreen ? "fixed inset-0 z-50 h-screen w-screen" : "h-[calc(100vh-80px)] rounded-xl border border-[#2a2e39]"
+        "flex flex-col bg-card text-foreground font-sans antialiased overflow-hidden select-none",
+        isFullscreen ? "fixed inset-0 z-50 h-screen w-screen" : "h-[calc(100vh-80px)] rounded-md border border-border"
       )}
     >
       {/* ------------------------------------------------------------- */}
-      {/* 1. TOP TRADINGVIEW TOOLBAR                                    */}
+      {/* 1. TOP TRADINGVIEW TOOLBAR */}
       {/* ------------------------------------------------------------- */}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#2a2e39] bg-[#131722] px-3 text-xs">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-card px-3 text-xs">
         <div className="flex items-center gap-2">
           {/* Symbol Search Picker */}
           <div className="relative">
             <button
               type="button"
               onClick={() => setSearchOpen(!searchOpen)}
-              className="flex items-center gap-1.5 rounded bg-[#2a2e39]/60 px-2.5 py-1 font-semibold text-white transition-colors hover:bg-[#2a2e39]"
+              className="flex items-center gap-1.5 rounded-md bg-border/60 px-2.5 py-1 font-semibold text-white transition-colors hover:bg-border"
             >
-              <Search size={13} className="text-[#787b86]" />
+              <Search size={13} className="text-muted-foreground" />
               <span>{symbol.replace("-EQ", "")}</span>
-              <span className="text-[10px] text-[#787b86]">NSE</span>
-              <ChevronDown size={12} className="text-[#787b86]" />
+              <span className="text-micro text-muted-foreground">NSE</span>
+              <ChevronDown size={12} className="text-muted-foreground" />
             </button>
 
             {searchOpen && (
-              <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-lg border border-[#2a2e39] bg-[#1e222d] p-2 shadow-2xl">
+              <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-md border border-border bg-muted p-2 ">
                 <input
                   type="text"
                   placeholder="Search symbol (e.g. TATA, INFY)..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   autoFocus
-                  className="w-full rounded bg-[#131722] px-2.5 py-1.5 text-xs text-white placeholder-[#787b86] outline-none border border-[#2a2e39] focus:border-[#2962ff]"
+                  className="w-full rounded-md bg-card px-2.5 py-1.5 text-xs text-white placeholder-muted-foreground outline-none border border-border focus:border-primary"
                 />
-                <div className="mt-2 max-h-56 overflow-y-auto space-y-0.5">
+                <div data-lenis-prevent className="mt-2 max-h-56 overflow-y-auto space-y-0.5">
                   {searchResults.map((r) => (
                     <button
                       key={r.symbol}
@@ -1010,44 +1013,44 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                         setSearchQuery("");
                         void loadCandles(r.symbol);
                       }}
-                      className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs text-[#d1d4dc] hover:bg-[#2a2e39]"
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-foreground hover:bg-border"
                     >
                       <span className="font-semibold">{r.symbol}</span>
-                      <span className="text-[10px] text-[#787b86]">{r.exchange}</span>
+                      <span className="text-micro text-muted-foreground">{r.exchange}</span>
                     </button>
                   ))}
                   {searchResults.length === 0 && searchQuery.length >= 2 && (
-                    <div className="py-3 text-center text-xs text-[#787b86]">No symbols found</div>
+                    <div className="py-3 text-center text-xs text-muted-foreground">No symbols found</div>
                   )}
                 </div>
               </div>
             )}
           </div>
 
-          <div className="h-4 w-px bg-[#2a2e39]" />
+          <div className="h-4 w-px bg-border" />
 
           {/* Quick Buy / Sell Execution Pills (Like TV Pro) */}
-          <div className="flex items-center rounded border border-[#2a2e39] overflow-hidden">
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
             <button
               type="button"
               onClick={() => void handleQuickOrder(false)}
-              className="flex items-center gap-1.5 bg-[#f23645]/15 px-2.5 py-1 text-xs font-semibold text-[#f23645] hover:bg-[#f23645]/25 transition-colors"
+              className="flex items-center gap-1.5 bg-loss/15 px-2.5 py-1 text-xs font-semibold text-loss hover:bg-loss/25 transition-colors"
             >
               <span>SELL</span>
               <span className="tabular-nums font-mono">{currentPrice.toFixed(2)}</span>
             </button>
-            <div className="w-px bg-[#2a2e39] self-stretch" />
+            <div className="w-px bg-border self-stretch" />
             <button
               type="button"
               onClick={() => void handleQuickOrder(true)}
-              className="flex items-center gap-1.5 bg-[#089981]/15 px-2.5 py-1 text-xs font-semibold text-[#089981] hover:bg-[#089981]/25 transition-colors"
+              className="flex items-center gap-1.5 bg-gain/15 px-2.5 py-1 text-xs font-semibold text-gain hover:bg-gain/25 transition-colors"
             >
               <span>BUY</span>
               <span className="tabular-nums font-mono">{currentPrice.toFixed(2)}</span>
             </button>
           </div>
 
-          <div className="h-4 w-px bg-[#2a2e39]" />
+          <div className="h-4 w-px bg-border" />
 
           {/* Timeframe selector (5m, 15m, 1h, D, W, M) */}
           <div className="flex items-center gap-0.5">
@@ -1060,10 +1063,10 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   void loadCandles(symbol, tf.v);
                 }}
                 className={cn(
-                  "rounded px-2 py-1 font-medium transition-colors",
+                  "rounded-md px-2 py-1 font-medium transition-colors",
                   timeframe === tf.v
-                    ? "bg-[#2962ff] text-white font-semibold"
-                    : "text-[#787b86] hover:bg-[#2a2e39] hover:text-white"
+                    ? "bg-primary text-white font-semibold"
+                    : "text-muted-foreground hover:bg-border hover:text-white"
                 )}
               >
                 {tf.label}
@@ -1071,7 +1074,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
             ))}
           </div>
 
-          <div className="h-4 w-px bg-[#2a2e39]" />
+          <div className="h-4 w-px bg-border" />
 
           {/* Indicators Dropdown */}
           <div className="relative">
@@ -1079,225 +1082,234 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               type="button"
               onClick={() => setShowIndicatorsMenu(!showIndicatorsMenu)}
               className={cn(
-                "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                showIndicatorsMenu ? "bg-[#2a2e39] text-white" : "text-[#d1d4dc] hover:bg-[#2a2e39]"
+                "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                showIndicatorsMenu ? "bg-border text-white" : "text-foreground hover:bg-border"
               )}
             >
-              <SlidersHorizontal size={13} className="text-[#2962ff]" />
+              <SlidersHorizontal size={13} className="text-primary" />
               <span>Indicators</span>
-              <ChevronDown size={11} className="text-[#787b86]" />
+              <ChevronDown size={11} className="text-muted-foreground" />
             </button>
 
             {showIndicatorsMenu && (
-              <div className="absolute left-0 top-full z-50 mt-1.5 w-60 rounded-lg border border-[#2a2e39] bg-[#1e222d] p-2.5 shadow-2xl space-y-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#787b86]">
+              <div className="absolute left-0 top-full z-50 mt-1.5 w-60 rounded-md border border-border bg-muted p-2.5 space-y-2">
+                <div className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">
                   Active Indicators
                 </div>
                 <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-[#2962ff]" />
+                    <span className="h-2 w-2 rounded-full bg-primary" />
                     EMA Ribbon (9, 21, 50)
                   </span>
                   <input
                     type="checkbox"
                     checked={showRibbon}
                     onChange={(e) => setShowRibbon(e.target.checked)}
-                    className="accent-[#2962ff]"
+                    className="accent-chart-blue"
                   />
                 </label>
                 <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-[#ffeb3b]" />
+                    <span className="h-2 w-2 rounded-full bg-chart-yellow" />
                     200 EMA
                   </span>
                   <input
                     type="checkbox"
                     checked={showEMA200}
                     onChange={(e) => setShowEMA200(e.target.checked)}
-                    className="accent-[#ffeb3b]"
+                    className="accent-chart-yellow"
                   />
                 </label>
                 <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-[#2196f3]" />
+                    <span className="h-2 w-2 rounded-full bg-chart-sky" />
                     Bollinger Bands
                   </span>
                   <input
                     type="checkbox"
                     checked={showBB}
                     onChange={(e) => setShowBB(e.target.checked)}
-                    className="accent-[#2196f3]"
+                    className="accent-chart-sky"
                   />
                 </label>
                 <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-[#7e57c2]" />
+                    <span className="h-2 w-2 rounded-full bg-chart-violet" />
                     RSI (14) Pane
                   </span>
                   <input
                     type="checkbox"
                     checked={showRSI}
                     onChange={(e) => setShowRSI(e.target.checked)}
-                    className="accent-[#7e57c2]"
+                    className="accent-chart-violet"
                   />
                 </label>
                 <label className="flex items-center justify-between text-xs hover:text-white cursor-pointer py-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-[#089981]" />
+                    <span className="h-2 w-2 rounded-full bg-gain" />
                     Volume Overlay
                   </span>
                   <input
                     type="checkbox"
                     checked={showVolume}
                     onChange={(e) => setShowVolume(e.target.checked)}
-                    className="accent-[#089981]"
+                    className="accent-chart-up"
                   />
                 </label>
               </div>
             )}
           </div>
 
-          <div className="h-4 w-px bg-[#2a2e39]" />
+          <div className="h-4 w-px bg-border" />
 
           {/* Pine Script Editor Toggle */}
+          <Tooltip content="Pine Script Indicator Editor" side="bottom" delay={400}>
           <button
             type="button"
             onClick={() => setPineEditorOpen(!pineEditorOpen)}
             className={cn(
-              "flex items-center gap-1.5 rounded px-2.5 py-1 transition-colors text-xs font-medium",
-              pineEditorOpen ? "bg-[#2962ff] text-white" : "text-[#d1d4dc] hover:bg-[#2a2e39]"
+                "flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors text-xs font-medium",
+                pineEditorOpen ? "bg-primary text-white" : "text-foreground hover:bg-border"
             )}
-            title="Pine Script Indicator Editor"
           >
-            <Code size={13} className={pineEditorOpen ? "text-white" : "text-[#787b86]"} />
+              <Code size={13} className={pineEditorOpen ? "text-white" : "text-muted-foreground"} />
             <span>Pine Editor</span>
           </button>
+          </Tooltip>
         </div>
 
         {/* Right Toolbar: Refresh, Fullscreen */}
         <div className="flex items-center gap-2">
+          <Tooltip content="Reload candles" side="bottom" delay={400}>
           <button
             type="button"
             onClick={() => void loadCandles()}
             disabled={loading}
-            title="Reload candles"
-            className="rounded p-1 text-[#787b86] hover:bg-[#2a2e39] hover:text-white transition-colors"
+              className="rounded-md p-1 text-muted-foreground hover:bg-border hover:text-white transition-colors"
           >
-            <RefreshCw size={13} className={cn(loading && "animate-spin text-[#2962ff]")} />
+              <RefreshCw size={13} className={cn(loading && "animate-spin text-primary")} />
           </button>
+          </Tooltip>
+          <Tooltip content={isFullscreen ? "Exit Fullscreen" : "Fullscreen Chart"} side="bottom" delay={400}>
           <button
             type="button"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Chart"}
-            className="rounded p-1 text-[#787b86] hover:bg-[#2a2e39] hover:text-white transition-colors"
+              className="rounded-md p-1 text-muted-foreground hover:bg-border hover:text-white transition-colors"
           >
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
+          </Tooltip>
         </div>
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 2. MAIN BODY: LEFT DRAWING TOOLS + CHART + RIGHT WATCHLIST     */}
+      {/* 2. MAIN BODY: LEFT DRAWING TOOLS + CHART + RIGHT WATCHLIST */}
       {/* ------------------------------------------------------------- */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* TradingView Left Drawing Tools Rail */}
-        <div className="flex flex-col items-center gap-1 border-r border-[#2a2e39] bg-[#131722] py-2 px-1 text-[#787b86] shrink-0 z-30 select-none">
+        <div className="flex flex-col items-center gap-1 border-r border-border bg-card py-2 px-1 text-muted-foreground shrink-0 z-30 select-none">
+          <Tooltip content="Crosshair / Normal Cursor" side="right" delay={400}>
           <button
             type="button"
-            title="Crosshair / Normal Cursor"
             onClick={() => setActiveTool("cursor")}
             className={cn(
-              "rounded p-1.5 transition-colors",
-              activeTool === "cursor" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+                "rounded-md p-1.5 transition-colors",
+                activeTool === "cursor" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
             )}
           >
             <MousePointer size={15} />
           </button>
+          </Tooltip>
+          <Tooltip content="Trendline (Click start & end points)" side="right" delay={400}>
           <button
             type="button"
-            title="Trendline (Click start & end points)"
             onClick={() => setActiveTool("trendline")}
             className={cn(
-              "rounded p-1.5 transition-colors",
-              activeTool === "trendline" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+                "rounded-md p-1.5 transition-colors",
+                activeTool === "trendline" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
             )}
           >
             <TrendingUp size={15} />
           </button>
+          </Tooltip>
+          <Tooltip content="Extended Ray" side="right" delay={400}>
           <button
             type="button"
-            title="Extended Ray"
             onClick={() => setActiveTool("ray")}
             className={cn(
-              "rounded p-1.5 transition-colors",
-              activeTool === "ray" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+                "rounded-md p-1.5 transition-colors",
+                activeTool === "ray" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
             )}
           >
             <Pencil size={15} />
           </button>
+          </Tooltip>
+          <Tooltip content="Horizontal Price Level" side="right" delay={400}>
           <button
             type="button"
-            title="Horizontal Price Level"
             onClick={() => setActiveTool("hline")}
             className={cn(
-              "rounded p-1.5 transition-colors",
-              activeTool === "hline" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+                "rounded-md p-1.5 transition-colors",
+                activeTool === "hline" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
             )}
           >
             <Minus size={15} />
           </button>
+          </Tooltip>
+          <Tooltip content="Rectangle / Supply & Demand Zone" side="right" delay={400}>
           <button
             type="button"
-            title="Rectangle / Supply & Demand Zone"
             onClick={() => setActiveTool("rect")}
             className={cn(
-              "rounded p-1.5 transition-colors",
-              activeTool === "rect" ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+                "rounded-md p-1.5 transition-colors",
+                activeTool === "rect" ? "bg-primary text-white" : "hover:bg-border hover:text-white"
             )}
           >
             <Square size={15} />
           </button>
-          <div className="my-1 h-px w-4 bg-[#2a2e39]" />
+          </Tooltip>
+          <div className="my-1 h-px w-4 bg-border" />
+          <Tooltip content="Clear All Drawings" side="right" delay={400}>
           <button
             type="button"
-            title="Clear All Drawings"
             onClick={() => {
               localStorage.removeItem("atr.chart.drawings");
               window.dispatchEvent(new Event("storage"));
               setActiveTool("cursor");
             }}
-            className="rounded p-1.5 text-[#787b86] hover:bg-[#f23645]/20 hover:text-[#f23645] transition-colors"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-loss/20 hover:text-loss transition-colors"
           >
             <Trash2 size={15} />
           </button>
+          </Tooltip>
         </div>
 
         {/* Central Interactive Canvas Area */}
         <div className="flex flex-1 flex-col min-w-0 relative">
           {/* TradingView Legend & OHLC HUD Bar */}
-          <div className="absolute top-2 left-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono pointer-events-none bg-[#131722]/85 px-2 py-1 rounded border border-[#2a2e39]/60 backdrop-blur">
+          <div className="absolute top-2 left-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption font-mono pointer-events-none bg-card/85 px-2 py-1 rounded-md border border-border/60 backdrop-blur">
             <span className="font-semibold text-white">{symbol.replace("-EQ", "")}</span>
-            <span className="text-[#787b86]">· {timeframe.toUpperCase()}</span>
-            <span className="text-[#787b86]">· NSE</span>
+            <span className="text-muted-foreground">· {timeframe.toUpperCase()}</span>
+            <span className="text-muted-foreground">· NSE</span>
             {hoverData && (
               <>
-                <span className="text-[#787b86]">
+                <span className="text-muted-foreground">
                   O <span className="text-white">{hoverData.open.toFixed(2)}</span>
                 </span>
-                <span className="text-[#787b86]">
+                <span className="text-muted-foreground">
                   H <span className="text-white">{hoverData.high.toFixed(2)}</span>
                 </span>
-                <span className="text-[#787b86]">
+                <span className="text-muted-foreground">
                   L <span className="text-white">{hoverData.low.toFixed(2)}</span>
                 </span>
-                <span className="text-[#787b86]">
-                  C <span className={cn(isUp ? "text-[#089981]" : "text-[#f23645]")}>{hoverData.close.toFixed(2)}</span>
+                <span className="text-muted-foreground">
+                C <span className={cn(isUp ? "text-gain" : "text-loss")}>{hoverData.close.toFixed(2)}</span>
                 </span>
-                <span className={cn("font-semibold", isUp ? "text-[#089981]" : "text-[#f23645]")}>
+                <span className={cn("font-semibold", isUp ? "text-gain" : "text-loss")}>
                   {isUp ? `+${hoverData.change}%` : `${hoverData.change}%`}
                 </span>
                 {showVolume && (
-                  <span className="text-[#787b86]">
+                  <span className="text-muted-foreground">
                     Vol <span className="text-white">{(hoverData.volume / 100000).toFixed(2)}L</span>
                   </span>
                 )}
@@ -1309,8 +1321,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           <div ref={chartWrapperRef} className="flex-1 flex flex-col min-h-0 w-full relative">
             {error ? (
               <div className="m-auto text-center">
-                <div className="text-sm font-semibold text-[#f23645]">Failed to load candles</div>
-                <div className="text-xs text-[#787b86] mt-1">{error}</div>
+                <div className="text-sm font-semibold text-loss">Failed to load candles</div>
+                <div className="text-xs text-muted-foreground mt-1">{error}</div>
                 <Button size="sm" variant="secondary" onClick={() => void loadCandles()} className="mt-3">
                   Retry
                 </Button>
@@ -1330,7 +1342,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   let hasPanePlots = false;
                   let indicatorName = "Pine Indicator";
                   try {
-                    const parsed = evaluatePineScript(pineScript, candles, true, "#2962ff", pineInputs, pineStyles);
+                    const parsed = evaluatePineScript(pineScript, candles, true, chartColor("blue"), pineInputs, pineStyles);
                     hasPanePlots = parsed.some((p) => !p.isOverlay);
                     const indMatch = pineScript.match(/indicator\s*\(\s*["']([^"']+)["']/i);
                     if (indMatch) indicatorName = indMatch[1];
@@ -1339,41 +1351,43 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   if (!hasPanePlots) return null;
 
                   return (
-                    <div className="border-t border-[#2a2e39] relative group/pane flex flex-col bg-[#131722]">
+                    <div className="border-t border-border relative group/pane flex flex-col bg-card">
                       {/* Indicator Header Legend (TradingView Style) */}
-                      <div className="absolute top-1.5 left-2 z-20 flex items-center gap-2 text-[11px] font-mono select-none bg-[#131722]/85 px-2 py-0.5 rounded border border-[#2a2e39]/60 backdrop-blur">
+                      <div className="absolute top-1.5 left-2 z-20 flex items-center gap-2 text-caption font-mono select-none bg-card/85 px-2 py-0.5 rounded-md border border-border/60 backdrop-blur">
                         <span className="font-semibold text-white truncate max-w-[200px]" title={indicatorName}>
                           {indicatorName}
                         </span>
 
                         {/* Interactive Action Icons (Hover visible or subtle) */}
                         <div className="flex items-center gap-1 opacity-70 group-hover/pane:opacity-100 transition-opacity">
+                          <Tooltip content="Indicator Settings" side="bottom" delay={400}>
                           <button
                             type="button"
-                            title="Indicator Settings"
                             onClick={() => setPineSettingsModalOpen(true)}
-                            className="p-1 rounded hover:bg-[#2a2e39] text-[#787b86] hover:text-white transition-colors"
+                              className="p-1 rounded-md hover:bg-border text-muted-foreground hover:text-white transition-colors"
                           >
                             <SlidersHorizontal size={12} />
                           </button>
+                          </Tooltip>
+                          <Tooltip content="Remove Indicator" side="bottom" delay={400}>
                           <button
                             type="button"
-                            title="Remove Indicator"
                             onClick={() => {
                               setPineScript("// No custom indicator");
                               localStorage.removeItem("atr.chart.pinescript");
                             }}
-                            className="p-1 rounded hover:bg-[#2a2e39] text-[#787b86] hover:text-[#f23645] transition-colors"
+                              className="p-1 rounded-md hover:bg-border text-muted-foreground hover:text-loss transition-colors"
                           >
                             <X size={12} />
                           </button>
+                          </Tooltip>
                         </div>
 
                         {/* Real-time Indicator Value readouts */}
                         <div className="flex items-center gap-2 text-[10.5px] ml-1">
                           {Object.entries(indicatorLegendValues).map(([name, val]) => (
-                            <span key={name} className="text-[#00e5ff]">
-                              <span className="text-[#787b86] font-normal">{name}: </span>
+                            <span key={name} className="text-chart-cyan">
+                              <span className="text-muted-foreground font-normal">{name}: </span>
                               <span className="font-semibold">{val !== null ? val.toFixed(2) : "—"}</span>
                             </span>
                           ))}
@@ -1387,8 +1401,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 })()}
 
                 {showRSI && (
-                  <div className="border-t border-[#2a2e39] relative">
-                    <span className="absolute top-1 left-2 z-10 text-[10px] font-mono text-[#7e57c2] font-semibold">
+                  <div className="border-t border-border relative">
+                    <span className="absolute top-1 left-2 z-10 text-micro font-mono text-chart-violet font-semibold">
                       RSI (14)
                     </span>
                     <div ref={rsiChartRef} data-lenis-prevent className="w-full h-[110px]" />
@@ -1400,19 +1414,20 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
 
           {/* Pine Script Editor Drawer (Bottom Dock) */}
           {pineEditorOpen && (
-            <div className="border-t border-[#2a2e39] bg-[#1e222d] flex flex-col h-72 shrink-0 z-40 transition-all">
+            <div className="border-t border-border bg-muted flex flex-col h-72 shrink-0 z-40 transition-all">
               {/* Header */}
-              <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#2a2e39] bg-[#171b26] text-xs">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-card text-xs">
                 <div className="flex items-center gap-2">
-                  <Code size={14} className="text-[#2962ff]" />
+                  <Code size={14} className="text-primary" />
                   <span className="font-semibold text-white tracking-wide">Pine Script Indicator Studio</span>
-                  <span className="text-[10px] text-[#2962ff] font-mono bg-[#2962ff]/10 px-1.5 py-0.5 rounded border border-[#2962ff]/30 font-semibold">v6 Reference</span>
+                  <span className="text-micro text-primary font-mono bg-primary/10 px-1.5 py-0.5 rounded-md border border-primary/30 font-semibold">v6 Reference</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {/* Preset Selector */}
-                  <span className="text-[11px] text-[#787b86]">Templates:</span>
+                  <span className="text-caption text-muted-foreground">Templates:</span>
                   <div className="flex items-center gap-1">
                     {PINE_PRESETS.map((p) => (
+                      <Tooltip content={p.desc} side="top" delay={400}>
                       <button
                         key={p.name}
                         type="button"
@@ -1420,15 +1435,15 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                           setPineDraft(p.code);
                           setPineError(null);
                         }}
-                        className="rounded px-2 py-0.5 text-[10.5px] bg-[#2a2e39]/80 hover:bg-[#2a2e39] text-[#b2b5be] hover:text-white transition-colors"
-                        title={p.desc}
+                          className="rounded-md px-2 py-0.5 text-[10.5px] bg-border/80 hover:bg-border text-muted-foreground hover:text-white transition-colors"
                       >
                         {p.name.replace(/ \(.*\)/, "")}
                       </button>
+                      </Tooltip>
                     ))}
                   </div>
 
-                  <div className="h-4 w-[1px] bg-[#2a2e39] mx-1" />
+                  <div className="h-4 w-[1px] bg-border mx-1" />
 
                   {/* Apply Button */}
                   <Button
@@ -1446,16 +1461,16 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                         setPineError(err?.message || "Syntax error in script");
                       }
                     }}
-                    className="h-6 px-2.5 text-xs bg-[#2962ff] hover:bg-[#2962ff]/90 text-white font-medium flex items-center gap-1"
+                    className="h-6 px-2.5 text-xs bg-primary hover:bg-primary/90 text-white font-medium flex items-center gap-1"
                   >
-                    {pineAppliedMsg ? <Check size={12} className="text-emerald-300" /> : <Play size={11} fill="currentColor" />}
+                  {pineAppliedMsg ? <Check size={12} className="text-gain" /> : <Play size={11} fill="currentColor" />}
                     <span>{pineAppliedMsg ? "Applied!" : "Apply to Chart"}</span>
                   </Button>
 
                   <button
                     type="button"
                     onClick={() => setPineEditorOpen(false)}
-                    className="p-1 rounded text-[#787b86] hover:bg-[#2a2e39] hover:text-white"
+                    className="p-1 rounded-md text-muted-foreground hover:bg-border hover:text-white"
                   >
                     <X size={14} />
                   </button>
@@ -1463,9 +1478,9 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               </div>
 
               {/* Code Editor Body with Line Numbers Gutter */}
-              <div className="flex-1 flex bg-[#131722] relative overflow-hidden font-mono text-[12px]">
+              <div className="flex-1 flex bg-card relative overflow-hidden font-mono text-xs">
                 {/* Line numbers gutter */}
-                <div className="w-10 select-none bg-[#0e1117] text-[#4a4e5d] text-right pr-2.5 pt-2 border-r border-[#2a2e39] font-mono text-[11px] leading-relaxed">
+                <div className="w-10 select-none bg-background text-muted-foreground text-right pr-2.5 pt-2 border-r border-border font-mono text-caption leading-relaxed">
                   {pineDraft.split("\n").map((_, i) => (
                     <div key={i}>{i + 1}</div>
                   ))}
@@ -1481,7 +1496,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                       const start = e.currentTarget.selectionStart;
                       const end = e.currentTarget.selectionEnd;
                       const val = pineDraft;
-                      setPineDraft(val.substring(0, start) + "    " + val.substring(end));
+                      setPineDraft(val.substring(0, start) + " " + val.substring(end));
                       setTimeout(() => {
                         const target = e.target as HTMLTextAreaElement;
                         if (target) {
@@ -1506,36 +1521,37 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   }}
                   spellCheck={false}
                   placeholder={`// Full TradingView Pine Script v5\n// e.g.:\nfast = ta.ema(close, 9);\nslow = ta.ema(close, 21);\nplot(fast, "Fast EMA", "#00e5ff");\nplot(slow, "Slow EMA", "#ff007f");`}
-                  className="flex-1 h-full bg-transparent text-[#d1d4dc] p-2 leading-relaxed resize-none focus:outline-none selection:bg-[#2962ff]/40 overflow-y-auto whitespace-pre font-mono"
+                  data-lenis-prevent
+                  className="flex-1 h-full bg-transparent text-foreground p-2 leading-relaxed resize-none focus:outline-none selection:bg-primary/40 overflow-y-auto whitespace-pre font-mono"
                 />
               </div>
 
               {/* Status / Syntax Console Footer */}
-              <div className="px-3 py-1.5 bg-[#171b26] border-t border-[#2a2e39] text-[11px] flex items-center justify-between font-mono">
+              <div className="px-3 py-1.5 bg-card border-t border-border text-caption flex items-center justify-between font-mono">
                 <div className="flex items-center gap-2">
                   {pineError ? (
-                    <span className="text-[#f23645] flex items-center gap-1.5 font-medium">
+                    <span className="text-loss flex items-center gap-1.5 font-medium">
                       <AlertCircle size={13} />
                       {pineError}
                     </span>
                   ) : (
-                    <span className="text-[#089981] flex items-center gap-1.5 font-medium">
+                    <span className="text-gain flex items-center gap-1.5 font-medium">
                       <Check size={13} />
                       Compilation successful · Added to chart
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 text-[#787b86] text-[10.5px]">
-                  <span>Shortcut: <kbd className="bg-[#2a2e39] px-1 py-0.5 rounded text-white text-[10px]">Ctrl</kbd> + <kbd className="bg-[#2a2e39] px-1 py-0.5 rounded text-white text-[10px]">Enter</kbd></span>
+                <div className="flex items-center gap-3 text-muted-foreground text-[10.5px]">
+                <span>Shortcut: <kbd className="bg-border px-1 py-0.5 rounded-md text-white text-micro">Ctrl</kbd> + <kbd className="bg-border px-1 py-0.5 rounded-md text-white text-micro">Enter</kbd></span>
                   <span>|</span>
-                  <span>Built-ins: <span className="text-[#2962ff]">ta.sma</span>, <span className="text-[#2962ff]">ta.ema</span>, <span className="text-[#2962ff]">ta.rsi</span>, <span className="text-[#2962ff]">ta.macd</span>, <span className="text-[#2962ff]">ta.atr</span>, <span className="text-[#2962ff]">plot</span></span>
+                  <span>Built-ins: <span className="text-primary">ta.sma</span>, <span className="text-primary">ta.ema</span>, <span className="text-primary">ta.rsi</span>, <span className="text-primary">ta.macd</span>, <span className="text-primary">ta.atr</span>, <span className="text-primary">plot</span></span>
                 </div>
               </div>
             </div>
           )}
 
           {/* Bottom Date Range Bar (1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, ALL) */}
-          <div className="flex h-8 shrink-0 items-center justify-between border-t border-[#2a2e39] bg-[#131722] px-3 text-[11px]">
+          <div className="flex h-8 shrink-0 items-center justify-between border-t border-border bg-card px-3 text-caption">
             <div className="flex items-center gap-1">
               {RANGES.map((r) => (
                 <button
@@ -1546,53 +1562,54 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     void loadCandles(symbol, timeframe, r.label);
                   }}
                   className={cn(
-                    "rounded px-2 py-0.5 font-medium transition-colors",
+                    "rounded-md px-2 py-0.5 font-medium transition-colors",
                     activeRange === r.label
-                      ? "bg-[#2a2e39] text-white font-semibold"
-                      : "text-[#787b86] hover:bg-[#2a2e39]/60 hover:text-white"
+                      ? "bg-border text-white font-semibold"
+                      : "text-muted-foreground hover:bg-border/60 hover:text-white"
                   )}
                 >
                   {r.label}
                 </button>
               ))}
             </div>
-            <div className="text-[10px] text-[#787b86]">
+            <div className="text-micro text-muted-foreground">
               IST (UTC+5:30) · Realtime Data Feed
             </div>
           </div>
         </div>
 
         {/* ----------------------------------------------------------- */}
-        {/* 3. RIGHT SIDEBAR: WATCHLIST & INSTRUMENT DETAILS            */}
+        {/* 3. RIGHT SIDEBAR: WATCHLIST & INSTRUMENT DETAILS */}
         {/* ----------------------------------------------------------- */}
-        <div className="w-80 shrink-0 border-l border-[#2a2e39] bg-[#131722] flex flex-col">
+        <div className="w-80 shrink-0 border-l border-border bg-card flex flex-col">
           {/* Top Watchlist Header with Add Symbol */}
-          <div className="relative flex h-9 items-center justify-between border-b border-[#2a2e39] px-3 text-xs font-semibold uppercase tracking-wider text-[#787b86]">
+          <div className="relative flex h-9 items-center justify-between border-b border-border px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span>Watchlist</span>
+            <Tooltip content="Add symbol to watchlist" side="left" delay={400}>
             <button
               type="button"
-              title="Add symbol to watchlist"
               onClick={() => {
                 setAddSymbolOpen((prev) => !prev);
                 setAddSymbolQuery("");
               }}
               className={cn(
-                "rounded p-1 transition-colors",
-                addSymbolOpen ? "bg-[#2962ff] text-white" : "hover:bg-[#2a2e39] hover:text-white"
+                  "rounded-md p-1 transition-colors",
+                  addSymbolOpen ? "bg-primary text-white" : "hover:bg-border hover:text-white"
               )}
             >
               <Plus size={14} />
             </button>
+            </Tooltip>
 
             {/* Add Symbol Dropdown / Search Modal */}
             {addSymbolOpen && (
-              <div className="absolute right-2 top-9 z-50 w-72 rounded-lg border border-[#2a2e39] bg-[#1e222d] p-2.5 shadow-2xl normal-case">
-                <div className="flex items-center justify-between border-b border-[#2a2e39] pb-2 text-xs font-semibold text-white">
+              <div className="absolute right-2 top-9 z-50 w-72 rounded-md border border-border bg-muted p-2.5 normal-case">
+                <div className="flex items-center justify-between border-b border-border pb-2 text-xs font-semibold text-white">
                   <span>Add Symbol</span>
                   <button
                     type="button"
                     onClick={() => setAddSymbolOpen(false)}
-                    className="rounded p-0.5 text-[#787b86] hover:bg-[#2a2e39] hover:text-white"
+                    className="rounded-md p-0.5 text-muted-foreground hover:bg-border hover:text-white"
                   >
                     <X size={13} />
                   </button>
@@ -1604,12 +1621,12 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     value={addSymbolQuery}
                     onChange={(e) => setAddSymbolQuery(e.target.value)}
                     autoFocus
-                    className="w-full rounded bg-[#131722] pl-7 pr-2.5 py-1.5 text-xs text-white placeholder-[#787b86] outline-none border border-[#2a2e39] focus:border-[#2962ff]"
+                    className="w-full rounded-md bg-card pl-7 pr-2.5 py-1.5 text-xs text-white placeholder-muted-foreground outline-none border border-border focus:border-primary"
                   />
-                  <Search size={12} className="absolute left-2 top-2 text-[#787b86]" />
+                  <Search size={12} className="absolute left-2 top-2 text-muted-foreground" />
                 </div>
 
-                <div className="mt-2 max-h-52 overflow-y-auto divide-y divide-[#2a2e39]/50">
+                <div data-lenis-prevent className="mt-2 max-h-52 overflow-y-auto divide-y divide-border/50">
                   {addSymbolResults.length > 0 ? (
                     addSymbolResults.map((r) => {
                       const alreadyInWatch = watchlist.some((w) => w.symbol === r.symbol);
@@ -1634,24 +1651,24 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                             setAddSymbolOpen(false);
                             setAddSymbolQuery("");
                           }}
-                          className="flex w-full items-center justify-between px-2 py-1.5 text-left text-xs transition-colors hover:bg-[#2a2e39]"
+                          className="flex w-full items-center justify-between px-2 py-1.5 text-left text-xs transition-colors hover:bg-border"
                         >
                           <div>
                             <span className="font-semibold text-white">{r.symbol}</span>
-                            <span className="ml-1.5 text-[10px] text-[#787b86]">{r.exchange}</span>
+                            <span className="ml-1.5 text-micro text-muted-foreground">{r.exchange}</span>
                           </div>
                           {alreadyInWatch ? (
-                            <span className="text-[10px] text-[#787b86]">Added</span>
+                            <span className="text-micro text-muted-foreground">Added</span>
                           ) : (
-                            <span className="text-[10px] text-[#2962ff] font-semibold hover:underline">+ Add</span>
+                            <span className="text-micro text-primary font-semibold hover:underline">+ Add</span>
                           )}
                         </button>
                       );
                     })
                   ) : addSymbolQuery.trim().length >= 2 ? (
-                    <div className="py-4 text-center text-xs text-[#787b86]">No symbols found</div>
+                    <div className="py-4 text-center text-xs text-muted-foreground">No symbols found</div>
                   ) : (
-                    <div className="py-3 text-center text-[11px] text-[#787b86]">
+                    <div className="py-3 text-center text-caption text-muted-foreground">
                       Type 2+ characters to search NSE symbols
                     </div>
                   )}
@@ -1661,7 +1678,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           </div>
 
           {/* Watchlist Items */}
-          <div className="flex-1 overflow-y-auto divide-y divide-[#2a2e39]/40">
+          <div data-lenis-prevent className="flex-1 overflow-y-auto divide-y divide-border/40">
             {watchlist.map((item) => {
               const active = item.symbol === symbol;
               const up = item.chg >= 0;
@@ -1674,31 +1691,32 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   }}
                   className={cn(
                     "group flex items-center justify-between px-3 py-2 cursor-pointer transition-colors text-xs",
-                    active ? "bg-[#2a2e39]" : "hover:bg-[#1e222d]"
+                    active ? "bg-border" : "hover:bg-muted"
                   )}
                 >
                   <div className="min-w-0 pr-2">
                     <div className="font-semibold text-white truncate">{item.symbol.replace("-EQ", "")}</div>
-                    <div className="text-[10px] text-[#787b86] truncate">{item.name ?? "Equity"}</div>
+                    <div className="text-micro text-muted-foreground truncate">{item.name ?? "Equity"}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-right tabular-nums">
                       <div className="font-medium text-white">₹{item.last.toLocaleString("en-IN")}</div>
-                      <div className={cn("text-[10.5px] font-semibold", up ? "text-[#089981]" : "text-[#f23645]")}>
+                      <div className={cn("text-[10.5px] font-semibold", up ? "text-gain" : "text-loss")}>
                         {up ? `+${item.chg.toFixed(2)}%` : `${item.chg.toFixed(2)}%`}
                       </div>
                     </div>
+                    <Tooltip content="Remove from watchlist" side="left" delay={400}>
                     <button
                       type="button"
-                      title="Remove from watchlist"
                       onClick={(e) => {
                         e.stopPropagation();
                         setWatchlist((prev) => prev.filter((w) => w.symbol !== item.symbol));
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-[#787b86] hover:text-[#f23645] transition-opacity"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-muted-foreground hover:text-loss transition-opacity"
                     >
                       <Trash2 size={12} />
                     </button>
+                    </Tooltip>
                   </div>
                 </div>
               );
@@ -1706,21 +1724,21 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           </div>
 
           {/* Bottom Instrument Details Pane (Like TradingView Right Pane) */}
-          <div className="border-t border-[#2a2e39] bg-[#1e222d]/60 p-3 text-xs">
+          <div className="border-t border-border bg-muted/60 p-3 text-xs">
             <div className="flex items-baseline justify-between">
               <div>
-                <div className="font-bold text-white text-sm">{symbol.replace("-EQ", "")}</div>
-                <div className="text-[10px] text-[#787b86]">NSE Equity · Market Open</div>
+                <div className="font-semibold text-white text-sm">{symbol.replace("-EQ", "")}</div>
+                <div className="text-micro text-muted-foreground">NSE Equity · Market Open</div>
               </div>
               <div className="text-right">
-                <div className="font-bold text-base text-white tabular-nums">₹{currentPrice.toFixed(2)}</div>
-                <div className={cn("text-xs font-semibold tabular-nums", isUp ? "text-[#089981]" : "text-[#f23645]")}>
+              <div className="font-semibold text-base text-white tabular-nums">₹{currentPrice.toFixed(2)}</div>
+              <div className={cn("text-xs font-semibold tabular-nums", isUp ? "text-gain" : "text-loss")}>
                   {isUp ? `+${currentChg}%` : `${currentChg}%`}
                 </div>
               </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] border-t border-[#2a2e39] pt-2 text-[#787b86]">
+            <div className="mt-3 grid grid-cols-2 gap-2 text-caption border-t border-border pt-2 text-muted-foreground">
               <div>
                 <span>High: </span>
                 <span className="text-white font-mono">{hoverData?.high.toFixed(2) ?? "—"}</span>
@@ -1746,14 +1764,14 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               <Button
                 size="sm"
                 onClick={() => void handleQuickOrder(true)}
-                className="bg-[#089981] hover:bg-[#089981]/90 text-white font-semibold h-7 text-xs"
+                className="bg-gain hover:bg-gain/90 text-white font-semibold h-7 text-xs"
               >
                 Buy
               </Button>
               <Button
                 size="sm"
                 onClick={() => void handleQuickOrder(false)}
-                className="bg-[#f23645] hover:bg-[#f23645]/90 text-white font-semibold h-7 text-xs"
+                className="bg-loss hover:bg-loss/90 text-white font-semibold h-7 text-xs"
               >
                 Sell
               </Button>
@@ -1763,14 +1781,14 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
       </div>
 
       {/* ========================================================================= */}
-      {/* TRADINGVIEW DYNAMIC INDICATOR SETTINGS MODAL                             */}
+      {/* TRADINGVIEW DYNAMIC INDICATOR SETTINGS MODAL */}
       {/* ========================================================================= */}
       {pineSettingsModalOpen && (() => {
         const dynamicInputs = parsePineInputs(pineScript);
         let plots: PineSeriesResult[] = [];
         let indicatorTitle = "Indicator Settings";
         try {
-          plots = evaluatePineScript(pineScript, candles, true, "#2962ff", pineInputs, pineStyles);
+          plots = evaluatePineScript(pineScript, candles, true, chartColor("blue"), pineInputs, pineStyles);
           const indMatch = pineScript.match(/indicator\s*\(\s*["']([^"']+)["']/i);
           if (indMatch) indicatorTitle = indMatch[1];
         } catch {}
@@ -1778,13 +1796,13 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm animate-in fade-in duration-150">
             <div
-              className="bg-[#1e222d] border border-[#2a2e39] rounded-xl shadow-2xl w-[480px] max-w-[92vw] flex flex-col overflow-hidden text-[#d1d4dc] font-sans"
+                className="bg-muted border border-border rounded-md w-[480px] max-w-[92vw] flex flex-col overflow-hidden text-foreground font-sans"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#2a2e39] bg-[#171b26]">
+                <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card">
                 <div className="flex items-center gap-2">
-                  <SlidersHorizontal size={16} className="text-[#2962ff]" />
+                    <SlidersHorizontal size={16} className="text-primary" />
                   <span className="font-semibold text-white text-sm truncate max-w-[340px]">
                     {indicatorTitle}
                   </span>
@@ -1792,22 +1810,22 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 <button
                   type="button"
                   onClick={() => setPineSettingsModalOpen(false)}
-                  className="p-1 rounded-md text-[#787b86] hover:bg-[#2a2e39] hover:text-white transition-colors"
+                    className="p-1 rounded-md text-muted-foreground hover:bg-border hover:text-white transition-colors"
                 >
                   <X size={16} />
                 </button>
               </div>
 
               {/* Tabs Bar (TradingView style: Inputs | Style | Visibility) */}
-              <div className="flex items-center gap-6 px-5 border-b border-[#2a2e39] bg-[#1e222d] text-xs font-semibold">
+                <div className="flex items-center gap-6 px-5 border-b border-border bg-muted text-xs font-semibold">
                 <button
                   type="button"
                   onClick={() => setPineSettingsActiveTab("inputs")}
                   className={cn(
                     "py-2.5 transition-colors border-b-2 font-medium tracking-wide",
                     pineSettingsActiveTab === "inputs"
-                      ? "border-[#2962ff] text-[#2962ff]"
-                      : "border-transparent text-[#787b86] hover:text-white"
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-white"
                   )}
                 >
                   Inputs
@@ -1818,8 +1836,8 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   className={cn(
                     "py-2.5 transition-colors border-b-2 font-medium tracking-wide",
                     pineSettingsActiveTab === "style"
-                      ? "border-[#2962ff] text-[#2962ff]"
-                      : "border-transparent text-[#787b86] hover:text-white"
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-white"
                   )}
                 >
                   Style
@@ -1827,11 +1845,11 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               </div>
 
               {/* Tab Contents Body */}
-              <div className="p-5 max-h-[360px] overflow-y-auto space-y-4 text-xs">
+              <div data-lenis-prevent className="p-5 max-h-[360px] overflow-y-auto space-y-4 text-xs">
                 {pineSettingsActiveTab === "inputs" && (
                   <>
                     {dynamicInputs.length === 0 ? (
-                      <div className="text-center py-8 text-[#787b86] font-mono text-xs">
+                        <div className="text-center py-8 text-muted-foreground font-mono text-xs">
                         No configurable inputs defined in this indicator script.
                       </div>
                     ) : (
@@ -1857,21 +1875,21 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                                       setPineInputs(updated);
                                       localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
                                     }}
-                                    className="h-4 w-4 rounded bg-[#131722] border-[#2a2e39] text-[#2962ff] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                      className="h-4 w-4 rounded-md bg-card border-border text-primary focus:ring-0 focus:ring-offset-0 cursor-pointer"
                                   />
                                 ) : inputDef.type === "color" ? (
                                   <div className="flex items-center gap-2">
                                     <input
                                       type="color"
-                                      value={String(currentValue).startsWith("#") ? String(currentValue) : "#2962ff"}
+                                      value={String(currentValue).startsWith("#") ? String(currentValue) : chartColor("blue")}
                                       onChange={(e) => {
                                         const updated = { ...pineInputs, [inputDef.id]: e.target.value };
                                         setPineInputs(updated);
                                         localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
                                       }}
-                                      className="w-7 h-7 rounded border border-[#2a2e39] bg-transparent cursor-pointer p-0"
+                                        className="w-7 h-7 rounded-md border border-border bg-transparent cursor-pointer p-0"
                                     />
-                                    <span className="font-mono text-[11px] text-[#787b86]">{currentValue}</span>
+                                    <span className="font-mono text-caption text-muted-foreground">{currentValue}</span>
                                   </div>
                                 ) : (
                                   <input
@@ -1889,7 +1907,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                                       setPineInputs(updated);
                                       localStorage.setItem("atr.chart.pineinputs", JSON.stringify(updated));
                                     }}
-                                    className="w-24 px-2 py-1.5 rounded bg-[#131722] border border-[#2a2e39] text-white text-right font-mono text-xs focus:outline-none focus:border-[#2962ff]"
+                                      className="w-24 px-2 py-1.5 rounded-md bg-card border border-border text-white text-right font-mono text-xs focus:outline-none focus:border-primary"
                                   />
                                 )}
                               </div>
@@ -1904,7 +1922,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 {pineSettingsActiveTab === "style" && (
                   <div className="space-y-3.5">
                     {plots.length === 0 ? (
-                      <div className="text-center py-8 text-[#787b86] font-mono text-xs">
+                        <div className="text-center py-8 text-muted-foreground font-mono text-xs">
                         No plot outputs to customize.
                       </div>
                     ) : (
@@ -1915,7 +1933,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                         const isVisible = styleConfig.visible !== false;
 
                         return (
-                          <div key={p.name} className="flex items-center justify-between gap-3 border-b border-[#2a2e39]/40 pb-2.5">
+                          <div key={p.name} className="flex items-center justify-between gap-3 border-b border-border/40 pb-2.5">
                             <div className="flex items-center gap-2">
                               <input
                                 type="checkbox"
@@ -1928,7 +1946,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                                   setPineStyles(updated);
                                   localStorage.setItem("atr.chart.pinestyles", JSON.stringify(updated));
                                 }}
-                                className="h-4 w-4 rounded bg-[#131722] border-[#2a2e39] text-[#2962ff] cursor-pointer"
+                                  className="h-4 w-4 rounded-md bg-card border-border text-primary cursor-pointer"
                               />
                               <span className="font-medium text-white text-xs truncate max-w-[160px]" title={p.name}>
                                 {p.name}
@@ -1939,7 +1957,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                               {/* Color Picker */}
                               <input
                                 type="color"
-                                value={currentColor.startsWith("#") ? currentColor : "#2962ff"}
+                                value={currentColor.startsWith("#") ? currentColor : chartColor("blue")}
                                 onChange={(e) => {
                                   const updated = {
                                     ...pineStyles,
@@ -1948,7 +1966,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                                   setPineStyles(updated);
                                   localStorage.setItem("atr.chart.pinestyles", JSON.stringify(updated));
                                 }}
-                                className="w-6 h-6 rounded border border-[#2a2e39] bg-transparent cursor-pointer p-0"
+                                  className="w-6 h-6 rounded-md border border-border bg-transparent cursor-pointer p-0"
                               />
 
                               {/* Line Width Selector */}
@@ -1981,7 +1999,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               </div>
 
               {/* Modal Footer */}
-              <div className="flex items-center justify-between px-5 py-3 border-t border-[#2a2e39] bg-[#171b26] text-xs">
+                <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-card text-xs">
                 <button
                   type="button"
                   onClick={() => {
@@ -1990,7 +2008,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     localStorage.removeItem("atr.chart.pineinputs");
                     localStorage.removeItem("atr.chart.pinestyles");
                   }}
-                  className="text-[#787b86] hover:text-white transition-colors"
+                    className="text-muted-foreground hover:text-white transition-colors"
                 >
                   Reset to Defaults
                 </button>
@@ -2000,14 +2018,14 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                     size="sm"
                     variant="secondary"
                     onClick={() => setPineSettingsModalOpen(false)}
-                    className="h-7 px-3 text-xs bg-[#2a2e39] text-white hover:bg-[#2a2e39]/80"
+                      className="h-7 px-3 text-xs bg-border text-white hover:bg-border/80"
                   >
                     Close
                   </Button>
                   <Button
                     size="sm"
                     onClick={() => setPineSettingsModalOpen(false)}
-                    className="h-7 px-3 text-xs bg-[#2962ff] text-white hover:bg-[#2962ff]/90"
+                      className="h-7 px-3 text-xs bg-primary text-white hover:bg-primary/90"
                   >
                     Ok
                   </Button>

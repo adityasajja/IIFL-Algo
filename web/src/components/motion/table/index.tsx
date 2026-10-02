@@ -261,6 +261,7 @@ export function Table<T>({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        data-lenis-prevent
         className="overflow-auto"
         style={{ height }}
       >
@@ -268,6 +269,10 @@ export function Table<T>({
           className={cn("border-collapse", sized ? "w-max" : undefined)}
           style={{
             tableLayout: "fixed",
+            // Fill the viewport; without an explicit width the table sizes to its
+            // content and drifts wider than the container (stray h-scroll). Once the
+            // user resizes a column every width is frozen in px and w-max takes over.
+            width: sized ? undefined : "100%",
             minWidth: `max(100%, ${minTableWidth}px)`,
           }}
         >
@@ -363,7 +368,7 @@ export function Table<T>({
                       )}
                     >
                       {selectable ? (
-                        <td className="text-center">
+                        <td className="pl-4 text-center">
                           <div className="flex items-center justify-center">
                             <Checkbox
                               checked={isSelected}

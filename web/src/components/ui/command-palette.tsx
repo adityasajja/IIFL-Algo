@@ -211,7 +211,7 @@ export function CommandPalette({
                 transition={reduce ? { duration: 0.1 } : PANEL_SPRING}
                 {...gate}
                 onKeyDown={onKeyDown}
-                className="pointer-events-auto w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl will-change-transform"
+                className="pointer-events-auto w-full max-w-xl overflow-hidden rounded-xl border border-border bg-card will-change-transform"
               >
                 <div className="flex items-center gap-3 border-b border-border px-4">
                   <Search className="h-4 w-4 text-muted-foreground" />
@@ -230,7 +230,7 @@ export function CommandPalette({
                       canTouch && "text-base",
                     )}
                   />
-                  <kbd className="hidden rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline-block">
+                  <kbd className="hidden rounded-lg border border-border bg-background px-1.5 py-0.5 text-micro text-muted-foreground sm:inline-block">
                     ESC
                   </kbd>
                 </div>
@@ -248,7 +248,7 @@ export function CommandPalette({
                   ) : (
                     grouped.map(([group, list]) => (
                       <div key={group} className="mb-1 last:mb-0">
-                        <div aria-hidden className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <div aria-hidden className="px-2 py-1.5 text-micro font-semibold uppercase tracking-wider text-muted-foreground">
                           {group}
                         </div>
                         {list.map((it) => {
@@ -290,7 +290,7 @@ export function CommandPalette({
                                 <span className="relative z-10 shrink-0">{it.badge}</span>
                               ) : null}
                               {it.hint ? (
-                                <kbd className="relative z-10 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                <kbd className="relative z-10 rounded-lg border border-border bg-background px-1.5 py-0.5 text-micro text-muted-foreground">
                                   {it.hint}
                                 </kbd>
                               ) : null}

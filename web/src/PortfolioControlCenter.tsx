@@ -1,50 +1,66 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  AlertOctagon,
   AlertTriangle,
   CheckCircle2,
+  Coins,
+  FlaskConical,
   RefreshCw,
+  ShieldOff,
   Sliders,
 } from "lucide-react";
 import {
   getPortfolioControlCenter,
+  getRiskStatus,
+  setKillSwitch,
   updatePortfolioPolicy,
   type PortfolioControlCenterData,
   type PortfolioPolicyConfig,
+  type RiskStatus,
 } from "./api";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { Button } from "./components/ui/button";
 import { Select } from "./components/ui/select";
-import { Badge } from "./components/ui/stat";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
+import { Tooltip } from "./components/motion/tooltip";
+import { Stat } from "./components/ui/stat";
+import { AnimatedBadge } from "./components/motion/animated-badge";
+import { TiltCard } from "./components/motion/tilt-card";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { useToast } from "./components/ui/toast-context";
+import { useDialog } from "./components/ui/dialog-context";
 import { cn } from "./lib/utils";
-
-const INR = (v: number | null | undefined, frac = 0) => {
-  if (v === null || v === undefined || isNaN(v)) return "—";
-  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: frac })}`;
-};
-
-const PCT = (v: number | null | undefined, frac = 1) => {
-  if (v === null || v === undefined || isNaN(v)) return "—";
-  return `${(v * 100).toFixed(frac)}%`;
-};
+import { formatInr as INR, formatPct as PCT, TYPOGRAPHY } from "./lib/theme";
 
 export function PortfolioControlCenter() {
   const [data, setData] = useState<PortfolioControlCenterData | null>(null);
+  const [riskData, setRiskData] = useState<RiskStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<ButtonState>("idle");
   const [showConfig, setShowConfig] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "ALL" | "STOPPED">("ACTIVE");
   const [policyForm, setPolicyForm] = useState<Partial<PortfolioPolicyConfig>>({});
   const [policyReason, setPolicyReason] = useState("");
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [killSwitchEngaged, setKillSwitchEngaged] = useState<boolean>(false);
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false);
   const { toast } = useToast();
+  const dialog = useDialog();
 
   const load = useCallback(async () => {
     setState("loading");
     try {
-      const res = await getPortfolioControlCenter();
+      const [res, risk] = await Promise.all([
+        getPortfolioControlCenter(),
+        getRiskStatus().catch(() => null),
+      ]);
       setData(res);
       setPolicyForm(res.policy);
+      if (risk) {
+        setRiskData(risk);
+        setKillSwitchEngaged(Boolean(risk.kill_switch));
+      }
       setError(null);
       setState("success");
     } catch (err) {
@@ -94,6 +110,44 @@ export function PortfolioControlCenter() {
     }
   };
 
+  const handleToggleKillSwitch = async () => {
+    const engage = !killSwitchEngaged;
+    const reason = await dialog.prompt({
+      title: engage ? "Engage Emergency Kill Switch?" : "Disengage Emergency Kill Switch?",
+      description: engage
+        ? "All new order placement across every strategy will be instantly blocked."
+        : "Order placement will be resumed across approved strategies.",
+      label: "Audit Reason",
+      placeholder: "State why this safety change is being made...",
+      required: true,
+      confirmLabel: engage ? "Halt All Orders" : "Resume Orders",
+      tone: engage ? "danger" : "default",
+    });
+    if (!reason) return;
+
+    setKillSwitchBusy(true);
+    try {
+      await setKillSwitch(engage, reason.trim());
+      setKillSwitchEngaged(engage);
+      toast({
+        title: engage ? "Emergency Kill Switch Engaged" : "Kill Switch Disengaged",
+        description: engage
+          ? "All new orders are immediately halted."
+          : "Order placement has safely resumed.",
+        status: engage ? "neutral" : "success",
+      });
+      void load();
+    } catch (err) {
+      toast({
+        title: "Kill Switch Error",
+        description: err instanceof Error ? err.message : String(err),
+        status: "error",
+      });
+    } finally {
+      setKillSwitchBusy(false);
+    }
+  };
+
   if (loading && !data) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -112,36 +166,126 @@ export function PortfolioControlCenter() {
 
   return (
     <div className="space-y-6">
+      {/* Kill Switch Alert Banner if engaged */}
+      {killSwitchEngaged && (
+        <div className="flex items-center justify-between rounded-md border border-destructive/50 bg-destructive/15 px-4 py-3 text-destructive dark:text-loss">
+          <div className="flex items-center gap-2.5">
+            <AlertOctagon className="size-5 shrink-0 text-destructive animate-pulse" />
+            <div>
+              <p className="text-sm font-semibold">Emergency Kill Switch is ENGAGED</p>
+              <p className="text-xs text-muted-foreground">Order placement is blocked across the entire system.</p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            disabled={killSwitchBusy}
+            onClick={() => void handleToggleKillSwitch()}
+            className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+          >
+            {killSwitchBusy ? "Processing…" : "Disengage Kill Switch"}
+          </Button>
+        </div>
+      )}
+
+      {/* Dual Context Strip: Explicit Paper Portfolio vs Live Broker Margin */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <TiltCard
+          max={6}
+          className="flex items-center gap-3 border border-gain/30 bg-gain/[0.06] p-3 text-xs"
+        >
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-gain/20 bg-gain/[0.08] text-gain">
+            <FlaskConical size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground">Paper Portfolio (Simulated Book)</span>
+            <AnimatedBadge status="success" size="sm">LOCAL PAPER ONLY</AnimatedBadge>
+            </div>
+            <p className="text-caption text-muted-foreground mt-0.5">
+            Simulated capital allocated across automated paper trading strategies. Zero broker fills or money movements.
+            </p>
+          </div>
+        </TiltCard>
+
+        <TiltCard
+          max={6}
+          className="flex items-center gap-3 border border-border/80 bg-card/60 p-3 text-xs"
+        >
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            <Coins size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground">Real Broker Demat (IIFL)</span>
+                <AnimatedBadge status={riskData?.live_orders_allowed ? "warning" : "neutral"} size="sm">
+                {riskData?.live_orders_allowed ? "LIVE ORDERS ALLOWED" : "READ ONLY / PAPER GUARD"}
+                </AnimatedBadge>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-caption text-muted-foreground mt-0.5">
+              <span>Available Broker Margin:</span>
+              <span className="font-semibold tabular-nums text-foreground">
+                {riskData?.margin?.AvailableMargin !== undefined
+                  ? INR(riskData.margin.AvailableMargin)
+                  : riskData?.margin?.OpeningCashLimit !== undefined
+                    ? INR(riskData.margin.OpeningCashLimit)
+                    : "Connect broker"}
+              </span>
+            </div>
+          </div>
+        </TiltCard>
+      </div>
+
       {/* Header & Quick Action */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-              Portfolio Control Center
+          <h2 className={TYPOGRAPHY.h2}>
+          Paper Strategy Portfolio Control
             </h2>
-            <Badge tone={data.policy_configured ? "good" : "warn"}>
-              {data.policy_configured ? "Active Risk Engine" : "Uncapped / Pass-Through"}
-            </Badge>
+            <AnimatedBadge
+              status={data.policy_configured ? "success" : "warning"}
+              pulse={data.policy_configured}
+              size="sm"
+            >
+              {data.policy_configured ? "Risk Engine Active" : "Uncapped / Pass-Through"}
+            </AnimatedBadge>
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Portfolio-level limits, cross-strategy capital allocation, concentration tracking, and conflict governance.
+          <p className={TYPOGRAPHY.sub}>
+          Paper-level limits, cross-strategy capital allocation, concentration tracking, and conflict governance.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
+        <Tooltip content={killSwitchEngaged ? "Disengage Kill Switch" : "Emergency Kill Switch"} side="bottom" delay={400}>
+            <Button
             type="button"
-            onClick={() => setShowConfig(!showConfig)}
+              size="sm"
+              variant={killSwitchEngaged ? "primary" : "outline"}
+              disabled={killSwitchBusy}
+              onClick={() => void handleToggleKillSwitch()}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold border transition-all",
-              showConfig
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted/30 border-border/70 text-muted-foreground hover:text-foreground hover:bg-muted/60"
+              killSwitchEngaged && "bg-destructive text-destructive-foreground hover:bg-destructive/90 animate-pulse border-destructive",
+              !killSwitchEngaged && "text-destructive border-destructive/30 hover:bg-destructive hover:text-destructive-foreground"
             )}
           >
-            <Sliders size={13} />
+          {killSwitchEngaged ? <ShieldOff size={13} className="mr-1.5" /> : <AlertOctagon size={13} className="mr-1.5" />}
+              {killSwitchEngaged ? "Kill Switch Active" : "Emergency Kill Switch"}
+            </Button>
+          </Tooltip>
+
+          <Button
+            type="button"
+            size="sm"
+            variant={showConfig ? "primary" : "secondary"}
+            onClick={() => setShowConfig(!showConfig)}
+          >
+            <Sliders size={13} className="mr-1.5" />
             Configure Limits & Rules
-          </button>
+          </Button>
           <StatefulButton
             state={state}
             variant="secondary"
@@ -160,9 +304,9 @@ export function PortfolioControlCenter() {
 
       {/* Proximity Warnings Banner */}
       {concentrations.warnings && concentrations.warnings.length > 0 && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-xs text-amber-200 space-y-1.5">
-          <div className="flex items-center gap-2 font-semibold text-amber-300">
-            <AlertTriangle size={15} className="text-amber-400 shrink-0" />
+        <div className="rounded-md border border border-warning/20 bg-warning/15/10 p-4 text-xs text-warning space-y-1.5">
+          <div className="flex items-center gap-2 font-semibold text-warning">
+            <AlertTriangle size={15} className="text-warning shrink-0" />
             <span>Concentration & Risk Proximity Warnings</span>
           </div>
           <ul className="list-disc pl-5 space-y-0.5">
@@ -175,7 +319,7 @@ export function PortfolioControlCenter() {
 
       {/* Modal / Inline Policy Configuration */}
       {showConfig && (
-        <Card className="border-primary/40 bg-card/90 shadow-xl">
+        <Card className="border-primary/40 bg-card/90 ">
           <CardHeader
             title="Configure Portfolio-Level Limits & Conflict Rules"
             sub="These limits sit ABOVE all individual strategy limits and are strictly enforced before OMS submission."
@@ -337,21 +481,22 @@ export function PortfolioControlCenter() {
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border/60">
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => setShowConfig(false)}
-                className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                size="sm"
                 disabled={savingPolicy}
                 onClick={() => void handleSavePolicy()}
-                className="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold text-xs hover:bg-primary/90 disabled:opacity-50"
               >
                 {savingPolicy ? "Saving…" : "Save Active Limits"}
-              </button>
+              </Button>
             </div>
           </div>
         </Card>
@@ -359,68 +504,77 @@ export function PortfolioControlCenter() {
 
       {/* KPI Ribbon Strip */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Total Capital</div>
-          <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{INR(capital.total)}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">Allocated book size</div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Deployed Capital</div>
-          <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{INR(capital.deployed)}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">Active running arms</div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Available Capital</div>
-          <div className="mt-1 text-lg font-bold tabular-nums text-emerald-500">{INR(capital.available)}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">Free margin capacity</div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Total Gross Exposure</div>
-          <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{INR(exposure.gross)}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            L: {INR(exposure.long)} | S: {INR(exposure.short)}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Today's P&L</div>
-          <div
-            className={cn(
-              "mt-1 text-lg font-bold tabular-nums",
-              today.total > 0 ? "text-emerald-500" : today.total < 0 ? "text-destructive" : "text-foreground"
-            )}
-          >
-            {today.total >= 0 ? "+" : ""}{INR(today.total)}
-          </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            Realized: {INR(today.realized)}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Max Drawdown</div>
-          <div className="mt-1 text-lg font-bold tabular-nums text-destructive">
-            {drawdown.value !== null ? INR(Math.abs(drawdown.value)) : "—"}
-          </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            Cash util: {PCT(capital.cash_utilization)}
-          </div>
-        </div>
+      <Stat
+      label="Paper Capital"
+      value={INR(capital.total)}
+      sub="Total simulated book"
+      />
+      <Stat
+      label="Deployed Capital"
+      value={INR(capital.deployed)}
+      sub="Active running arms"
+      />
+        <Stat
+          label="Available Capital"
+          value={INR(capital.available)}
+          sub="Unallocated capacity"
+          tone="good"
+        />
+        <Stat
+          label="Gross Exposure"
+          value={INR(exposure.gross)}
+          sub={`L: ${INR(exposure.long)} | S: ${INR(exposure.short)}`}
+        />
+        <Stat
+          label="Paper P&L (Today)"
+          value={`${today.total >= 0 ? "+" : ""}${INR(today.total)}`}
+          sub={`Realized: ${INR(today.realized)}`}
+          tone={today.total > 0 ? "good" : today.total < 0 ? "bad" : "neutral"}
+        />
+        <Stat
+          label="Max Drawdown"
+          value={drawdown.value !== null ? INR(Math.abs(drawdown.value)) : "—"}
+          sub={`Sim cash util: ${PCT(capital.cash_utilization)}`}
+          tone="bad"
+        />
       </div>
 
       {/* Strategy Capital Allocation & Objective Metrics Comparison */}
       <Card>
-        <CardHeader
-          title="Strategy Capital Allocation & Performance Comparison"
-          sub="Objective comparison across all paper deployments ordered by allocated capital (no arbitrary 'best' ranking)."
-        />
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4 pb-2 border-b border-border/60">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Paper Strategy Allocations & Performance
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Simulated deployments running on paper capital, ordered by allocated capital.
+            </p>
+          </div>
+          <div>
+            <Tabs
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as "ACTIVE" | "ALL" | "STOPPED")}
+              variant="segment"
+            >
+              <TabsList>
+                <TabsTrigger value="ACTIVE">
+                  Active ({strategies.filter((s) => s.deployment_status === "RUNNING").length})
+                </TabsTrigger>
+                <TabsTrigger value="ALL">
+                All ({strategies.length})
+                </TabsTrigger>
+                <TabsTrigger value="STOPPED">
+                  Stopped ({strategies.filter((s) => s.deployment_status !== "RUNNING").length})
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+        </div>
+
         <div className="overflow-x-auto p-1">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-border/60 text-[11px] text-muted-foreground uppercase font-semibold">
+              <tr className="border-b border-border/60 text-caption text-muted-foreground uppercase font-semibold">
                 <th className="p-3">Strategy / Deployment</th>
                 <th className="p-3">Status</th>
                 <th className="p-3 text-right">Allocated</th>
@@ -435,49 +589,61 @@ export function PortfolioControlCenter() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {strategies.length === 0 ? (
+              {strategies.filter((s) => {
+                if (statusFilter === "ACTIVE") return s.deployment_status === "RUNNING";
+                if (statusFilter === "STOPPED") return s.deployment_status !== "RUNNING";
+                return true;
+              }).length === 0 ? (
                 <tr>
                   <td colSpan={11} className="p-6 text-center text-muted-foreground">
-                    No active deployments found. Create a deployment in Paper trading to allocate capital.
+                    No {statusFilter.toLowerCase()} paper deployments found.
                   </td>
                 </tr>
               ) : (
-                strategies.map((strat) => {
+                strategies
+                  .filter((s) => {
+                    if (statusFilter === "ACTIVE") return s.deployment_status === "RUNNING";
+                    if (statusFilter === "STOPPED") return s.deployment_status !== "RUNNING";
+                    return true;
+                  })
+                  .map((strat) => {
                   const pnlPos = strat.total_pnl >= 0;
                   return (
                     <tr key={strat.deployment_id} className="hover:bg-muted/20 transition-colors">
                       <td className="p-3 font-semibold text-foreground">
                         <div className="flex items-center gap-1.5">
                           <span>{strat.strategy_name}</span>
-                          <span className="text-[10px] text-muted-foreground font-mono">
+                            <span className="text-micro text-muted-foreground font-mono">
                             #{strat.deployment_id.slice(0, 6)}
                           </span>
                         </div>
                       </td>
                       <td className="p-3">
-                        <Badge
-                          tone={
+                          <AnimatedBadge
+                            status={
                             strat.deployment_status === "RUNNING"
-                              ? "good"
+                                ? "success"
                               : strat.deployment_status === "PAUSED"
-                              ? "warn"
-                              : "flat"
+                                  ? "warning"
+                                  : "neutral"
                           }
+                            pulse={strat.deployment_status === "RUNNING"}
+                            size="sm"
                         >
                           {strat.deployment_status}
-                        </Badge>
+                          </AnimatedBadge>
                       </td>
                       <td className="p-3 text-right font-medium tabular-nums">{INR(strat.allocated)}</td>
                       <td className="p-3 text-right tabular-nums text-muted-foreground">{INR(strat.used)}</td>
-                      <td className="p-3 text-right tabular-nums text-emerald-500 font-medium">
+                        <td className="p-3 text-right tabular-nums text-gain font-medium">
                         {INR(strat.available)}
                       </td>
                       <td className="p-3 text-right tabular-nums">{INR(strat.exposure)}</td>
                       <td className="p-3 text-right tabular-nums">{INR(strat.realized)}</td>
-                      <td className={cn("p-3 text-right font-semibold tabular-nums", pnlPos ? "text-emerald-500" : "text-destructive")}>
+                      <td className={cn("p-3 text-right font-semibold tabular-nums", pnlPos ? "text-gain" : "text-destructive")}>
                         {pnlPos ? "+" : ""}{INR(strat.total_pnl)}
                       </td>
-                      <td className={cn("p-3 text-right font-medium tabular-nums", (strat.return_pct ?? 0) >= 0 ? "text-emerald-500" : "text-destructive")}>
+                      <td className={cn("p-3 text-right font-medium tabular-nums", (strat.return_pct ?? 0) >= 0 ? "text-gain" : "text-destructive")}>
                         {strat.return_pct !== null ? `${strat.return_pct > 0 ? "+" : ""}${strat.return_pct}%` : "—"}
                       </td>
                       <td className="p-3 text-right tabular-nums text-muted-foreground">
@@ -513,7 +679,7 @@ export function PortfolioControlCenter() {
                   <div key={l.key} className="py-2.5 flex items-center justify-between text-xs">
                     <div className="space-y-0.5 min-w-0 pr-2">
                       <div className="font-medium text-foreground">{l.label}</div>
-                      <div className="text-[11px] text-muted-foreground">
+                      <div className="text-caption text-muted-foreground">
                         Configured: {l.configured !== null ? (l.unit === "INR" ? INR(l.configured) : l.unit === "fraction" ? PCT(l.configured) : String(l.configured)) : "Unset"}
                       </div>
                     </div>
@@ -524,8 +690,8 @@ export function PortfolioControlCenter() {
                       {l.utilization !== null ? (
                         <div
                           className={cn(
-                            "text-[10.5px] font-bold tabular-nums",
-                            isBreaching ? "text-destructive" : isWarning ? "text-amber-500" : "text-muted-foreground"
+                            "text-[10.5px] font-semibold tabular-nums",
+                            isBreaching ? "text-destructive" : isWarning ? "text-warning" : "text-muted-foreground"
                           )}
                         >
                           {PCT(l.utilization)} utilized
@@ -548,7 +714,7 @@ export function PortfolioControlCenter() {
           <div className="p-4 space-y-3">
             {conflicts.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground">
-                <CheckCircle2 size={24} className="mx-auto text-emerald-500 mb-2 opacity-80" />
+                <CheckCircle2 size={24} className="mx-auto text-gain mb-2 opacity-80" />
                 No cross-strategy position or signal conflicts detected across running deployments.
               </div>
             ) : (
@@ -557,12 +723,12 @@ export function PortfolioControlCenter() {
                   <div key={c.symbol} className="rounded-lg border border-border/80 bg-muted/20 p-3 text-xs">
                     <div className="flex items-center justify-between font-semibold">
                       <span className="text-foreground">{c.symbol}</span>
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-caption text-muted-foreground">
                         Net: {c.net_qty > 0 ? `+${c.net_qty} LONG` : `${c.net_qty} SHORT`}
                       </span>
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="bg-emerald-950/20 border border-emerald-500/20 rounded p-1.5 text-emerald-300">
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-caption">
+                      <div className="bg-gain/15/20 border border-gain/20 rounded-md p-1.5 text-gain">
                         <div className="font-semibold uppercase tracking-wider text-[9.5px]">Long Arm(s)</div>
                         {c.long.map((l) => (
                           <div key={l.deployment_id}>
@@ -570,7 +736,7 @@ export function PortfolioControlCenter() {
                           </div>
                         ))}
                       </div>
-                      <div className="bg-rose-950/20 border border-rose-500/20 rounded p-1.5 text-rose-300">
+                      <div className="bg-loss/15/20 border border-loss/20 rounded-md p-1.5 text-loss">
                         <div className="font-semibold uppercase tracking-wider text-[9.5px]">Short Arm(s)</div>
                         {c.short.map((s) => (
                           <div key={s.deployment_id}>
@@ -659,7 +825,7 @@ export function PortfolioControlCenter() {
         <div className="overflow-x-auto p-1">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-border/60 text-[11px] text-muted-foreground uppercase font-semibold">
+              <tr className="border-b border-border/60 text-caption text-muted-foreground uppercase font-semibold">
                 <th className="p-3">Symbol</th>
                 <th className="p-3">Sector</th>
                 <th className="p-3 text-right">Net Quantity</th>
@@ -688,7 +854,7 @@ export function PortfolioControlCenter() {
                     <td className="p-3">
                       <div className="flex flex-wrap gap-1">
                         {p.deployments.map((d) => (
-                          <span key={d} className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                          <span key={d} className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-mono text-muted-foreground">
                             #{d.slice(0, 6)}
                           </span>
                         ))}

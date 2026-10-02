@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Flame, Trophy, TrendingDown } from "lucide-react";
+import { ChevronLeft, ChevronRight, Landmark } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   getPnlCalendar,
@@ -10,6 +10,9 @@ import {
 } from "../../api";
 import { cn } from "../../lib/utils";
 import { PageLoader } from "./loading";
+import { Card, CardHeader } from "./card";
+import { Button } from "./button";
+import { Input } from "../motion/input";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -23,10 +26,13 @@ const monthLabel = (m: string) =>
   new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 const dayLabel = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
-/** Shade a day by its size next to the month's biggest, so one huge day does not wash out the rest. */
-function shade(pnl: number, biggest: number): string {
-  const strength = biggest > 0 ? Math.min(1, Math.abs(pnl) / biggest) : 0;
-  const alpha = 0.22 + 0.68 * strength;
+/** Absolute shade scale: the same rupee P&L renders the same color in every
+calendar and every month. Normalizing to each month's biggest day made
+identical results look different side by side. */
+const FULL_SHADE_AT = 20000;
+function shade(pnl: number): string {
+  const strength = Math.min(1, Math.abs(pnl) / FULL_SHADE_AT);
+  const alpha = 0.15 + 0.55 * strength;
   return pnl >= 0 ? `rgba(16, 185, 129, ${alpha})` : `rgba(244, 63, 94, ${alpha})`;
 }
 
@@ -63,22 +69,23 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
 
   if (error) {
     return (
-      <Frame title={title}>
+      <Card className="p-5">
+      <CardHeader title={<span className="text-base font-semibold tracking-tight">{title}</span>} />
         <div className="py-6 text-sm text-muted-foreground">Couldn't load this calendar.</div>
-      </Frame>
+      </Card>
     );
   }
   if (!data) {
     return (
-      <Frame title={title}>
+      <Card className="p-5">
+      <CardHeader title={<span className="text-base font-semibold tracking-tight">{title}</span>} />
         <PageLoader label="Loading" />
-      </Frame>
+      </Card>
     );
   }
 
   const months = data.months_with_data;
   const at = months.indexOf(data.month);
-  const biggest = Math.max(0, ...data.days.map((d) => Math.abs(d.pnl)));
   const step = (by: number) => {
     const next = months[at + by];
     if (next) {
@@ -88,45 +95,91 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
   };
 
   return (
-    <Frame title={title}>
+    <Card className="p-5">
+      <CardHeader
+        title={<span className="text-base font-semibold tracking-tight">{title}</span>}
+        sub={note ? <span className="text-xs text-muted-foreground">{note}</span> : undefined}
+      />
+      <div className="mt-3">
       {months.length === 0 ? (
         <div className="py-10 text-center text-sm text-muted-foreground">
           {scope === "paper" ? "No paper trades have closed yet." : "No portfolio history yet."}
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2 text-[11px]">
-            <Chip icon={<Flame className="size-3" />}>
-              {data.current_green} green {data.current_green === 1 ? "day" : "days"} running
-            </Chip>
-            <Chip>
-              best run {data.best_green} · worst {data.worst_red}
-            </Chip>
-            {data.best_day && <Chip icon={<Trophy className="size-3 text-emerald-500" />}>best {inr(data.best_day.pnl)}</Chip>}
-            {data.worst_day && <Chip icon={<TrendingDown className="size-3 text-rose-500" />}>worst {inr(data.worst_day.pnl)}</Chip>}
-            <Chip>
-              {data.green_days}G / {data.red_days}R over {data.traded_days} traded {data.traded_days === 1 ? "day" : "days"}
-            </Chip>
+            {/* Official FY figures, straight from the broker — one strip, no cards. */}
+            {data.tax_gl_summary && (
+              <div className="mb-4 rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
+                <div className="flex items-center gap-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  <Landmark className="size-3.5 text-primary" />
+                  <span>Official FY figures · IIFL</span>
           </div>
+                <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4">
+                  <div className="min-w-0">
+                  <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Net realized</div>
+                  <div className={cn("mt-0.5 text-lg font-semibold tracking-tight tabular-nums", (data.tax_gl_summary.totalPnlInclusiveCharges ?? 0) >= 0 ? "text-gain" : "text-loss")}>{compact(data.tax_gl_summary.totalPnlInclusiveCharges ?? 0)}</div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">after all charges</div>
+                  </div>
+                  <div className="min-w-0">
+                  <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Short-term</div>
+                  <div className={cn("mt-0.5 text-lg font-semibold tracking-tight tabular-nums", (data.tax_gl_summary.shortTerm ?? 0) >= 0 ? "text-gain" : "text-loss")}>{compact(data.tax_gl_summary.shortTerm ?? 0)}</div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">held under 12 months</div>
+                  </div>
+                  <div className="min-w-0">
+                  <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Long-term</div>
+                  <div className={cn("mt-0.5 text-lg font-semibold tracking-tight tabular-nums", (data.tax_gl_summary.longTerm ?? 0) >= 0 ? "text-gain" : "text-loss")}>{compact(data.tax_gl_summary.longTerm ?? 0)}</div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">held 12 months or more</div>
+                  </div>
+                  <div className="min-w-0">
+                  <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Charges</div>
+                  <div className="mt-0.5 text-lg font-semibold tracking-tight tabular-nums text-warning">{compact((data.tax_gl_summary.brokerage ?? 0) + (data.tax_gl_summary.chargesTaxes ?? 0))}</div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">brokerage, STT, GST & stamp</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* One quiet sentence instead of five shouting pills. */}
+            <p className="text-body tabular-nums text-muted-foreground">
+            <span className="font-medium text-foreground">{data.traded_days}</span> traded {data.traded_days === 1 ? "day" : "days"} ·{" "}
+              <span className="font-medium text-foreground">{data.green_days}</span> up ·{" "}
+              <span className="font-medium text-foreground">{data.red_days}</span> down
+              {data.best_day ? <> · best <span className="font-medium text-gain">{compact(data.best_day.pnl)}</span></> : null}
+              {data.worst_day ? <> · worst <span className="font-medium text-loss">{compact(data.worst_day.pnl)}</span></> : null}
+            </p>
 
           <div className="mt-4 flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <NavButton disabled={at <= 0} onClick={() => step(-1)} label="Earlier month">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  disabled={at <= 0}
+                  onClick={() => step(-1)}
+                  aria-label="Earlier month"
+                  className="size-7 rounded-lg"
+                >
                 <ChevronLeft className="size-4" />
-              </NavButton>
-              <span className="min-w-24 text-center text-sm font-medium tabular-nums">{monthLabel(data.month)}</span>
-              <NavButton disabled={at < 0 || at >= months.length - 1} onClick={() => step(1)} label="Later month">
+                </Button>
+                <span className="min-w-24 text-center text-sm font-semibold tabular-nums">{monthLabel(data.month)}</span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  disabled={at < 0 || at >= months.length - 1}
+                  onClick={() => step(1)}
+                  aria-label="Later month"
+                  className="size-7 rounded-lg"
+                >
                 <ChevronRight className="size-4" />
-              </NavButton>
+                </Button>
             </div>
-            <span className={cn("text-sm font-semibold tabular-nums", data.total >= 0 ? "text-emerald-500" : "text-rose-500")}>
+            <span className={cn("text-base font-semibold tabular-nums", data.total >= 0 ? "text-gain" : "text-loss")}>
               {inr(data.total)}
             </span>
           </div>
 
           <div className="mt-3 grid grid-cols-7 gap-1.5">
             {WEEKDAYS.map((w, i) => (
-              <div key={i} className="pb-1 text-center text-[10px] text-muted-foreground">
+              <div key={i} className="pb-1 text-center text-micro font-semibold text-muted-foreground">
                 {w}
               </div>
             ))}
@@ -138,31 +191,33 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
               const tip = d
                 ? `${dayLabel(iso)}: ${inr(d.pnl)}${d.trades ? ` · ${d.trades} ${what}` : ""}${d.estimated ? " · rebuilt from today's holdings" : ""}`
                 : `${dayLabel(iso)}: no result`;
-              // On the real calendar a past day with no result is clickable too, so a day's
-              // trading profit can be recorded when nothing else was captured for it.
               const clickable = !!d || (scope === "real" && iso <= new Date().toISOString().slice(0, 10));
               const cellClass = cn(
-                "flex aspect-square flex-col items-center justify-center rounded-md text-[11px] tabular-nums",
-                d ? "text-foreground" : "bg-muted/40 text-muted-foreground",
-                d?.estimated && "ring-1 ring-inset ring-foreground/25",
-                clickable && "cursor-pointer transition-transform hover:scale-[1.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                picked === iso && "ring-2 ring-primary",
+                  "flex aspect-square flex-col items-center justify-center rounded-md text-caption tabular-nums font-medium transition-all",
+                  d ? "text-foreground" : "bg-muted/30 text-muted-foreground/60",
+                  d?.estimated && "ring-1 ring-inset ring-foreground/10",
+                  clickable && "cursor-pointer hover:ring-1 hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                  picked === iso && "ring-2 ring-primary ",
               );
               const inner = (
                 <>
-                  <span className="font-medium">{n}</span>
-                  {d && <span className="text-[9px] leading-none opacity-80">{compact(d.pnl)}</span>}
+                    <span className="text-caption font-semibold leading-none">{n}</span>
+                    {d && (
+                      <span className="mt-0.5 text-micro font-medium leading-tight opacity-90 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-0.5">
+                        {compact(d.pnl)}
+                      </span>
+                    )}
                 </>
               );
               return clickable ? (
                 <button
                   key={iso}
                   type="button"
-                  title={d ? tip : `${dayLabel(iso)}: no result yet. Click to record profit from trading.`}
+                  title={d ? tip : `${dayLabel(iso)}: no result yet. Click to inspect or record profit.`}
                   aria-pressed={picked === iso}
                   onClick={() => setPicked((cur) => (cur === iso ? null : iso))}
                   className={cellClass}
-                  style={d ? { backgroundColor: shade(d.pnl, biggest) } : undefined}
+                    style={d ? { backgroundColor: shade(d.pnl) } : undefined}
                 >
                   {inner}
                 </button>
@@ -184,58 +239,26 @@ export function PnlCalendar({ scope, title, note }: { scope: "paper" | "real"; t
             />
           )}
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
             <span>
-              {note}
-              {data.any_estimated && " Outlined days are rebuilt from today's holdings."}
+                {data.any_estimated && "Outlined days are rebuilt from today's holdings."}
               {data.unpriced && data.unpriced.length > 0 && ` ${data.unpriced.length} holdings have no price history and are left out.`}
             </span>
-            <span className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <i className="size-2 rounded-full bg-rose-500" />
+              <span className="flex items-center gap-3 font-medium">
+                <span className="flex items-center gap-1.5">
+                  <i className="size-2 rounded-full bg-loss" />
                 loss
               </span>
-              <span className="flex items-center gap-1">
-                <i className="size-2 rounded-full bg-emerald-500" />
+                <span className="flex items-center gap-1.5">
+                  <i className="size-2 rounded-full bg-gain" />
                 profit
               </span>
             </span>
           </div>
         </>
       )}
-    </Frame>
-  );
-}
-
-function Frame({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="mb-3 text-sm font-semibold">{title}</div>
-      {children}
     </div>
-  );
-}
-
-function Chip({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
-      {icon}
-      {children}
-    </span>
-  );
-}
-
-function NavButton({ disabled, onClick, label, children }: { disabled: boolean; onClick: () => void; label: string; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="grid size-7 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-    >
-      {children}
-    </button>
+    </Card>
   );
 }
 
@@ -276,14 +299,16 @@ function DayDetail({
         <div>
           <div className="text-sm font-semibold">{dayLabel(date)}</div>
           {detail && (
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-caption text-muted-foreground">
               {detail.rows.length} {real ? "holdings" : detail.rows.length === 1 ? "trade" : "trades"} · {detail.gainers} up, {detail.losers} down
             </div>
           )}
         </div>
         <div className="flex items-center gap-3">
-          {detail && <span className={cn("text-sm font-semibold tabular-nums", detail.total >= 0 ? "text-emerald-500" : "text-rose-500")}>{inr(detail.total)}</span>}
-          <button type="button" onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
+        {detail && <span className={cn("text-sm font-semibold tabular-nums", detail.total >= 0 ? "text-gain" : "text-loss")}>{inr(detail.total)}</span>}
+          <Button variant="ghost" size="sm" onClick={onClose} className="h-7 px-2 text-xs">
+            Close
+          </Button>
         </div>
       </div>
 
@@ -292,21 +317,21 @@ function DayDetail({
       {detail && detail.rows.length === 0 && <div className="mt-3 text-xs text-muted-foreground">Nothing recorded for this day.</div>}
 
       {detail && detail.rows.length > 0 && (
-        <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-border bg-card">
+        <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-border bg-card" data-lenis-prevent>
           <div className="divide-y divide-border">
             {detail.rows.map((r, i) => (
               <div key={`${r.symbol}-${i}`} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{r.symbol.replace("-EQ", "")}</div>
-                  <div className="truncate text-[11px] text-muted-foreground">
+                  <div className="truncate text-caption text-muted-foreground">
                     {real
                       ? `${r.quantity} shares · ${inr(r.previous_close ?? 0)} to ${inr(r.close ?? 0)}`
                       : [r.source, r.entry != null && r.exit != null ? `${inr(r.entry)} to ${inr(r.exit)}` : null, r.note].filter(Boolean).join(" · ")}
                   </div>
                 </div>
                 <div className="shrink-0 text-right tabular-nums">
-                  <div className={cn("text-sm font-medium", r.pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>{inr(r.pnl)}</div>
-                  <div className="text-[11px] text-muted-foreground">
+                <div className={cn("text-sm font-medium", r.pnl >= 0 ? "text-gain" : "text-loss")}>{inr(r.pnl)}</div>
+                  <div className="text-caption text-muted-foreground">
                     {(real ? r.change_pct : r.pnl_pct) != null ? `${(real ? r.change_pct : r.pnl_pct)! > 0 ? "+" : ""}${(real ? r.change_pct : r.pnl_pct)!.toFixed(2)}%` : ""}
                   </div>
                 </div>
@@ -317,9 +342,9 @@ function DayDetail({
       )}
 
       {detail && detail.unpriced.length > 0 && (
-        <div className="mt-2 text-[11px] text-muted-foreground">Not priced on this day, so left out: {detail.unpriced.map((s) => s.replace("-EQ", "")).join(", ")}.</div>
+        <div className="mt-2 text-caption text-muted-foreground">Not priced on this day, so left out: {detail.unpriced.map((s) => s.replace("-EQ", "")).join(", ")}.</div>
       )}
-      {estimated && <div className="mt-2 text-[11px] text-muted-foreground">Rebuilt from today's holdings, so the mix on that day may have differed.</div>}
+      {estimated && <div className="mt-2 text-caption text-muted-foreground">Rebuilt from today's holdings, so the mix on that day may have differed.</div>}
       {real && detail && (
         <TradingProfit
           date={date}
@@ -376,49 +401,53 @@ function TradingProfit({
 
   return (
     <div className="mt-4 border-t border-border pt-3">
-      <div className="text-xs font-medium">Profit from trading</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground">
+      <div className="text-xs font-semibold">Realized Trading Profit / Broker Sync</div>
+      <div className="mt-0.5 text-caption text-muted-foreground">
         {current
-          ? `Recorded ${inr(current.amount)} on top of the ${inr(holdings)} change in your holdings.`
-          : "Only for profit that is not already in the holdings figure above, such as shares bought and sold the same day. The broker keeps no past trades, so it can't be read back. Whatever you enter is added to the day's total."}
+          ? `Recorded ${inr(current.amount)} (${current.source || "sync"}) on top of the ${inr(holdings)} change in your holdings.`
+          : "Only for profit that is not already in the holdings figure above, such as intraday trades or F&O settled during the day."}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <input
-          inputMode="decimal"
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <div className="w-36">
+          <Input
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="e.g. 11000 or -2500"
+            onChange={(val) => setAmount(val)}
+            placeholder="Amount (₹)"
           aria-label="Profit from trading, in rupees"
-          className="h-8 w-40 rounded-lg border border-border bg-card px-2.5 text-sm outline-none focus:border-primary"
+            className="h-8 text-xs"
         />
-        <input
+        </div>
+        <div className="min-w-40 flex-1">
+          <Input
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+            onChange={(val) => setNote(val)}
           placeholder="Note (optional)"
           aria-label="Note"
-          maxLength={200}
-          className="h-8 min-w-40 flex-1 rounded-lg border border-border bg-card px-2.5 text-sm outline-none focus:border-primary"
+            className="h-8 text-xs"
         />
-        <button
-          type="button"
+        </div>
+        <Button
+          size="sm"
+          variant="primary"
           disabled={!valid || busy}
           onClick={() => void run(() => saveTradingProfit(date, parsed, note))}
-          className="h-8 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-40"
+          className="h-8 text-xs"
         >
           {current ? "Update" : "Save"}
-        </button>
+        </Button>
         {current && (
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="outline"
             disabled={busy}
             onClick={() => void run(() => removeTradingProfit(date))}
-            className="h-8 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
+            className="h-8 text-xs"
           >
             Remove
-          </button>
+          </Button>
         )}
       </div>
-      {problem && <div className="mt-1.5 text-[11px] text-rose-500">{problem}</div>}
+      {problem && <div className="mt-1.5 text-caption text-loss">{problem}</div>}
     </div>
   );
 }

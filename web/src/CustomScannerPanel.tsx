@@ -2,11 +2,11 @@
  * Chartink-style condition builder & scanner panel.
  *
  * Features:
- *  - Drag-and-drop-free condition rows (indicator, op, value/indicator)
- *  - AND / OR combinator
- *  - Saved scans (presets + user saves)
- *  - Universe toggle: All NSE (cached) vs Watchlist
- *  - Results table with sort, live ticks, chart nav
+ * - Drag-and-drop-free condition rows (indicator, op, value/indicator)
+ * - AND / OR combinator
+ * - Saved scans (presets + user saves)
+ * - Universe toggle: All NSE (cached) vs Watchlist
+ * - Results table with sort, live ticks, chart nav
  */
 import {
   BookmarkCheck,
@@ -29,7 +29,7 @@ import {
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
 import { ButtonLoader } from "./components/ui/loading";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
@@ -46,38 +46,38 @@ interface IndicatorMeta {
 
 const INDICATORS: IndicatorMeta[] = [
   // Price
-  { id: "close",       label: "Close",          hasPeriod: false, category: "Price" },
-  { id: "open",        label: "Open",            hasPeriod: false, category: "Price" },
-  { id: "high",        label: "High",            hasPeriod: false, category: "Price" },
-  { id: "low",         label: "Low",             hasPeriod: false, category: "Price" },
+  { id: "close", label: "Close", hasPeriod: false, category: "Price" },
+  { id: "open", label: "Open", hasPeriod: false, category: "Price" },
+  { id: "high", label: "High", hasPeriod: false, category: "Price" },
+  { id: "low", label: "Low", hasPeriod: false, category: "Price" },
   // Moving Averages
-  { id: "sma",         label: "SMA",             hasPeriod: true, defaultPeriod: 20, category: "MA" },
-  { id: "ema",         label: "EMA",             hasPeriod: true, defaultPeriod: 20, category: "MA" },
+  { id: "sma", label: "SMA", hasPeriod: true, defaultPeriod: 20, category: "MA" },
+  { id: "ema", label: "EMA", hasPeriod: true, defaultPeriod: 20, category: "MA" },
   // Momentum
-  { id: "rsi",         label: "RSI",             hasPeriod: true, defaultPeriod: 14, category: "Momentum" },
+  { id: "rsi", label: "RSI", hasPeriod: true, defaultPeriod: 14, category: "Momentum" },
   // Volatility
-  { id: "atr",         label: "ATR",             hasPeriod: true, defaultPeriod: 14, category: "Volatility" },
-  { id: "atr_pct",     label: "ATR %",           hasPeriod: true, defaultPeriod: 14, category: "Volatility" },
-  { id: "bb_upper",    label: "BB Upper",        hasPeriod: true, defaultPeriod: 20, category: "Volatility" },
-  { id: "bb_mid",      label: "BB Mid",          hasPeriod: true, defaultPeriod: 20, category: "Volatility" },
-  { id: "bb_lower",    label: "BB Lower",        hasPeriod: true, defaultPeriod: 20, category: "Volatility" },
+  { id: "atr", label: "ATR", hasPeriod: true, defaultPeriod: 14, category: "Volatility" },
+  { id: "atr_pct", label: "ATR %", hasPeriod: true, defaultPeriod: 14, category: "Volatility" },
+  { id: "bb_upper", label: "BB Upper", hasPeriod: true, defaultPeriod: 20, category: "Volatility" },
+  { id: "bb_mid", label: "BB Mid", hasPeriod: true, defaultPeriod: 20, category: "Volatility" },
+  { id: "bb_lower", label: "BB Lower", hasPeriod: true, defaultPeriod: 20, category: "Volatility" },
   // Volume
-  { id: "volume",      label: "Volume",          hasPeriod: false, category: "Volume" },
-  { id: "vol_x",       label: "Volume ×avg",     hasPeriod: false, category: "Volume" },
+  { id: "volume", label: "Volume", hasPeriod: false, category: "Volume" },
+  { id: "vol_x", label: "Volume ×avg", hasPeriod: false, category: "Volume" },
   // Returns
-  { id: "day_chg_pct", label: "Day Change %",    hasPeriod: false, category: "Returns" },
-  { id: "ret_1m",      label: "1-Month Return %",hasPeriod: false, category: "Returns" },
-  { id: "vs_high",     label: "vs 52w High %",   hasPeriod: false, category: "Returns" },
+  { id: "day_chg_pct", label: "Day Change %", hasPeriod: false, category: "Returns" },
+  { id: "ret_1m", label: "1-Month Return %",hasPeriod: false, category: "Returns" },
+  { id: "vs_high", label: "vs 52w High %", hasPeriod: false, category: "Returns" },
 ];
 
 const IND_BY_ID = Object.fromEntries(INDICATORS.map((i) => [i.id, i]));
 
 const OPERATORS = [
-  { id: ">",             label: ">" },
-  { id: "<",             label: "<" },
-  { id: ">=",            label: "≥" },
-  { id: "<=",            label: "≤" },
-  { id: "=",             label: "=" },
+  { id: ">", label: ">" },
+  { id: "<", label: "<" },
+  { id: ">=", label: "≥" },
+  { id: "<=", label: "≤" },
+  { id: "=", label: "=" },
   { id: "crosses_above", label: "crosses above" },
   { id: "crosses_below", label: "crosses below" },
 ];
@@ -386,13 +386,13 @@ export default function CustomScannerPanel({
   const { getTick } = useLiveTicks(visible.slice(0, 50).map((r) => r.symbol));
 
   const SORT_COLS: { key: SortKey; label: string }[] = [
-    { key: "score",       label: "Score" },
-    { key: "last",        label: "Last" },
+    { key: "score", label: "Score" },
+    { key: "last", label: "Last" },
     { key: "day_chg_pct", label: "Day %" },
-    { key: "ret_1m",      label: "1M %" },
-    { key: "vs_high",     label: "vs High" },
-    { key: "rsi",         label: "RSI" },
-    { key: "vol_x",       label: "Vol ×" },
+    { key: "ret_1m", label: "1M %" },
+    { key: "vs_high", label: "vs High" },
+    { key: "rsi", label: "RSI" },
+    { key: "vol_x", label: "Vol ×" },
   ];
 
   return (
@@ -401,7 +401,7 @@ export default function CustomScannerPanel({
       {/* ── Saved scans row ──────────────────────────────────────────────── */}
       {savedScans.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">
             Saved scans
           </span>
           {savedScans.map((s) => (
@@ -557,7 +557,7 @@ export default function CustomScannerPanel({
             {conditions.map((c, i) => (
               <span key={c._key} className="flex items-center gap-1.5">
                 {i > 0 && (
-                  <span className="text-[10px] font-bold uppercase text-primary">{combine}</span>
+                  <span className="text-micro font-semibold uppercase text-primary">{combine}</span>
                 )}
                 <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs text-primary font-medium">
                   {conditionText(c)}
@@ -578,7 +578,7 @@ export default function CustomScannerPanel({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[13px]">
+            <table className="w-full border-collapse text-body">
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30 text-left">
                   <th className="px-4 py-2.5 font-semibold">Symbol</th>
@@ -609,46 +609,46 @@ export default function CustomScannerPanel({
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-1.5">
                           <strong className="font-semibold">{r.symbol.replace("-EQ", "")}</strong>
-                          {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                          {tick && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" />}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{r.score.toFixed(1)}</td>
                       <td className={cn("px-3 py-2 text-right tabular-nums font-medium transition-colors duration-300",
-                        tick?.flash === "up" && "text-emerald-500",
+                          tick?.flash === "up" && "text-gain",
                         tick?.flash === "down" && "text-destructive",
                         !tick?.flash && "text-foreground",
                       )}>
                         {ltp.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
                       </td>
                       <td className={cn("px-3 py-2 text-right tabular-nums",
-                        r.day_chg_pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
+                      r.day_chg_pct >= 0 ? "text-gain" : "text-destructive"
                       )}>
                         {r.day_chg_pct >= 0 ? "+" : ""}{r.day_chg_pct.toFixed(2)}%
                       </td>
                       <td className={cn("px-3 py-2 text-right tabular-nums",
-                        r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
+                      r.ret_1m >= 0 ? "text-gain" : "text-destructive"
                       )}>
                         {r.ret_1m >= 0 ? "+" : ""}{r.ret_1m.toFixed(1)}%
                       </td>
                       <td className={cn("px-3 py-2 text-right tabular-nums",
-                        r.vs_high > -2 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
+                      r.vs_high > -2 ? "text-gain" : "text-destructive"
                       )}>
                         {r.vs_high.toFixed(1)}%
                       </td>
                       <td className={cn("px-3 py-2 text-right tabular-nums",
-                        r.rsi < 30 ? "text-emerald-600 dark:text-emerald-400" : r.rsi > 70 ? "text-amber-500" : ""
+                      r.rsi < 30 ? "text-gain" : r.rsi > 70 ? "text-warning" : ""
                       )}>
                         {r.rsi.toFixed(0)}
                       </td>
                       <td className={cn("px-3 py-2 text-right tabular-nums",
-                        r.vol_x >= 2 ? "text-amber-500" : ""
+                      r.vol_x >= 2 ? "text-warning" : ""
                       )}>
                         {r.vol_x.toFixed(1)}×
                       </td>
                       <td className="px-3 py-2">
                         <span className={cn(
-                          "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          r.trend === "UP" ? "bg-emerald-500/10 text-emerald-500" :
+                            "rounded-full px-2 py-0.5 text-micro font-semibold",
+                            r.trend === "UP" ? "border border-gain/20 bg-gain/[0.08] text-gain" :
                           r.trend === "DOWN" ? "bg-destructive/10 text-destructive" :
                           "bg-muted text-muted-foreground",
                         )}>
@@ -657,9 +657,9 @@ export default function CustomScannerPanel({
                       </td>
                       <td className="px-3 py-2">
                         <span className="flex flex-wrap gap-1">
-                          {r.breakout && <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-500">BREAKOUT</span>}
-                          {r.gold_cross_5d && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-500">GOLDEN ✕</span>}
-                          {r.rsi < 30 && <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-500">OVERSOLD</span>}
+                        {r.breakout && <span className="rounded-full border border-gain/20 bg-gain/[0.08] px-2 py-0.5 text-micro font-semibold text-gain">BREAKOUT</span>}
+                        {r.gold_cross_5d && <span className="rounded-full border border-warning/20 bg-warning/[0.08] px-2 py-0.5 text-micro font-semibold text-warning">GOLDEN ✕</span>}
+                        {r.rsi < 30 && <span className="rounded-full border border-primary/20 bg-primary/[0.08] px-2 py-0.5 text-micro font-semibold text-primary">OVERSOLD</span>}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right">

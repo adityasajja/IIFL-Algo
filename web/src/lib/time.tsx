@@ -1,3 +1,15 @@
+function toDate(input: string | Date): Date {
+  if (input instanceof Date) return input;
+  let str = String(input).trim();
+  if (str && !str.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(str)) {
+    if (str.includes('T')) {
+      str = str + 'Z';
+    } else if (str.includes(' ')) {
+      str = str.replace(' ', 'T') + 'Z';
+    }
+  }
+  return new Date(str);
+}
 import { cn } from "./utils";
 
 /**
@@ -9,7 +21,7 @@ import { cn } from "./utils";
  */
 export function relativeTime(input: string | Date | null | undefined): string | null {
   if (!input) return null;
-  const then = input instanceof Date ? input : new Date(input);
+  const then = toDate(input);
   if (Number.isNaN(then.getTime())) return null;
 
   const secs = Math.round((Date.now() - then.getTime()) / 1000);
@@ -34,7 +46,7 @@ export function relativeTime(input: string | Date | null | undefined): string | 
 /** `09-09 09:08` — compact, unambiguous, no locale surprises. */
 export function shortDate(input: string | Date | null | undefined): string | null {
   if (!input) return null;
-  const d = input instanceof Date ? input : new Date(input);
+  const d = toDate(input);
   if (Number.isNaN(d.getTime())) return null;
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getDate())}-${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -51,7 +63,7 @@ export function staleness(
   staleHours = 24,
 ): "fresh" | "aging" | "stale" | "unknown" {
   if (!input) return "unknown";
-  const then = input instanceof Date ? input : new Date(input);
+  const then = toDate(input);
   if (Number.isNaN(then.getTime())) return "unknown";
   const mins = (Date.now() - then.getTime()) / 60000;
   if (mins < 0) return "fresh";
@@ -62,7 +74,7 @@ export function staleness(
 
 export const STALENESS_TONE: Record<string, string> = {
   fresh: "text-muted-foreground",
-  aging: "text-amber-600 dark:text-amber-400",
+  aging: "text-warning",
   stale: "text-destructive",
   unknown: "text-muted-foreground/70",
 };

@@ -11,6 +11,7 @@ export const API_URL =
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -62,6 +63,7 @@ export interface DashboardSummary {
     day_pnl_from_cache?: number;
     day_pnl_pct?: number;
     unrealized_pnl?: number;
+    total_day_pnl?: number;
     last_flat_at?: string | null;
     error?: string;
   };
@@ -358,6 +360,10 @@ export interface IntelligentAlertConfig {
   buy_rsi_threshold: number;
   buy_breakout_vol: boolean;
   buy_dip_sma20: boolean;
+  sell_stall_enabled: boolean;
+  sell_stall_min_gain_pct: number;
+  sell_stall_days: number;
+  sell_stall_atr_mult: number;
 }
 
 export interface IntelligentStatus {
@@ -1054,6 +1060,18 @@ export interface PnlMonth {
   ticket: number | null;
   holdings_source?: string;
   unpriced?: string[];
+  tax_gl_summary?: {
+    cashPl?: number;
+    fnoPl?: number;
+    dividend?: number;
+    brokerage?: number;
+    chargesTaxes?: number;
+    totalPnl?: number;
+    totalPnlInclusiveCharges?: number;
+    shortTerm?: number;
+    longTerm?: number;
+    intraDay?: number;
+  };
 }
 
 export interface PnlDayRow {
@@ -1512,6 +1530,8 @@ export interface TradeSignal {
   rr_ratio: number;
   rsi: number | null;
   vol_x: number | null;
+  setup_hit_rate_pct?: number | null;
+  setup_median_days_to_target?: number | null;
   paper_citation?: string | null;
   thesis?: string | null;
   confidence_score?: number | null;
@@ -2712,6 +2732,7 @@ export interface TimelineEvent {
   ts: string;
   stage: TimelineStage;
   symbol: string | null;
+  side?: string | null;
   summary: string;
   /** A word, not a status code: `observed`, `approved`, `rejected`, `placed`,
    *  `filled`, `recorded`. The wording lives server-side so the two cannot drift. */
@@ -3319,12 +3340,12 @@ export const learningBacktestVsForward = (strategy?: string) =>
     `/learning/backtest-vs-forward${strategy ? `?strategy=${encodeURIComponent(strategy)}` : ""}`
   );
 
-export const getForwardEvidenceCounts = (strategyId?: string, version?: number) => {
+export const getForwardEvidenceCounts = (strategyId?: string, version?: number, signal?: AbortSignal) => {
   const q = new URLSearchParams();
   if (strategyId) q.set("strategy", strategyId);
   if (version !== undefined && version !== null) q.set("strategy_version", String(version));
   const query = q.toString() ? `?${q.toString()}` : "";
-  return v1<ForwardEvidenceCounts>(`/learning/evidence-counts${query}`);
+  return v1<ForwardEvidenceCounts>(`/learning/evidence-counts${query}`, signal ? { signal } : undefined);
 };
 
 export const learningObservationsList = (limit = 100) =>

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { API_URL, getScan, type ScanRow } from "./api";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
-import { Switch } from "./components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Switch } from "./components/motion/switch";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
 
@@ -32,10 +32,10 @@ function Pill({ tone, children }: { tone: "up" | "down" | "gold" | "flat"; child
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
-        tone === "up" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        "inline-flex items-center rounded-full px-2 py-0.5 text-caption font-semibold",
+        tone === "up" && "border border-gain/20 bg-gain/[0.08] text-gain",
         tone === "down" && "bg-destructive/10 text-destructive",
-        tone === "gold" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        tone === "gold" && "border border-warning/20 bg-warning/[0.08] text-warning",
         tone === "flat" && "bg-primary/[0.07] text-muted-foreground",
       )}
     >
@@ -188,8 +188,8 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
       )}
 
       {visible && (
-        <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-          <table className="w-full border-collapse whitespace-nowrap text-[13px]">
+        <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+          <table className="w-full border-collapse whitespace-nowrap text-body">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
                 <th className="px-2 py-2 font-semibold">Symbol</th>
@@ -217,7 +217,7 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                     <td className="px-2 py-1.5">
                       <div className="flex items-center gap-1.5">
                         <button type="button" onClick={() => openChart(r.symbol)} title="Open chart" className="font-semibold hover:underline">{r.symbol.replace("-EQ", "")}</button>
-                        {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                        {tick && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" />}
                       </div>
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{r.score.toFixed(1)}</td>
@@ -225,20 +225,20 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
                       <span
                         className={cn(
                           "transition-colors duration-300 font-medium",
-                          tick?.flash === "up" && "text-emerald-500 font-bold",
-                          tick?.flash === "down" && "text-destructive font-bold"
+                          tick?.flash === "up" && "text-gain font-semibold",
+                          tick?.flash === "down" && "text-destructive font-semibold"
                         )}
                       >
                         {ltp.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
                       </span>
                     </td>
-                    <td className={cn("px-2 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
+                    <td className={cn("px-2 py-1.5 text-right tabular-nums", r.ret_1m >= 0 ? "text-gain" : "text-destructive")}>
                       {r.ret_1m.toFixed(1)}
                     </td>
-                  <td className={cn("px-2 py-1.5 text-right tabular-nums", r.vs_high > -2 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
+                    <td className={cn("px-2 py-1.5 text-right tabular-nums", r.vs_high > -2 ? "text-gain" : "text-destructive")}>
                     {r.vs_high.toFixed(1)}
                   </td>
-                  <td className={cn("px-2 py-1.5 text-right tabular-nums", r.rsi < 30 ? "text-emerald-600 dark:text-emerald-400" : r.rsi > 70 ? "text-destructive" : "")}>
+                  <td className={cn("px-2 py-1.5 text-right tabular-nums", r.rsi < 30 ? "text-gain" : r.rsi > 70 ? "text-destructive" : "")}>
                     {r.rsi.toFixed(0)}
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{r.vol_x.toFixed(1)}</td>

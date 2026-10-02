@@ -130,7 +130,7 @@ function ColumnHandle<T>({
     >
       <TableMenu
         ariaLabel={`${column.key} column options`}
-        triggerClassName="flex h-2 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+        triggerClassName="flex h-2 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
         trigger={<MoreHorizontal className="h-3 w-3" />}
         items={columnMenuItems(column, index, onInsertColumn, onDeleteColumn)}
       />
@@ -185,7 +185,7 @@ export function TableHeader<T>({
       <thead>
       <tr style={{ height: rowHeight }}>
         {selectable ? (
-          <th className="sticky top-0 z-10 border-border border-b bg-muted">
+            <th className="sticky top-0 z-10 border-border border-b bg-muted pl-4">
             <div className="flex items-center justify-center">
               <Checkbox
                 checked={allSelected}

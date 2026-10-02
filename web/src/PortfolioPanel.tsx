@@ -10,7 +10,6 @@ import {
   Coins,
   LineChart,
   ListOrdered,
-  RefreshCw,
   Send,
   ShieldAlert,
   ShieldCheck,
@@ -31,14 +30,14 @@ import {
   type PortfolioSection,
 } from "./api";
 import { ErrorBox, Hint } from "./components/ui/card";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { Button } from "./components/ui/button";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
-import { Badge, fmtNum } from "./components/ui/stat";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Badge, Stat, fmtNum } from "./components/ui/stat";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { useToast } from "./components/ui/toast-context";
-import { Tooltip } from "./components/ui/tooltip";
+import { Tooltip } from "./components/motion/tooltip";
 import { Table, type TableColumn } from "./components/motion/table";
 import { BouncyAccordion, type BouncyAccordionItem } from "./components/motion/bouncy-accordion";
 import { MarketDepthLadder } from "./components/ui/market-depth";
@@ -59,7 +58,7 @@ const num = (v: unknown): number => {
 };
 
 const INR = (n: number, frac = 0) =>
-  `\u20b9${n.toLocaleString("en-IN", { maximumFractionDigits: frac })}`;
+  `\u20b9${n.toLocaleString("en-IN", { minimumFractionDigits: frac, maximumFractionDigits: frac })}`;
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -67,7 +66,7 @@ const INR = (n: number, frac = 0) =>
 
 function Empty({ icon: Icon, title, hint }: { icon: React.ElementType; title: string; hint?: string }) {
   return (
-    <div className="grid place-items-center gap-2 rounded-2xl border border-dashed border-border bg-muted/15 px-6 py-10 text-center">
+    <div className="grid place-items-center gap-2 rounded-md border border-dashed border-border bg-muted/15 px-6 py-10 text-center">
       <div className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-muted-foreground">
         <Icon size={18} />
       </div>
@@ -80,16 +79,16 @@ function Empty({ icon: Icon, title, hint }: { icon: React.ElementType; title: st
 function PnLCell({ value, pct, size = "sm" }: { value: number; pct?: number; size?: "sm" | "md" | "lg" }) {
   const positive = value >= 0;
   const cls =
-    size === "lg" ? "text-[17px] font-bold tabular-nums tracking-tight"
-    : size === "md" ? "text-[15px] font-semibold tabular-nums"
-    : "text-[13px] font-semibold tabular-nums";
-  const colour = positive ? "text-emerald-600 dark:text-emerald-400" : "text-destructive";
+  size === "lg" ? "text-lg font-semibold tabular-nums tracking-tight"
+  : size === "md" ? "text-sm font-semibold tabular-nums"
+        : "text-body font-semibold tabular-nums";
+  const colour = positive ? "text-gain" : "text-destructive";
   return (
     <span className={cn("inline-flex items-center gap-1", colour, cls)}>
       {positive ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
       {INR(Math.abs(value))}
       {typeof pct === "number" ? (
-        <span className="text-[11px] font-medium opacity-80">({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)</span>
+        <span className="text-caption font-medium opacity-80">({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)</span>
       ) : null}
     </span>
   );
@@ -124,14 +123,12 @@ function StaleNotice({ onRetry }: { lastUpdated: Date | null; onRetry: () => voi
 // ---------------------------------------------------------------------------
 
 function KpiStrip({
-  data, error, lastUpdated, getTick, pnlMode, setPnlMode,
+  data, error, lastUpdated, getTick,
 }: {
   data: PortfolioResponse | null;
   error: string | null;
   lastUpdated: Date | null;
   getTick: (sym: string) => LiveTick | undefined;
-  pnlMode: "total" | "daily";
-  setPnlMode: (mode: "total" | "daily") => void;
 }) {
   const kpis = useMemo(() => {
     const limits = data?.sections?.limits?.rows?.[0] ?? null;
@@ -154,16 +151,6 @@ function KpiStrip({
       const sym = String(h.nseTradingSymbol ?? h.bseTradingSymbol ?? h.symbol ?? "");
       const px = priceOf(h, getTick(sym));
       return s + num(h.totalQuantity) * px;
-    }, 0);
-
-    const positionsTotalPnl = positions.reduce((s, p) => {
-      const sym = String(p.symbol ?? p.tradingSymbol ?? "");
-      const tick = getTick(sym);
-      const ltp = tick?.ltp ?? 0;
-      const avg = num(p.avg_price);
-      const qty = num(p.quantity);
-      const explicit = p.unrealized_pnl;
-      return s + (tick?.ltp ? (tick.ltp - avg) * qty : typeof explicit === "number" ? num(explicit) : (ltp - avg) * qty);
     }, 0);
 
     const positionsDailyPnl = positions.reduce((s, p) => {
@@ -191,21 +178,16 @@ function KpiStrip({
       holdingsAtClose,
       holdingsCount: holdings.length,
       positionsCount: positions.length,
-      pnl:
-        pnlMode === "total"
-          ? positionsTotalPnl + (holdingsAtClose - holdingsInvested)
-          : positionsDailyPnl + holdingsDailyPnl,
-      // the base the percentage is read against: what you paid, or yesterday's value
-      pnlBase: pnlMode === "total" ? holdingsInvested : holdingsAtClose - holdingsDailyPnl,
+      pnl: positionsDailyPnl + holdingsDailyPnl,
     };
-  }, [data, getTick, pnlMode]);
+  }, [data, getTick]);
 
   const noData = !data && !error;
 
   return (
-    <div className="rounded-2xl border border-border/80 bg-card/40 p-1">
+    <>
       {error && data && lastUpdated && (
-        <div className="flex items-center gap-1.5 px-4 pt-2.5 pb-0 text-[11px] text-amber-500/80">
+        <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 text-caption text-warning/80">
           <Clock size={10} />
           <span>
             Market data delayed · Last updated{" "}
@@ -213,55 +195,34 @@ function KpiStrip({
           </span>
         </div>
       )}
-      <div className="grid grid-cols-2 divide-y divide-border/60 sm:divide-y-0 sm:divide-x sm:grid-cols-4">
-        <div className="p-4 sm:p-5">
-          <div className="text-xs text-muted-foreground">Available margin</div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.tradingLimit)}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{noData ? "Loading\u2026" : `${INR(kpis.utilized)} utilized`}</div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat
+          label="Available Margin"
+          value={INR(noData ? 0 : kpis.tradingLimit, 2)}
+          sub={noData ? "Loading\u2026" : `${INR(kpis.utilized, 2)} utilized`}
+          hint="Funds and margin available for placing new orders"
+        />
+        <Stat
+          label="Cash Balance"
+          value={INR(noData ? 0 : kpis.cashFunds, 2)}
+          sub={kpis.blockedForPayout > 0 ? `${INR(kpis.blockedForPayout, 2)} blocked` : "Free funds"}
+          hint="Liquid cash in trading account"
+        />
+        <Stat
+          label="Holdings Value"
+          value={INR(noData ? 0 : kpis.holdingsAtClose, 2)}
+          sub={noData ? "Loading\u2026" : `${INR(kpis.holdingsInvested, 2)} invested`}
+          hint="Current market value of demat holdings"
+        />
+        <Stat
+          label="Day P&L"
+          value={INR(kpis.pnl, 2)}
+          sub={`${kpis.holdingsCount} holdings · ${kpis.positionsCount} open pos`}
+          tone={kpis.pnl > 0 ? "good" : kpis.pnl < 0 ? "bad" : "neutral"}
+          hint="Day movement — since yesterday's close"
+        />
         </div>
-        <div className="p-4 sm:p-5">
-          <div className="text-xs text-muted-foreground">Cash</div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.cashFunds)}</div>
-          <div className="mt-1 text-xs text-muted-foreground truncate">
-            {kpis.blockedForPayout > 0 ? `${INR(kpis.blockedForPayout)} blocked` : "Free funds"}
-          </div>
-        </div>
-        <div className="p-4 sm:p-5">
-          <div className="text-xs text-muted-foreground">Holdings</div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-foreground tabular-nums">{INR(noData ? 0 : kpis.holdingsAtClose)}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {noData ? "Loading\u2026" : (
-              <span>
-                {INR(kpis.holdingsInvested)} invested ·{" "}
-                <span className={kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "text-emerald-500" : "text-destructive"}>
-                  {kpis.holdingsAtClose - kpis.holdingsInvested >= 0 ? "+" : ""}{INR(kpis.holdingsAtClose - kpis.holdingsInvested)} unrealized
-                </span>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-            <div className="text-xs text-muted-foreground">P&L</div>
-            <div className="flex items-center gap-0.5 rounded border border-border/60 p-0.5 text-[10px]">
-              <button type="button" onClick={() => setPnlMode("total")}
-                className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "total" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
-                title="Holdings and positions, since you bought">Total</button>
-              <button type="button" onClick={() => setPnlMode("daily")}
-                className={cn("rounded px-1.5 py-0.5 font-medium transition-colors", pnlMode === "daily" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
-                title="Holdings and positions, since yesterday's close">Daily</button>
-            </div>
-          </div>
-          <div className={cn("mt-1 text-xl font-semibold tracking-tight tabular-nums",
-            kpis.pnl > 0 ? "text-emerald-500" : kpis.pnl < 0 ? "text-destructive" : "text-foreground")}>
-            {kpis.pnl === 0 ? "\u20b90" : INR(kpis.pnl)}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {kpis.holdingsCount} {kpis.holdingsCount === 1 ? "holding" : "holdings"} · {kpis.positionsCount} open {kpis.positionsCount === 1 ? "position" : "positions"}
-          </div>
-        </div>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -276,12 +237,12 @@ function LimitRow({ label, value, hint, emphasize, tone }: {
     <div className={cn("flex items-center justify-between gap-3 py-2 transition-colors", emphasize && "border-b border-border/60 pb-2.5")}>
       <div className="flex items-center gap-1.5 min-w-0">
         <span className={cn("truncate", emphasize ? "text-sm font-semibold text-foreground" : "text-xs text-muted-foreground")}>{label}</span>
-        {hint ? <span className="cursor-help rounded-full bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground/70">?</span> : null}
+        {hint ? <span className="cursor-help rounded-full bg-muted px-1.5 py-0.2 text-micro text-muted-foreground/70">?</span> : null}
       </div>
-      <div className={cn("shrink-0 tabular-nums font-medium", emphasize ? "text-base font-bold text-foreground" : "text-xs",
-        tone === "good" && "text-emerald-600 dark:text-emerald-400",
+      <div className={cn("shrink-0 tabular-nums font-medium", emphasize ? "text-base font-semibold text-foreground" : "text-xs",
+          tone === "good" && "text-gain",
         tone === "bad" && "text-destructive",
-        tone === "warn" && "text-amber-600 dark:text-amber-400")}>
+        tone === "warn" && "text-warning")}>
         {INR(value)}
       </div>
     </div>
@@ -294,7 +255,7 @@ function LimitsGroup({ title, icon: Icon, badge, children, className }: {
   title: string; icon: React.ElementType; badge?: React.ReactNode; children: React.ReactNode; className?: string;
 }) {
   return (
-    <div className={cn("rounded-2xl border border-border bg-card p-4.5", className)}>
+    <div className={cn("rounded-xl border border-border bg-card p-4.5", className)}>
       <div className="mb-3 flex items-center justify-between gap-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
         <span className="flex items-center gap-2">
           <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/[0.09] text-primary"><Icon size={11} /></span>
@@ -342,8 +303,8 @@ function LimitsView({ row }: { row: Row | null }) {
       description: (
         <div className="space-y-1.5 pt-1">
           <div className="flex justify-between py-1 border-b border-border/40"><span>Opening Cash</span><span className="font-semibold text-foreground">{INR(openingCash)}</span></div>
-          <div className="flex justify-between py-1 border-b border-border/40"><span>Intraday Pay-in</span><span className="font-semibold text-emerald-600 dark:text-emerald-400">+{INR(intradayPayin)}</span></div>
-          <div className="flex justify-between py-1 border-b border-border/40"><span>Credit from Sells</span><span className="font-semibold text-emerald-600 dark:text-emerald-400">+{INR(credit)}</span></div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>Intraday Pay-in</span><span className="font-semibold text-gain">+{INR(intradayPayin)}</span></div>
+          <div className="flex justify-between py-1 border-b border-border/40"><span>Credit from Sells</span><span className="font-semibold text-gain">+{INR(credit)}</span></div>
           <div className="flex justify-between py-1"><span>Blocked for Payout</span><span className="font-semibold text-destructive">-{INR(blocked)}</span></div>
         </div>
       ),
@@ -377,10 +338,10 @@ function LimitsView({ row }: { row: Row | null }) {
           <LimitRow label="Ad-hoc Margin" value={adhoc} hint="Special discretionary margin extended by the broker." />
         </LimitsGroup>
       </div>
-      <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Granular Breakdown & Ledger Flow</div>
-          <span className="text-[11px] text-muted-foreground/75">Click to inspect</span>
+        <div className="text-caption font-semibold uppercase tracking-[0.07em] text-muted-foreground">Granular Breakdown & Ledger Flow</div>
+          <span className="text-caption text-muted-foreground/75">Click to inspect</span>
         </div>
         <BouncyAccordion items={technicalItems} />
       </div>
@@ -412,8 +373,8 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
         return (
           <div className="flex items-center gap-2 py-1">
             <span className="font-semibold text-foreground hover:text-primary transition-colors">{sym}</span>
-            <span className="text-[11px] text-muted-foreground">{exch}</span>
-            {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" title="Live" />}
+              <span className="text-caption text-muted-foreground">{exch}</span>
+              {tick && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" title="Live" />}
           </div>
         );
       },
@@ -440,7 +401,7 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
         const sym = String(r.symbol ?? r.tradingSymbol ?? "");
         const tick = getTick(sym);
         const ltp = tick?.ltp ?? 0;
-        return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
+        return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-gain", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
     },
     {
@@ -456,7 +417,7 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
         const avg = num(r.avg_price); const ltp = tick?.ltp ?? 0;
         if (!tick || ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[12.5px]">—</span>;
         const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
-        return <span className={cn("inline-flex items-center tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
+        return <span className={cn("inline-flex items-center tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-gain" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
       },
     },
   ], [getTick]);
@@ -464,9 +425,9 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
   if (rows.length === 0) return <Empty icon={Activity} title="No open positions" hint="Your intraday book is flat. Active positions will appear here with live P&L." />;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 shadow-xs">
+    <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 -xs">
       <Table data={rows} columns={columns} getRowId={(r, i) => String(r.symbol ?? r.tradingSymbol ?? i)} resizable reorderable
-        defaultSort={{ key: "pnl", direction: "desc" }} height={Math.min(480, Math.max(160, rows.length * 52 + 48))} rowHeight={52} className="rounded-xl border-none" />
+      defaultSort={{ key: "pnl", direction: "desc" }} height={Math.min(480, Math.max(160, rows.length * 52 + 48))} rowHeight={52} className="rounded-md border-none" />
     </div>
   );
 }
@@ -477,10 +438,17 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
  * way while still counting what it cost shows a loss that is not there.
  */
 function priceOf(row: Row, tick?: LiveTick): number {
-  const quoted = num(row.ltp); // the broker's last traded price, refreshed with each poll
-  if (quoted > 0) return quoted;
+  // The live WebSocket tick is pushed the instant a trade prints — the same
+  // mechanism a broker terminal uses — so it's always fresher than `row.ltp`,
+  // which only updates on the ~1.5s account-state poll. Preferring `row.ltp`
+  // here (the original order) meant every price on this page only ever moved
+  // on that poll, silently ignoring the live stream this page already
+  // subscribes every held symbol to. Only fall back to the polled snapshot,
+  // then yesterday's close, when no live tick has arrived yet.
   const live = tick?.ltp ?? 0;
-  return live > 0 ? live : num(row.previousDayClose);
+  if (live > 0) return live;
+  const quoted = num(row.ltp);
+  return quoted > 0 ? quoted : num(row.previousDayClose);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,13 +469,13 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
 
   return (
     <motion.div whileHover={{ y: -1 }} transition={{ type: "spring", stiffness: 380, damping: 28 }}
-      className="rounded-2xl border border-border bg-card p-4 transition-colors">
+    className="rounded-xl border border-border bg-card p-4 transition-colors">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <div className="truncate text-[15px] font-bold tracking-tight">{symbol}</div>
+            <div className="truncate text-sm font-semibold tracking-tight">{symbol}</div>
             {product ? <Badge tone="flat">{product}</Badge> : null}
-            {tick && <span className="flex items-center gap-1 text-[10.5px] font-medium text-emerald-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />Live</span>}
+            {tick && <span className="flex items-center gap-1 text-[10.5px] font-medium text-gain"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gain" />Live</span>}
           </div>
           {name ? <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground" title={name}>{name}</div> : null}
         </div>
@@ -519,23 +487,23 @@ function HoldingCard({ row, tick }: { row: Row; tick?: LiveTick }) {
       <div className="mt-3 grid grid-cols-3 gap-3 border-t border-border/60 pt-3">
         <div>
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Invested</div>
-          <div className="mt-0.5 text-[13px] font-semibold tabular-nums">{INR(invested)}</div>
+          <div className="mt-0.5 text-body font-semibold tabular-nums">{INR(invested)}</div>
           <div className="text-[10.5px] text-muted-foreground/70">@ {INR(avg, 2)}</div>
         </div>
         <div>
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Current</div>
           {lastPrice > 0 ? (
             <>
-              <div className={cn("mt-0.5 text-[13px] font-semibold tabular-nums transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive")}>{INR(currentVal)}</div>
+            <div className={cn("mt-0.5 text-body font-semibold tabular-nums transition-colors duration-300", tick?.flash === "up" && "text-gain", tick?.flash === "down" && "text-destructive")}>{INR(currentVal)}</div>
               <div className="text-[10.5px] text-muted-foreground/70">@ {INR(lastPrice, 2)}</div>
             </>
           ) : (
-            <div className="mt-0.5 text-[13px] font-semibold text-muted-foreground/50">—</div>
+            <div className="mt-0.5 text-body font-semibold text-muted-foreground/50">—</div>
           )}
         </div>
         <div>
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Δ vs avg</div>
-          <div className="mt-0.5">{lastPrice > 0 ? <PnLCell value={delta} pct={pct} /> : <span className="text-muted-foreground/50 text-[13px]">—</span>}</div>
+          <div className="mt-0.5">{lastPrice > 0 ? <PnLCell value={delta} pct={pct} /> : <span className="text-muted-foreground/50 text-body">—</span>}</div>
         </div>
       </div>
     </motion.div>
@@ -567,9 +535,9 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
           <div className="flex flex-col justify-center min-w-0 py-1">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-foreground hover:text-primary transition-colors">{sym}</span>
-              {tick && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                {tick && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" />}
             </div>
-            {name && <span className="text-[11px] text-muted-foreground/75 truncate" title={name}>{name}</span>}
+            {name && <span className="text-caption text-muted-foreground/75 truncate" title={name}>{name}</span>}
           </div>
         );
       },
@@ -591,7 +559,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
         const tick = getTick(sym);
         const ltp = priceOf(r, tick);
-        return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
+        return <span className={cn("tabular-nums font-semibold transition-colors duration-300", tick?.flash === "up" && "text-gain", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{ltp > 0 ? INR(ltp, 2) : <span className="text-muted-foreground/50">—</span>}</span>;
       },
     },
     {
@@ -613,12 +581,12 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
         const ltp = priceOf(r, getTick(sym));
-        if (ltp === 0) return <div className="flex flex-col items-end gap-0.5"><span className="text-muted-foreground/50 text-[12px]">—</span></div>;
+        if (ltp === 0) return <div className="flex flex-col items-end gap-0.5"><span className="text-muted-foreground/50 text-xs">—</span></div>;
         const val = num(r.totalQuantity) * ltp;
         const pct = totalPortfolioValue > 0 ? (val / totalPortfolioValue) * 100 : 0;
         return (
           <div className="flex flex-col items-end gap-0.5">
-            <span className="tabular-nums text-[12px] font-semibold text-foreground/80">{pct.toFixed(1)}%</span>
+          <span className="tabular-nums text-xs font-semibold text-foreground/80">{pct.toFixed(1)}%</span>
             <div className="h-1 w-14 rounded-full bg-border/50 overflow-hidden">
               <div className="h-full rounded-full bg-primary/60 transition-all duration-500" style={{ width: `${Math.min(100, pct)}%` }} />
             </div>
@@ -636,7 +604,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
       cell: (r) => {
         const sym = String(r.nseTradingSymbol ?? r.bseTradingSymbol ?? r.symbol ?? "");
         const ltp = priceOf(r, getTick(sym));
-        if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[13px]">—</span>;
+        if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-body">—</span>;
         return <PnLCell value={num(r.totalQuantity) * ltp - num(r.totalQuantity) * num(r.averageTradedPrice)} size="sm" />;
       },
     },
@@ -652,7 +620,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
         const avg = num(r.averageTradedPrice); const ltp = priceOf(r, getTick(sym));
         if (ltp === 0) return <span className="text-muted-foreground/50 tabular-nums text-[12.5px]">—</span>;
         const pct = avg > 0 ? ((ltp - avg) / avg) * 100 : 0;
-        return <span className={cn("inline-flex tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
+        return <span className={cn("inline-flex tabular-nums font-semibold text-[12.5px]", pct >= 0 ? "text-gain" : "text-destructive")}>{pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>;
       },
     },
   ], [getTick, totalPortfolioValue]);
@@ -674,7 +642,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
     <div className="space-y-3.5">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3.5 pt-1">
         <div className="flex items-center gap-2.5">
-          <span className="text-[13px] font-medium text-muted-foreground">Unrealized:</span>
+          <span className="text-body font-medium text-muted-foreground">Unrealized:</span>
           <PnLCell value={totalDelta} pct={totalPct} size="md" />
           {selectedLots.length > 0 && (
             <><span className="text-xs text-muted-foreground/60">·</span>
@@ -682,22 +650,31 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
           )}
         </div>
         <div className="flex items-center gap-2.5">
-          <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search symbols…"
-            className="h-8 w-48 rounded-lg border border-border/80 bg-card/60 px-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none transition-colors" />
-          <div className="flex items-center rounded-lg border border-border/80 bg-card/50 p-0.5 text-xs">
-            <button type="button" onClick={() => toggleView("table")} className={cn("rounded-md px-2 py-0.5 font-medium transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>Table</button>
-            <button type="button" onClick={() => toggleView("grid")} className={cn("rounded-md px-2 py-0.5 font-medium transition-colors", viewMode === "grid" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>Cards</button>
+          <div className="w-52">
+            <Input
+              value={query}
+              onChange={(val) => setQuery(val)}
+              placeholder="Search symbols…"
+              className="text-sm"
+              classNames={{ field: "h-12" }}
+            />
           </div>
+          <Tabs value={viewMode} onValueChange={(v) => toggleView(v as "table" | "grid")} variant="pill">
+            <TabsList>
+            <TabsTrigger value="table" className="h-10 px-4 text-xs">Table</TabsTrigger>
+            <TabsTrigger value="grid" className="h-10 px-4 text-xs">Cards</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </div>
 
       {viewMode === "table" ? (
-        <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 shadow-xs">
+        <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 -xs">
           <Table data={filtered} columns={columns}
             getRowId={(r, i) => String(r.isin ? `${r.isin}-${r.product ?? "DEL"}-${i}` : (r.nseTradingSymbol ?? r.symbol ?? i))}
             selectable resizable reorderable selectedRowIds={selectedLots} onSelectionChange={setSelectedLots}
             defaultSort={{ key: "value", direction: "desc" }}
-            height={Math.min(540, Math.max(160, filtered.length * 52 + 48))} rowHeight={52} className="rounded-xl border-none" />
+            height={Math.min(540, Math.max(160, filtered.length * 52 + 48))} rowHeight={52} className="rounded-md border-none" />
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -724,8 +701,8 @@ function pickString(row: Row, ...keys: string[]): string {
 function OrdersView({ rows }: { rows: Row[] }) {
   if (rows.length === 0) return <Empty icon={ListOrdered} title="No orders today" hint="Every order the broker has seen today appears here." />;
   return (
-    <div className="overflow-x-auto rounded-2xl border border-border">
-      <table className="w-full text-[13px]">
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-body">
         <thead><tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
           <th className="px-3 py-2 text-left font-semibold">Time</th>
           <th className="px-3 py-2 text-left font-semibold">Symbol</th>
@@ -757,8 +734,8 @@ function OrdersView({ rows }: { rows: Row[] }) {
 function TradesView({ rows }: { rows: Row[] }) {
   if (rows.length === 0) return <Empty icon={BarChart3} title="No trades today" hint="Executed trades appear here as they happen." />;
   return (
-    <div className="overflow-x-auto rounded-2xl border border-border">
-      <table className="w-full text-[13px]">
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-body">
         <thead><tr className="bg-muted/40 text-[10.5px] uppercase tracking-[0.07em] text-muted-foreground">
           <th className="px-3 py-2 text-left font-semibold">Time</th>
           <th className="px-3 py-2 text-left font-semibold">Symbol</th>
@@ -869,15 +846,25 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
       {/* Left: Order Ticket */}
       <div className="space-y-4">
         {/* BUY / SELL toggle */}
-        <div className="flex items-center gap-1 rounded-xl border border-border/60 bg-muted/20 p-1">
-          <button type="button" onClick={() => setSide("BUY")}
-            className={cn("flex-1 rounded-lg py-2 text-sm font-bold transition-all", side === "BUY" ? "bg-emerald-600 text-white shadow" : "text-muted-foreground hover:text-foreground")}>
-            <TrendingUp size={13} className="mr-1.5 inline" />BUY
-          </button>
-          <button type="button" onClick={() => setSide("SELL")}
-            className={cn("flex-1 rounded-lg py-2 text-sm font-bold transition-all", side === "SELL" ? "bg-rose-600 text-white shadow" : "text-muted-foreground hover:text-foreground")}>
-            <TrendingDown size={13} className="mr-1.5 inline" />SELL
-          </button>
+        <div className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-muted/20 p-1">
+          <Button
+            type="button"
+            variant={side === "BUY" ? "primary" : "ghost"}
+            size="md"
+            onClick={() => setSide("BUY")}
+            className={cn("flex-1 font-semibold", side === "BUY" ? "bg-gain hover:bg-gain/90 text-white" : "text-muted-foreground")}
+          >
+          <TrendingUp size={14} className="mr-1.5 inline" />BUY
+          </Button>
+          <Button
+            type="button"
+            variant={side === "SELL" ? "primary" : "ghost"}
+            size="md"
+            onClick={() => setSide("SELL")}
+            className={cn("flex-1 font-semibold", side === "SELL" ? "bg-destructive hover:bg-destructive/90 text-white" : "text-muted-foreground")}
+          >
+          <TrendingDown size={14} className="mr-1.5 inline" />SELL
+          </Button>
         </div>
 
         {/* Symbol + Exchange */}
@@ -889,7 +876,7 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
               onBlur={() => window.setTimeout(() => setShowMatches(false), 150)}
               placeholder="RELIANCE" autoComplete="off" />
             {showMatches && matches.length > 0 && (
-              <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-border bg-card shadow-lg">
+              <div data-lenis-prevent className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-border bg-card ">
                 {matches.map((m) => {
                   const q = quoteBy[m.symbol]; const pct = q?.chg_pct; const positive = typeof pct === "number" && pct >= 0;
                   return (
@@ -898,7 +885,7 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
                       className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12.5px] hover:bg-primary/[0.06]">
                       <span className="flex items-center gap-2"><span className="font-semibold text-foreground">{m.symbol}</span><span className="text-[10.5px] text-muted-foreground">{m.exchange}</span></span>
                       <span className="flex items-center gap-2 tabular-nums">
-                        {q && q.ltp > 0 ? (<><span className="font-semibold text-foreground">₹{q.ltp.toFixed(2)}</span>{typeof pct === "number" && Number.isFinite(pct) && <span className={positive ? "text-emerald-500" : "text-destructive"}>{positive ? "+" : ""}{pct.toFixed(2)}%</span>}</>) : <span className="text-muted-foreground/70 text-[10.5px]">· · ·</span>}
+                      {q && q.ltp > 0 ? (<><span className="font-semibold text-foreground">₹{q.ltp.toFixed(2)}</span>{typeof pct === "number" && Number.isFinite(pct) && <span className={positive ? "text-gain" : "text-destructive"}>{positive ? "+" : ""}{pct.toFixed(2)}%</span>}</>) : <span className="text-muted-foreground/70 text-[10.5px]">· · ·</span>}
                       </span>
                     </button>
                   );
@@ -943,29 +930,29 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
         {ltp > 0 && (
           <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-[12.5px]">
             <span className="text-muted-foreground">LTP</span>
-            <span className={cn("font-bold tabular-nums transition-colors duration-300", tick?.flash === "up" && "text-emerald-500", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{INR(ltp, 2)}</span>
-            {tick?.flash && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+            <span className={cn("font-semibold tabular-nums transition-colors duration-300", tick?.flash === "up" && "text-gain", tick?.flash === "down" && "text-destructive", !tick?.flash && "text-foreground")}>{INR(ltp, 2)}</span>
+            {tick?.flash && <span className="h-1.5 w-1.5 rounded-full bg-gain animate-pulse" />}
             <span className="ml-auto text-muted-foreground/70">{formattedSymbol}</span>
           </div>
         )}
 
         {/* Risk preview */}
-        <div className={cn("rounded-xl border px-4 py-3 text-[12px] space-y-2", canAfford ? "border-border/60 bg-muted/10" : "border-amber-500/40 bg-amber-950/20")}>
+        <div className={cn("rounded-md border px-4 py-3 text-xs space-y-2", canAfford ? "border-border/60 bg-muted/10" : "border border-warning/20 bg-warning/15/10")}>
           <div className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Order Preview</div>
           <div className="flex justify-between"><span className="text-muted-foreground">Estimated value</span><span className="font-semibold tabular-nums text-foreground">{estimatedValue > 0 ? INR(estimatedValue) : "\u2014"}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Margin required</span><span className="font-semibold tabular-nums text-foreground">{marginRequired > 0 ? INR(marginRequired) : "\u2014"}</span></div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Margin usage</span>
-            <span className={cn("font-semibold tabular-nums", marginPct > 80 ? "text-amber-400" : "text-foreground")}>{marginPct > 0 ? `${marginPct.toFixed(1)}% of available` : "\u2014"}</span>
+            <span className={cn("font-semibold tabular-nums", marginPct > 80 ? "text-warning" : "text-foreground")}>{marginPct > 0 ? `${marginPct.toFixed(1)}% of available` : "\u2014"}</span>
           </div>
           {orderType === "MARKET" && (
-            <div className="flex items-start gap-1.5 border-t border-border/40 pt-2 text-[11px] text-muted-foreground/80">
-              <Zap size={10} className="mt-0.5 shrink-0 text-amber-500" />
+            <div className="flex items-start gap-1.5 border-t border-border/40 pt-2 text-caption text-muted-foreground/80">
+              <Zap size={10} className="mt-0.5 shrink-0 text-warning" />
               <span>MARKET orders include 0.5% protection per SEBI mandate — actual fill may differ slightly from LTP.</span>
             </div>
           )}
           {!canAfford && availableMargin > 0 && (
-            <div className="flex items-start gap-1.5 border-t border-amber-500/30 pt-2 text-[11px] text-amber-400">
+            <div className="flex items-start gap-1.5 border-t border-warning/30 pt-2 text-caption text-warning">
               <ShieldAlert size={10} className="mt-0.5 shrink-0" />
               <span>Estimated margin ({INR(marginRequired)}) may exceed available ({INR(availableMargin)}).</span>
             </div>
@@ -975,14 +962,14 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
         {/* Submit */}
         <StatefulButton state={state} onClick={() => void submit()}
           loadingText="Submitting\u2026" successText="Submitted \u2713" errorText="Failed \u2014 retry"
-          className={cn("w-full h-11 text-[14px] font-bold tracking-wide", side === "BUY" ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" : "bg-rose-600 hover:bg-rose-700 text-white border-rose-600")}>
+          className={cn("w-full h-11 text-sm font-semibold tracking-wide", side === "BUY" ? "bg-gain hover:bg-gain/90 text-white border-gain" : "bg-destructive hover:bg-destructive/90 text-white border-loss")}>
           {side} {qty} {symbol.trim().toUpperCase() || "\u2014"}
         </StatefulButton>
       </div>
 
       {/* Right: Market Depth */}
       <div className="flex flex-col">
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="mb-2 text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           Market Depth · {formattedSymbol}
         </div>
         <MarketDepthLadder symbol={formattedSymbol} depth={tick?.depth} ltp={tick?.ltp}
@@ -1017,28 +1004,15 @@ export default function PortfolioPanel() {
     return "limits";
   });
 
-  const [pnlMode, setPnlMode] = useState<"total" | "daily">(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("atr.portfolio.pnlMode") as "total" | "daily" | null;
-      if (saved && (saved === "total" || saved === "daily")) return saved;
-    }
-    return "total";
-  });
-
   const setSection = useCallback((next: TabId) => {
     setSectionState(next);
     if (typeof window !== "undefined") localStorage.setItem("atr.portfolio.section", next);
   }, []);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("atr.portfolio.pnlMode", pnlMode);
-  }, [pnlMode]);
-
   const { toast } = useToast();
   const [data, setData] = useState<PortfolioResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [state, setState] = useState<ButtonState>("idle");
   const [killEngaged, setKillEngaged] = useState<boolean>(false);
   const [killLoading, setKillLoading] = useState<boolean>(false);
   const dialog = useDialog();
@@ -1055,8 +1029,15 @@ export default function PortfolioPanel() {
   // a failed poll (e.g. a 429) cleared `error` right before immediately
   // re-setting it, flickering the error banner off and back on.
   const lastPayloadRef = useRef<string | null>(null);
-  const load = useCallback(async () => {
-    setState("loading");
+  // Nudges the account poll to run ~800ms from now — used after actions
+  // that change account state so the UI catches up without waiting.
+  const kickRef = useRef<(() => void) | null>(null);
+  const requestPollSoon = useCallback(() => kickRef.current?.(), []);
+  // `load` deliberately swallows its own errors (the UI shows stale data plus
+  // a banner rather than blanking), so the poll loop below needs its own
+  // signal of whether that call actually succeeded, to decide whether to back
+  // its interval off.
+  const load = useCallback(async (): Promise<boolean> => {
     try {
       const [res] = await Promise.all([getPortfolio(), loadRisk()]);
       // `as_of` is a fresh server timestamp on every call — comparing the
@@ -1068,10 +1049,11 @@ export default function PortfolioPanel() {
       }
       setLastUpdated(new Date());
       setError(null);
-      setState("success");
+      return true;
     } catch (e) {
       // Preserve stale data; just show friendly error
-      setError(e instanceof Error ? e.message : String(e)); setState("error");
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, [loadRisk]);
 
@@ -1093,6 +1075,7 @@ export default function PortfolioPanel() {
     try {
       await setKillSwitch(nextState, reason.trim());
       setKillEngaged(nextState);
+      requestPollSoon();
       toast({ title: nextState ? "Kill Switch ENGAGED" : "Kill Switch Disarmed", description: nextState ? "All order submissions are blocked." : "Risk engine cleared. New orders may be placed.", status: nextState ? "error" : "success" });
     } catch (e) {
       toast({ title: "Kill switch action failed", description: e instanceof Error ? e.message : String(e), status: "error" });
@@ -1101,23 +1084,36 @@ export default function PortfolioPanel() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Poll every 5s, but only while the tab is actually visible — there is
-  // nothing to look at when it isn't, and polling anyway just adds to the
-  // 429s this endpoint already throws under load.
+  // Account state has no push channel — only prices stream — so it polls.
+  // Steady 5s while visible: ticks already move prices live, the poll just
+  // re-confirms account state. A 429 (or any failed poll) backs off to 15s.
+  // Actions that change account state kick an early poll (see requestPollSoon).
+  const BASE_POLL_MS = 5000;
+  const MAX_POLL_MS = 15000;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
-    const tick = () => {
+    let delay = BASE_POLL_MS;
+    const tick = async () => {
       if (cancelled) return;
-      if (document.visibilityState === "visible") void load();
-      timer = setTimeout(tick, 5000);
+      if (document.visibilityState === "visible") {
+        const ok = await load();
+        delay = ok ? BASE_POLL_MS : Math.min(delay * 2, MAX_POLL_MS);
+      }
+      timer = setTimeout(() => void tick(), delay);
     };
-    timer = setTimeout(tick, 5000);
+    kickRef.current = () => {
+      if (cancelled) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void tick(), 800);
+    };
+    timer = setTimeout(() => void tick(), delay);
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
+      kickRef.current = null;
       cancelled = true;
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -1155,22 +1151,22 @@ export default function PortfolioPanel() {
 
   return (
     <div className="space-y-6">
-      <KpiStrip data={data} error={error} lastUpdated={lastUpdated} getTick={getTick} pnlMode={pnlMode} setPnlMode={setPnlMode} />
+      <KpiStrip data={data} error={error} lastUpdated={lastUpdated} getTick={getTick} />
 
-      <div className="rounded-2xl border border-border/80 bg-card/40 p-5">
+      <div className="rounded-lg border border-border/80 bg-card/40 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-4">
           <Tabs value={section} onValueChange={(v) => setSection(v as TabId)}>
-            <TabsList className="bg-muted/40 p-1 gap-1 rounded-xl border border-border/60">
+            <TabsList>
               {SECTIONS.map((s) => {
                 const Icon = s.icon;
                 const c = counts[s.id] ?? 0;
                 const active = section === s.id;
                 return (
-                  <TabsTrigger key={s.id} value={s.id} className="whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium">
+                  <TabsTrigger key={s.id} value={s.id} className="whitespace-nowrap px-3 py-1.5 text-xs font-medium">
                     <span className="inline-flex items-center gap-1.5">
                       <Icon size={13} />
                       {s.label}
-                      {c > 0 && <span className={cn("rounded-full px-1.5 py-0.2 text-[10px] font-semibold tabular-nums transition-colors", active ? "bg-primary-foreground/20 text-primary-foreground font-bold" : "bg-primary/10 text-primary")}>{c}</span>}
+                      {c > 0 && <span className={cn("rounded-full px-1.5 py-0.2 text-micro tabular-nums transition-colors", active ? "bg-primary-foreground/20 text-primary-foreground font-medium" : "bg-primary/10 text-primary font-semibold")}>{c}</span>}
                     </span>
                   </TabsTrigger>
                 );
@@ -1179,23 +1175,20 @@ export default function PortfolioPanel() {
           </Tabs>
 
           <div className="flex items-center gap-2.5">
+          <Tooltip content={killEngaged ? "Orders are blocked. Click to allow orders again." : "Block all new orders."} side="bottom" delay={400}>
             <button type="button" onClick={() => void handleToggleKillSwitch()} disabled={killLoading}
-              title={killEngaged ? "Orders are blocked. Click to allow orders again." : "Block all new orders."}
-              className={cn("inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors",
-                killEngaged ? "border-rose-500/50 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20" : "border-border/70 text-muted-foreground hover:border-border hover:text-foreground")}>
+            className={cn("inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors",
+            killEngaged ? "border border-destructive/30 bg-destructive/[0.08] text-destructive hover:bg-loss/20" : "border-border/70 text-muted-foreground hover:border-border hover:text-foreground")}>
               {killEngaged ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
               {killEngaged ? "Allow orders" : "Stop orders"}
             </button>
+            </Tooltip>
 
+            <Tooltip content={connected ? (bridgeActive ? "Live prices" : "Connecting to prices") : "Prices offline"} side="top" delay={400}>
             <span
-              title={connected ? (bridgeActive ? "Live prices" : "Connecting to prices") : "Prices offline"}
-              className={cn("h-2 w-2 rounded-full", connected ? (bridgeActive ? "bg-emerald-500" : "bg-amber-500") : "bg-muted-foreground/40")}
+            className={cn("h-2 w-2 rounded-full", connected ? (bridgeActive ? "bg-gain" : "bg-warning") : "bg-muted-foreground/40")}
             />
-
-            <StatefulButton state={state} variant="secondary" size="sm" onClick={() => void load()}
-              loadingText="\u2026" successText="Done" errorText="Refresh" icon={<RefreshCw size={11} />} className="h-7 px-2.5 text-xs">
-              Refresh
-            </StatefulButton>
+            </Tooltip>
           </div>
         </div>
 

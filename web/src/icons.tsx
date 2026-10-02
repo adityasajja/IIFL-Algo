@@ -3,7 +3,7 @@
 interface P {
   size?: number;
 }
-const S = (p: P) => ({ width: p.size ?? 16, height: p.size ?? 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const });
+const S = (p: P) => ({ width: p.size ?? 16, height: p.size ?? 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round" as const, strokeLinejoin: "round" as const });
 
 export const IconHome = (p: P) => (
   <svg {...S(p)}><path d="M2 7.5 8 2.5 14 7.5" /><path d="M3.5 6.8V13.5h2.6v-3h3.3v3h2.6V6.8" /></svg>
@@ -65,6 +65,14 @@ export const IconRadio = (p: P) => (
   <svg {...S(p)}><circle cx="8" cy="8" r="1.8" /><path d="M4.9 11.1a4.4 4.4 0 0 1 0-6.2M11.1 4.9a4.4 4.4 0 0 1 0 6.2" /><path d="M2.9 13.1a7.2 7.2 0 0 1 0-10.2M13.1 2.9a7.2 7.2 0 0 1 0 10.2" /></svg>
 );
 
+export const IconEye = (p: P) => (
+  <svg {...S(p)}><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8Z" /><circle cx="8" cy="8" r="2.2" /></svg>
+);
+
+export const IconSliders = (p: P) => (
+  <svg {...S(p)}><path d="M3 2v12M8 2v12M13 2v12" /><circle cx="3" cy="5" r="1.5" /><circle cx="8" cy="11" r="1.5" /><circle cx="13" cy="7" r="1.5" /></svg>
+);
+
 /**
  * Post-trade attribution — one trade fanning out into the branches it is
  * explained by. A pulse would read as "live", and this is the opposite: it is
@@ -77,3 +85,32 @@ export const IconAttribution = (p: P) => (
     <path d="M11.4 2.6h2.2v2.2h-2.2zM11.4 6.9h2.2v2.2h-2.2zM11.4 11.2h2.2v2.2h-2.2z" />
   </svg>
 );
+
+export const IconCheck = (p: P) => (
+  <svg {...S(p)}><path d="m3 8.5 3.5 3.5 6.5-8" /></svg>
+);
+
+export const IconX = (p: P) => (
+  <svg {...S(p)}><path d="m3.5 3.5 9 9M12.5 3.5l-9 9" /></svg>
+);
+
+export const IconAlertTriangle = (p: P) => (
+  <svg {...S(p)}><path d="M8 2.2 14.5 13.5H1.5L8 2.2z" /><path d="M8 6.5v3.2M8 11.8h.01" /></svg>
+);
+
+export const IconInfo = (p: P) => (
+  <svg {...S(p)}><circle cx="8" cy="8" r="6" /><path d="M8 7v4M8 5h.01" /></svg>
+);
+
+export const IconChevronDown = (p: P) => (
+  <svg {...S(p)}><path d="m3.5 6 4.5 4.5 4.5-4.5" /></svg>
+);
+
+export const IconStar = (p: P) => (
+  <svg {...S(p)}><polygon points="8,2 9.9,5.8 14.1,6.4 11.1,9.3 11.8,13.5 8,11.5 4.2,13.5 4.9,9.3 1.9,6.4 6.1,5.8" /></svg>
+);
+
+export const IconSearch = (p: P) => (
+  <svg {...S(p)}><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3.5 3.5" /></svg>
+);
+

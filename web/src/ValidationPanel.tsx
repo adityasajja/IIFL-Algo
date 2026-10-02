@@ -62,7 +62,7 @@ export default function ValidationPanel() {
         <div className="px-4 pb-4">
           <Callout tone="warn">
             Run the harness to produce real numbers:
-            <code className="mt-2 block rounded bg-muted/60 px-2 py-1 text-[12px]">
+            <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               .venv/Scripts/python.exe scripts/validate_paper_strategies.py
             </code>
           </Callout>
@@ -91,7 +91,7 @@ export default function ValidationPanel() {
               Every model below was checked on prices it had never seen.
             </span>{" "}
             The column labelled <em>claimed</em> is what{" "}
-            <code className="rounded bg-muted/60 px-1">papers.py</code> used to assert from the
+            <code className="rounded-md bg-muted/60 px-1">papers.py</code> used to assert from the
             literature. <em>Measured</em> is what actually happened.
             {passed === 0 && (
               <>
@@ -123,8 +123,8 @@ export default function ValidationPanel() {
           )}
 
           <div className="overflow-x-auto rounded-lg border border-border/60">
-            <table className="w-full text-[13px]">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+            <table className="w-full text-body">
+              <thead className="bg-muted/40 text-caption uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">Strategy</th>
                   <th className="px-3 py-2 text-right font-medium">Claimed</th>
@@ -162,8 +162,8 @@ export default function ValidationPanel() {
             {results.map((r) => (
               <div key={r.strategy} className="rounded-lg border border-border/60 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-[13px] font-medium">{pretty(r.strategy)}</span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-body font-medium">{pretty(r.strategy)}</span>
+                  <span className="text-caption text-muted-foreground">
                     {r.folds} folds · {r.n_trials} trials
                   </span>
                 </div>
@@ -172,7 +172,7 @@ export default function ValidationPanel() {
                     <li key={c.name} className="flex items-start gap-2 text-[12.5px]">
                       <span className="mt-0.5 shrink-0">
                         {c.ok ? (
-                          <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                          <Check className="h-3.5 w-3.5 text-gain" />
                         ) : (
                           <X className="h-3.5 w-3.5 text-destructive" />
                         )}
@@ -215,7 +215,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
       <td
         className={cn(
           "px-3 py-2 text-right tabular-nums",
-          (r.oos_sharpe ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
+          (r.oos_sharpe ?? 0) >= 0 ? "text-gain" : "text-destructive",
         )}
       >
         {fmtNum(r.oos_sharpe)}
@@ -224,7 +224,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
         className={cn(
           "px-3 py-2 text-right tabular-nums",
           (r.oos_return_pct ?? 0) >= 0
-            ? "text-emerald-600 dark:text-emerald-400"
+          ? "text-gain"
             : "text-destructive",
         )}
       >
@@ -234,7 +234,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
         {z === null || z === undefined ? (
           <Minus className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
         ) : (
-          <span className={cn(z >= 2 ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+          <span className={cn(z >= 2 ? "font-medium text-gain" : "text-muted-foreground")}>
             {z >= 0 ? "+" : ""}
             {fmtNum(z)}σ
           </span>
@@ -247,7 +247,7 @@ function ResultRow({ r }: { r: ValidationResult }) {
         className={cn(
           "px-3 py-2 text-right tabular-nums",
           (r.measured_expectancy_r ?? 0) >= 0
-            ? "text-emerald-600 dark:text-emerald-400"
+          ? "text-gain"
             : "text-destructive",
         )}
       >
@@ -276,10 +276,10 @@ function ControlStat({
   hint: string;
 }) {
   return (
-    <div className="rounded-lg bg-muted/40 p-3">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="rounded-md bg-muted/40 p-3">
+      <div className="text-caption uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-xl font-medium tabular-nums">{value}</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+      <div className="mt-0.5 text-caption text-muted-foreground">{hint}</div>
     </div>
   );
 }

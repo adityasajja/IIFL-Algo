@@ -163,10 +163,10 @@ function BouncyAccordionRow({
         data-state={open ? "open" : "closed"}
         initial={false}
         animate={{
-          borderTopLeftRadius: startsGroup ? 28 : 0,
-          borderTopRightRadius: startsGroup ? 28 : 0,
-          borderBottomLeftRadius: endsGroup ? 28 : 0,
-          borderBottomRightRadius: endsGroup ? 28 : 0,
+          borderTopLeftRadius: startsGroup ? 16 : 0,
+          borderTopRightRadius: startsGroup ? 16 : 0,
+          borderBottomLeftRadius: endsGroup ? 16 : 0,
+          borderBottomRightRadius: endsGroup ? 16 : 0,
         }}
         transition={reduce ? { duration: 0 } : ROW_TRANSITION}
         className={cn(
@@ -201,7 +201,7 @@ function BouncyAccordionRow({
           ) : null}
           <span
             className={cn(
-              "min-w-0 flex-1 truncate text-[15px] font-medium text-foreground",
+              "min-w-0 flex-1 truncate text-sm font-medium text-foreground",
               classNames?.title,
             )}
           >
@@ -248,7 +248,7 @@ function BouncyAccordionRow({
           >
             <div
               className={cn(
-                "text-[15px] leading-6 text-muted-foreground",
+                "text-sm leading-6 text-muted-foreground",
                 classNames?.description,
               )}
             >

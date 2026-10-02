@@ -2,13 +2,13 @@
  * TradeSignalsPanel — Semi-automatic trading command centre.
  *
  * Layout:
- *   Settings bar  (capital, risk %, stop method)
- *   ─────────────────────────────────────────────
- *   Pending signals  (big cards — Execute / Skip)
- *   ─────────────────────────────────────────────
- *   Active positions (signals that are in-flight)
- *   ─────────────────────────────────────────────
- *   History          (done / skipped, collapsed)
+ * Settings bar (capital, risk %, stop method)
+ * ─────────────────────────────────────────────
+ * Pending signals (big cards — Execute / Skip)
+ * ─────────────────────────────────────────────
+ * Active positions (signals that are in-flight)
+ * ─────────────────────────────────────────────
+ * History (done / skipped, collapsed)
  */
 import {
   AlertTriangle,
@@ -36,9 +36,10 @@ import {
   type TradeSignalSettings,
 } from "./api";
 import { Button } from "./components/ui/button";
+import { Tooltip } from "./components/motion/tooltip";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
 import { ButtonLoader } from "./components/ui/loading";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { humanizeSentence } from "./lib/format";
 import { cn } from "./lib/utils";
@@ -89,20 +90,20 @@ function PlanBar({ sig }: { sig: TradeSignal }) {
   const labels = [
     { k: "Stop", p: sig.stop_loss, cls: "text-destructive" },
     { k: "Entry", p: sig.entry_price, cls: "text-foreground" },
-    { k: "Target", p: sig.target, cls: "text-emerald-500" },
+    { k: "Target", p: sig.target, cls: "text-gain" },
   ].sort((a, b) => a.p - b.p);
 
   return (
     <div>
       <div className="relative h-2 rounded-full bg-muted">
-        <div className="absolute inset-y-0 rounded-full bg-rose-500/60" style={seg(sig.stop_loss, sig.entry_price)} />
-        <div className="absolute inset-y-0 rounded-full bg-emerald-500/60" style={seg(sig.entry_price, sig.target)} />
+      <div className="absolute inset-y-0 rounded-full bg-loss/60" style={seg(sig.stop_loss, sig.entry_price)} />
+      <div className="absolute inset-y-0 rounded-full bg-gain/60" style={seg(sig.entry_price, sig.target)} />
         <div
           className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground"
           style={{ left: `${x(sig.entry_price)}%` }}
         />
       </div>
-      <div className="mt-1.5 flex justify-between text-[11px] tabular-nums">
+      <div className="mt-1.5 flex justify-between text-caption tabular-nums">
         {labels.map((l) => (
           <span key={l.k} className={l.cls}>
             {l.k} ₹{fmt(l.p)}
@@ -165,20 +166,23 @@ function PendingRow({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span
               className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                isBuy ? "bg-emerald-500/10 text-emerald-500" : "bg-destructive/10 text-destructive",
+                "rounded-full border px-2 py-0.5 text-caption font-semibold tabular-nums",
+                isBuy
+                  ? "border-gain/20 bg-gain/[0.08] text-gain"
+                  : "border-destructive/20 bg-destructive/[0.08] text-destructive",
               )}
             >
               {isBuy ? "Buy" : "Sell"}
             </span>
+            <Tooltip content="Open chart" side="top" delay={400}>
             <button
               type="button"
               onClick={() => onOpenChart?.(sig.symbol)}
               className="text-base font-semibold hover:underline"
-              title="Open chart"
             >
               {sig.symbol.replace("-EQ", "")}
             </button>
+            </Tooltip>
             <span className="text-xs text-muted-foreground">{sig.setup}</span>
           </div>
           <div className="mt-1 truncate text-xs text-muted-foreground" title={sig.reason}>
@@ -191,16 +195,17 @@ function PendingRow({
             {skipping ? <ButtonLoader /> : null}
             Skip
           </Button>
+          <Tooltip content="Places the entry, stop-loss and target orders together" side="top" delay={400}>
           <Button
             size="sm"
             onClick={() => void handleExecute()}
             disabled={executing || skipping}
-            title="Places the entry, stop-loss and target orders together"
-            className={cn("gap-1.5 text-white", isBuy ? "bg-emerald-600 hover:bg-emerald-700" : "bg-destructive hover:bg-destructive/90")}
+            className={cn("gap-1.5 text-white", isBuy ? "bg-gain hover:bg-gain/90" : "bg-destructive hover:bg-destructive/90")}
           >
             {executing ? <ButtonLoader size={14} /> : <Check className="h-3.5 w-3.5" />}
             {executing ? "Placing…" : isBuy ? "Buy" : "Sell"}
           </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -216,11 +221,24 @@ function PendingRow({
           Risking <span className="font-medium text-destructive">₹{fmt(sig.risk_amount, 0)}</span>
         </span>
         <span>
-          Reward is <span className="font-medium text-emerald-500">{sig.rr_ratio.toFixed(1)}x</span> the risk
+        Reward is <span className="font-medium text-gain">{sig.rr_ratio.toFixed(1)}x</span> the risk
         </span>
+        {sig.setup_median_days_to_target != null ? (
+          <span
+            title={
+              sig.setup_hit_rate_pct != null
+                ? `Backtested: this setup reached target before stop ${sig.setup_hit_rate_pct}% of the time, historically`
+                : undefined
+            }
+          >
+          Target in <span className="font-medium text-foreground">~{sig.setup_median_days_to_target}</span>{" "}
+            sessions historically
+            {sig.setup_hit_rate_pct != null ? ` (${sig.setup_hit_rate_pct}% hit rate)` : ""}
+          </span>
+        ) : null}
         <span className="ml-auto flex items-center gap-3">
           <span>{timeAgo(sig.created_at)}</span>
-          {sig.expires_at ? <span className="text-amber-500">{timeLeft(sig.expires_at)}</span> : null}
+          {sig.expires_at ? <span className="text-warning">{timeLeft(sig.expires_at)}</span> : null}
           {hasDetails ? (
             <button
               type="button"
@@ -236,7 +254,7 @@ function PendingRow({
       </div>
 
       {open && (
-        <div className="mt-3 space-y-2 rounded-xl bg-muted/30 p-3 text-xs">
+        <div className="mt-3 space-y-2 rounded-md bg-muted/30 p-3 text-xs">
           {sig.paper_citation ? (
             <div className="flex items-center gap-1.5 font-medium text-primary">
               <BookOpen className="h-3.5 w-3.5 shrink-0" />
@@ -267,12 +285,14 @@ function ActiveRow({ sig }: { sig: TradeSignal }) {
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-muted/10 px-4 py-3">
       <span className={cn(
         "h-2 w-2 rounded-full",
-        isBuy ? "bg-emerald-500" : "bg-destructive",
+        isBuy ? "bg-gain" : "bg-destructive",
       )} />
       <span className="font-semibold">{sig.symbol.replace("-EQ", "")}</span>
       <span className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-bold",
-        isBuy ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-destructive/10 text-destructive",
+          "rounded-full border px-2 py-0.5 text-micro font-semibold tabular-nums",
+          isBuy
+            ? "border-gain/20 bg-gain/[0.08] text-gain"
+            : "border-destructive/20 bg-destructive/[0.08] text-destructive",
       )}>
         {sig.action}
       </span>
@@ -280,7 +300,7 @@ function ActiveRow({ sig }: { sig: TradeSignal }) {
       <span className="ml-auto flex items-center gap-4 text-xs tabular-nums">
         <span>Entry <strong>₹{fmt(sig.entry_price)}</strong></span>
         <span className="text-destructive">SL ₹{fmt(sig.stop_loss)}</span>
-        <span className="text-emerald-600 dark:text-emerald-400">Target ₹{fmt(sig.target)}</span>
+        <span className="text-gain">Target ₹{fmt(sig.target)}</span>
         <span className="text-muted-foreground">{sig.quantity} shares</span>
       </span>
     </div>
@@ -299,7 +319,7 @@ function SettingsPanel({
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
       <div>
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           Capital (₹)
         </label>
         <Input
@@ -310,7 +330,7 @@ function SettingsPanel({
         />
       </div>
       <div>
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           Risk / trade %
         </label>
         <Input
@@ -322,7 +342,7 @@ function SettingsPanel({
         />
       </div>
       <div>
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           Stop method
         </label>
         <Select
@@ -337,7 +357,7 @@ function SettingsPanel({
       </div>
       {settings.stop_method === "atr" ? (
         <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
             ATR multiplier
           </label>
           <Input
@@ -350,7 +370,7 @@ function SettingsPanel({
         </div>
       ) : (
         <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
             Stop loss %
           </label>
           <Input
@@ -363,7 +383,7 @@ function SettingsPanel({
         </div>
       )}
       <div>
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           R:R ratio
         </label>
         <Input
@@ -375,7 +395,7 @@ function SettingsPanel({
         />
       </div>
       <div>
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           Max active trades
         </label>
         <Input
@@ -386,7 +406,7 @@ function SettingsPanel({
         />
       </div>
       <div>
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wider text-muted-foreground">
           Product
         </label>
         <Select
@@ -500,13 +520,13 @@ export default function TradeSignalsPanel({
     }
   };
 
-  const pending  = signals.filter((s) => s.status === "PENDING");
+  const pending = signals.filter((s) => s.status === "PENDING");
   const buyCount = pending.filter((s) => s.action === "BUY").length;
   const sellCount = pending.length - buyCount;
   const filteredPending = sideFilter === "ALL" ? pending : pending.filter((s) => s.action === sideFilter);
   const visiblePending = showAllPending ? filteredPending : filteredPending.slice(0, 8);
-  const active   = signals.filter((s) => s.status === "ACTIVE");
-  const history  = signals.filter((s) => s.status === "DONE" || s.status === "SKIPPED");
+  const active = signals.filter((s) => s.status === "ACTIVE");
+  const history = signals.filter((s) => s.status === "DONE" || s.status === "SKIPPED");
 
   const maxRisk = settings ? ((settings.capital * settings.risk_per_trade_pct) / 100) : 0;
 
@@ -516,23 +536,25 @@ export default function TradeSignalsPanel({
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         {settings && (
+          <Tooltip content="Change position sizing and risk" side="top" delay={400}>
           <button
             type="button"
             onClick={() => setShowSettings((v) => !v)}
-            title="Change position sizing and risk"
             className="text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             ₹{(settings.capital / 1e5).toFixed(1)}L capital · risking ₹{fmt(maxRisk, 0)} a trade
           </button>
+          </Tooltip>
         )}
         <div className="ml-auto flex items-center gap-2">
           {learningStatus && (
+            <Tooltip content={`${learningStatus.market_regime.breadth_pct}% of stocks are above their average`} side="bottom" delay={400}>
             <span
-              title={`${learningStatus.market_regime.breadth_pct}% of stocks are above their average`}
               className="hidden items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs text-muted-foreground sm:inline-flex"
             >
               {marketWord(learningStatus.market_regime.regime)}
             </span>
+            </Tooltip>
           )}
           <Button onClick={() => void handleScan()} disabled={scanning} className="gap-2">
             {scanning ? <ButtonLoader size={16} /> : <RefreshCw className="h-4 w-4" />}
@@ -571,17 +593,18 @@ export default function TradeSignalsPanel({
           />
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
             <span className="text-xs text-muted-foreground">Changes apply to new signals only.</span>
+            <Tooltip content="Retrain the signal model on the stock history" side="top" delay={400}>
             <Button
               variant="outline"
               size="sm"
               onClick={() => void handleTrain()}
               disabled={training}
-              title="Retrain the signal model on the stock history"
               className="gap-1.5"
             >
               {training ? <ButtonLoader size={14} /> : <BrainCircuit className="h-3.5 w-3.5" />}
               {training ? "Retraining…" : "Retrain model"}
             </Button>
+            </Tooltip>
           </div>
         </Card>
       )}
@@ -592,7 +615,7 @@ export default function TradeSignalsPanel({
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">Waiting for you</span>
             {pending.length > 0 && (
-              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">
+              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-caption font-semibold text-primary-foreground">
                 {pending.length}
               </span>
             )}
@@ -626,7 +649,7 @@ export default function TradeSignalsPanel({
           <Hint>Nothing waiting. Press Scan now to look for setups.</Hint>
         ) : (
           <>
-            <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
               {visiblePending.map((s) => (
                 <PendingRow
                   key={s.id}
@@ -655,10 +678,10 @@ export default function TradeSignalsPanel({
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">Active trades</span>
-            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-white">
+            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gain px-1.5 text-caption font-semibold text-white">
               {active.length}
             </span>
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
             <span className="text-xs text-muted-foreground">
               Stop-loss and target orders are live in IIFL
             </span>
@@ -690,7 +713,7 @@ export default function TradeSignalsPanel({
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 font-semibold",
-                      s.status === "DONE" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground",
+                      s.status === "DONE" ? "border border-gain/20 bg-gain/[0.08] text-gain" : "bg-muted text-muted-foreground",
                     )}
                   >
                     {s.status}

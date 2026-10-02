@@ -89,7 +89,7 @@ export function MorphingModal({
                 transition={SPRING_PANEL}
                 {...gate}
                 className={cn(
-                  "pointer-events-auto relative w-full max-w-sm overflow-hidden rounded-3xl border border-border bg-background shadow-2xl will-change-transform",
+                  "pointer-events-auto relative w-full max-w-sm overflow-hidden rounded-xl border border-border bg-background shadow-2xl will-change-transform",
                   className,
                 )}
               >

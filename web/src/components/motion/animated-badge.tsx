@@ -45,16 +45,16 @@ export interface AnimatedBadgeProps extends Omit<
 }
 
 const STATUS_CLASS: Record<AnimatedBadgeStatus, string> = {
-  neutral: "border-border bg-card text-muted-foreground",
-  info: "border-primary/30 bg-primary/10 text-primary",
-  success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  warning: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  danger: "border-destructive/30 bg-destructive/10 text-destructive",
-  loading: "border-primary/30 bg-primary/10 text-primary",
+  neutral: "border-border/60 bg-muted/40 text-muted-foreground",
+  info: "border-primary/20 bg-primary/[0.08] text-primary",
+  success: "border-gain/20 bg-gain/[0.08] text-gain",
+  warning: "border-warning/20 bg-warning/[0.08] text-warning",
+  danger: "border-destructive/20 bg-destructive/[0.08] text-destructive",
+  loading: "border-primary/20 bg-primary/[0.08] text-primary",
 };
 
 const SIZE_CLASS: Record<AnimatedBadgeSize, string> = {
-  sm: "h-6 gap-1.5 px-2 text-[11px]",
+  sm: "h-6 gap-1.5 px-2 text-caption",
   md: "h-8 gap-2 px-3 text-xs",
 };
 

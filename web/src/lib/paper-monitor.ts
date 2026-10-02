@@ -6,16 +6,16 @@
  * three that carry real consequences:
  *
  * 1. **What the four controls may do.** The backend refuses most transitions
- *    (`start` accepts only `PENDING`/`PAUSED`; a stopped deployment is terminal;
- *    pause needs a running one). A screen that offers a button the server will
- *    reject teaches the user that the button is broken. So the gating lives here,
- *    mirrors the repository's `WHERE` clauses, and is tested.
+ * (`start` accepts only `PENDING`/`PAUSED`; a stopped deployment is terminal;
+ * pause needs a running one). A screen that offers a button the server will
+ * reject teaches the user that the button is broken. So the gating lives here,
+ * mirrors the repository's `WHERE` clauses, and is tested.
  * 2. **How a null P&L is rendered.** `today_pnl` is `null` when no fill exists
- *    before the session boundary. That is "not yet measured", not "flat", and the
- *    two must not print the same.
+ * before the session boundary. That is "not yet measured", not "flat", and the
+ * two must not print the same.
  * 3. **The pipeline rail.** The five stages are shown in causal order always —
- *    a stage that has not happened yet is greyed, not omitted, because a chain
- *    drawn only from what has occurred cannot show the user where it *stopped*.
+ * a stage that has not happened yet is greyed, not omitted, because a chain
+ * drawn only from what has occurred cannot show the user where it *stopped*.
  *
  * No React, no fetch, no imports beyond types.
  */
@@ -56,10 +56,10 @@ export const STAGE_BLURB: Record<TimelineStage, string> = {
 
 /** Which controls are usable on a deployment in this state.
  *
- *  `canStart` is true for `PENDING` and `PAUSED` and **false for `STOPPED`**.
- *  That asymmetry is the single most surprising thing about this screen, so it
- *  is also surfaced as `resetInstead` rather than left for the user to discover
- *  by clicking a disabled button. */
+ * `canStart` is true for `PENDING` and `PAUSED` and **false for `STOPPED`**.
+ * That asymmetry is the single most surprising thing about this screen, so it
+ * is also surfaced as `resetInstead` rather than left for the user to discover
+ * by clicking a disabled button. */
 export interface ControlGates {
   canStart: boolean;
   canPause: boolean;
@@ -101,8 +101,8 @@ export function controlGates(status: DeploymentStatus | string | null | undefine
 
 /** Is this combination of state and outcome worth the viewer's attention?
  *
- *  Used to tint a timeline row. A `rejected` risk decision and a completed fill
- *  are both "normal", but only one of them is something to look at. */
+ * Used to tint a timeline row. A `rejected` risk decision and a completed fill
+ * are both "normal", but only one of them is something to look at. */
 export function outcomeTone(outcome: string): "good" | "bad" | "warn" | "flat" {
   if (outcome === "rejected") return "bad";
   if (outcome === "approved" || outcome === "filled" || outcome === "recorded") return "good";
@@ -112,10 +112,10 @@ export function outcomeTone(outcome: string): "good" | "bad" | "warn" | "flat" {
 
 /** One timeline row, already de-duplicated into a single chain link.
  *
- *  `count` exists because a busy deployment emits an `order` entry for both
- *  `SUBMITTED` and `ACKNOWLEDGED` — two facts, one link in the chain. Collapsing
- *  them keeps the rail readable while `summaries` retains both lines so nothing
- *  is hidden. */
+ * `count` exists because a busy deployment emits an `order` entry for both
+ * `SUBMITTED` and `ACKNOWLEDGED` — two facts, one link in the chain. Collapsing
+ * them keeps the rail readable while `summaries` retains both lines so nothing
+ * is hidden. */
 export interface ChainLink {
   stage: TimelineStage;
   ts: string;
@@ -127,8 +127,8 @@ export interface ChainLink {
 
 /** Group a timeline into the five stages, newest order first within each stage.
  *
- *  Returns one link per stage **that has occurred**. The rail the UI draws is
- *  `STAGES`; this is what has actually filled in. */
+ * Returns one link per stage **that has occurred**. The rail the UI draws is
+ * `STAGES`; this is what has actually filled in. */
 export function toChain(events: TimelineEvent[]): ChainLink[] {
   const byStage = new Map<TimelineStage, ChainLink>();
   // Newest first: an operator reads the timeline to answer "what just happened",
@@ -159,26 +159,26 @@ export function toChain(events: TimelineEvent[]): ChainLink[] {
 }
 
 /** Positions the ledger could not value. Named rather than dropped — see
- *  `PaperSnapshot.complete`. */
+ * `PaperSnapshot.complete`. */
 export function unpricedOf(overview: MonitorOverview | null): string[] {
   if (!overview) return [];
   return overview.pnl.unpriced_symbols ?? [];
 }
 
 /** Open positions only. The ledger returns flat rows too, and a flat row is not
- *  a holding — showing it would inflate the position count. */
+ * a holding — showing it would inflate the position count. */
 export function openPositions(overview: MonitorOverview | null): PaperPosition[] {
   if (!overview) return [];
   return overview.positions.filter((p) => p.quantity !== 0);
 }
 
 /** The one-line explanation of why a deployment is idle, or `null` when it is
- *  trading.
+ * trading.
  *
- *  Ordered by what the operator can act on: a blocked rule set is a
- *  configuration problem they can fix, a closed session is not. `status`
- *  already computes this server-side; this only decides the wording and falls
- *  back through the individual flags when `not_trading_because` is absent. */
+ * Ordered by what the operator can act on: a blocked rule set is a
+ * configuration problem they can fix, a closed session is not. `status`
+ * already computes this server-side; this only decides the wording and falls
+ * back through the individual flags when `not_trading_because` is absent. */
 export function idleReason(status: MonitorOverview["status"] | null): string | null {
   if (!status) return null;
   if (status.trading) return null;
@@ -193,12 +193,18 @@ export function idleReason(status: MonitorOverview["status"] | null): string | n
 
 /** Format a nullable money figure, distinguishing "not measured" from zero.
  *
- *  `null` renders as an em dash with the caller's note; `0` renders as ₹0. The
- *  distinction is the whole reason `today_pnl` is nullable in the API. */
-export function fmtMoneyOrDash(value: number | null | undefined): string {
+ * `null` renders as an em dash with the caller's note; `0` renders as ₹0. The
+ * distinction is the whole reason `today_pnl` is nullable in the API. */
+ export function fmtMoneyOrDash(
+   value: number | null | undefined,
+   digits = 0,
+ ): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   const sign = value < 0 ? "-" : "";
-  return `${sign}₹${Math.abs(value).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  return `${sign}₹${Math.abs(value).toLocaleString("en-IN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`;
 }
 
 /** Percentage with an explicit sign, or a dash. Never `+0.00%` for unknown. */
@@ -209,9 +215,9 @@ export function fmtPctOrDash(value: number | null | undefined, digits = 2): stri
 
 /** IST wall-clock for a timestamp, so an operator reads exchange time.
  *
- *  The deployment trades an Indian session; a timeline rendered in the browser's
- *  local zone would put a 09:15 fill at 03:45 for anyone reading from Europe and
- *  make the session boundary impossible to see. */
+ * The deployment trades an Indian session; a timeline rendered in the browser's
+ * local zone would put a 09:15 fill at 03:45 for anyone reading from Europe and
+ * make the session boundary impossible to see. */
 export function istClock(ts: string | null | undefined): string {
   if (!ts) return "—";
   const parsed = new Date(ts);
@@ -238,7 +244,7 @@ export function istDate(ts: string | null | undefined): string {
 }
 
 /** How long ago, in words, from an ISO timestamp. Coarse on purpose: the exact
- *  second is in the tooltip, and "3m ago" is what an operator actually reads. */
+ * second is in the tooltip, and "3m ago" is what an operator actually reads. */
 export function ago(ts: string | null | undefined, now: number = Date.now()): string {
   if (!ts) return "—";
   const parsed = new Date(ts).getTime();
@@ -255,9 +261,9 @@ export function ago(ts: string | null | undefined, now: number = Date.now()): st
 
 /** Split the comma-separated symbol input the deploy form uses.
  *
- *  Upper-cased and de-duplicated because the runner upper-cases symbols before
- *  matching them against the cache; letting `reliance` through would create a
- *  deployment whose symbols never resolve and which is therefore silently inert. */
+ * Upper-cased and de-duplicated because the runner upper-cases symbols before
+ * matching them against the cache; letting `reliance` through would create a
+ * deployment whose symbols never resolve and which is therefore silently inert. */
 export function parseSymbols(raw: string): string[] {
   const seen = new Set<string>();
   for (const piece of raw.split(/[,\s]+/)) {
@@ -289,21 +295,21 @@ export function deployReadiness(input: {
 
 /** The version number to preselect for a chosen strategy, or `""` for none.
  *
- *  **"Newest" is the highest version number, not the last row.** The service
- *  serves the list `ORDER BY version DESC`, so it arrives newest-first — and
- *  reading `versions[versions.length - 1]` on a newest-first list returns the
- *  *oldest*. That is what this panel used to do, under a comment that said
- *  "preselect the newest".
+ * **"Newest" is the highest version number, not the last row.** The service
+ * serves the list `ORDER BY version DESC`, so it arrives newest-first — and
+ * reading `versions[versions.length - 1]` on a newest-first list returns the
+ * *oldest*. That is what this panel used to do, under a comment that said
+ * "preselect the newest".
  *
- *  It failed silently, and expensively. A version is what a deployment is
- *  *pinned* to: the rules it will keep running for months. Preselecting the
- *  oldest meant the default form submission deployed the least-current rules,
- *  with nothing on screen to suggest it — the dropdown showed `v1`, which is a
- *  valid choice, and only a user who remembered authoring `v2` would notice.
+ * It failed silently, and expensively. A version is what a deployment is
+ * *pinned* to: the rules it will keep running for months. Preselecting the
+ * oldest meant the default form submission deployed the least-current rules,
+ * with nothing on screen to suggest it — the dropdown showed `v1`, which is a
+ * valid choice, and only a user who remembered authoring `v2` would notice.
  *
- *  Comparing the numbers is correct whichever way the list is ordered, which is
- *  the property worth having: the ordering of an API response is not something
- *  a form should be silently coupled to.
+ * Comparing the numbers is correct whichever way the list is ordered, which is
+ * the property worth having: the ordering of an API response is not something
+ * a form should be silently coupled to.
  */
 export function newestVersion(
   versions: readonly { version: number }[] | null | undefined,
@@ -321,12 +327,12 @@ export function newestVersion(
 // honest, and each has a test:
 //
 // 1. **The verdict is about sample, not superiority.** Tones follow the
-//    readiness ladder: muted below the floor, amber while early, and only
-//    then a neutral "ready to read" — never green-for-the-leader, because
-//    there is no leader.
+// readiness ladder: muted below the floor, amber while early, and only
+// then a neutral "ready to read" — never green-for-the-leader, because
+// there is no leader.
 // 2. **A delta without both sizes is a rumour.** Delta cells always render
-//    beside the two arm counts; a missing side renders as an em dash, never
-//    as zero.
+// beside the two arm counts; a missing side renders as an em dash, never
+// as zero.
 
 export type VerdictTone = "good" | "warn" | "muted";
 

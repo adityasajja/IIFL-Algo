@@ -22,6 +22,7 @@ import {
   getAvailableColumns,
   getWatchlist,
   getWatchlistQuotes,
+  getQuote,
   listWatchlists,
   removeWatchlistItem,
   reorderWatchlistItems,
@@ -37,11 +38,12 @@ import {
 import { Button } from "./components/ui/button";
 import { Card, ErrorBox, Hint } from "./components/ui/card";
 import { ButtonLoader, PageLoader } from "./components/ui/loading";
-import { Input } from "./components/ui/input";
-import { Switch } from "./components/ui/switch";
+import { Input } from "./components/motion/input";
+import { Tooltip } from "./components/motion/tooltip";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
 import { useDialog } from "./components/ui/dialog-context";
+import { useLiveTicks, type LiveTick } from "./lib/useLiveTicks";
 
 interface Props {
   /** Effective permissions of the signed-in principal, from `/auth/me`. */
@@ -49,7 +51,7 @@ interface Props {
   onOpenChart?: (symbol: string) => void;
 }
 
-/** How often to re-pull quotes while the live toggle is on. */
+/** How often to re-pull quotes. */
 const LIVE_REFRESH_MS = 20_000;
 
 /** Columns that read as a movement, so they get up/down colouring. */
@@ -62,6 +64,18 @@ const SIGNED_COLUMNS = new Set(["change", "change_pct"]);
  * `null` on purpose, and printing `0.00` there would turn "we do not know" into
  * a measurement — the exact failure this platform is built to avoid.
  */
+/** Suggestion price: live tick first, one-time fetched quote as fallback. */
+function sugPrice(
+  s: InstrumentRecord,
+  ticks: Record<string, LiveTick>,
+  fallback: Record<string, number>,
+): number | undefined {
+  const t = ticks[s.symbol] ?? ticks[s.symbol.toUpperCase()];
+  if (t && Number.isFinite(t.ltp)) return t.ltp;
+  const f = fallback[s.symbol];
+  return f !== undefined && Number.isFinite(f) ? f : undefined;
+}
+
 function formatValue(value: unknown, kind: string): string {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "yes" : "no";
@@ -105,7 +119,8 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const dialog = useDialog();
 
-  const [live, setLive] = useState(true);
+  /** Always live: quotes re-pull on an interval, no toggle. */
+  const live = true;
   const [showColumns, setShowColumns] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState("");
@@ -113,6 +128,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
 
   const [draft, setDraft] = useState("");
   const [suggestions, setSuggestions] = useState<InstrumentRecord[]>([]);
+  const [sugQuotes, setSugQuotes] = useState<Record<string, number>>({});
   const [highlight, setHighlight] = useState(0);
   const [searching, setSearching] = useState(false);
 
@@ -226,9 +242,9 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live polling. Cleared on unmount, on list change, and when the toggle goes
-  // off — a leaked interval here would keep hammering the broker for a panel
-  // the user has already navigated away from.
+  // Live polling. Cleared on unmount and on list change — a leaked interval
+  // here would keep hammering the broker for a panel the user has already
+  // navigated away from.
   useEffect(() => {
     if (!live || !activeId) return;
     const t = setVisibleInterval(() => void loadQuotes(activeId, true), LIVE_REFRESH_MS);
@@ -261,6 +277,31 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
     }, 220);
     return () => clearTimeout(t);
   }, [draft, detail?.exchange]);
+
+  // Priced suggestions: one batched quote call per result set, debounced so
+  // fast typing never fans out. Symbols without a quote simply show no price.
+  useEffect(() => {
+    if (suggestions.length === 0) { setSugQuotes({}); return; }
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await getQuote(suggestions.map((s) => s.symbol).join(","), detail?.exchange ?? "NSEEQ");
+        const map: Record<string, number> = {};
+        for (const q of res.quotes || []) {
+          const rec = q as Record<string, unknown>;
+          const sym = String(rec.symbol || "");
+          const ltp = Number(rec.ltp);
+          if (sym && Number.isFinite(ltp)) map[sym] = ltp;
+        }
+        if (!cancelled) setSugQuotes(map);
+      } catch { if (!cancelled) setSugQuotes({}); }
+    }, 150);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, [suggestions, detail?.exchange]);
+
+  // Live ticks for whatever is suggested right now; the fetched quotes above
+  // stay as the fallback when the socket has nothing yet.
+  const { ticks: sugTicks } = useLiveTicks(suggestions.map((s) => s.symbol));
 
   // ── mutations ──────────────────────────────────────────────────────────────
   function report(e: unknown) {
@@ -511,13 +552,14 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
 
   if (lists && lists.length === 0) {
     return (
-      <Card className="mx-auto grid max-w-md justify-items-center gap-4 px-8 py-14 text-center">
-        <span className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-          <ListChecks className="size-6" />
+      <div className="grid min-h-[55svh] place-items-center">
+        <Card className="grid w-full max-w-md justify-items-center gap-5 px-8 py-14 text-center">
+          <span className="grid size-14 place-items-center rounded-xl bg-primary/10 text-primary dark:text-primary-subdued">
+            <ListChecks className="size-7" />
         </span>
         <div>
-          <div className="text-base font-semibold">Follow the stocks you care about</div>
-          <p className="mt-1 text-sm text-muted-foreground">Make a list and watch live prices.</p>
+            <div className="text-heading text-foreground">Follow the stocks you care about</div>
+            <p className="mt-2 text-sm font-light text-muted-foreground">Make a list and watch live prices.</p>
         </div>
         {mayWrite ? (
           <div className="flex w-full items-center gap-2">
@@ -539,6 +581,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
           <p className="text-sm text-muted-foreground">Ask an owner to create one.</p>
         )}
       </Card>
+      </div>
     );
   }
 
@@ -551,10 +594,10 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             Watchlists
           </span>
           {mayWrite ? (
+            <Tooltip content="New watchlist" side="bottom" delay={400}>
             <Button
               size="sm"
               variant="ghost"
-              title="New watchlist"
               onClick={() => {
                 setRenaming(true);
                 setNewName("");
@@ -562,6 +605,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             >
               <Plus className="size-3.5" />
             </Button>
+            </Tooltip>
           ) : null}
         </div>
 
@@ -615,7 +659,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
               type="button"
               onClick={() => void selectList(w.watchlist_id, live)}
               className={cn(
-                "flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
+                "flex items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
                 w.watchlist_id === activeId
                   ? "bg-primary/10 font-semibold text-foreground"
                   : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -623,11 +667,11 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             >
               <span className="flex min-w-0 items-center gap-1.5">
                 {w.is_default ? (
-                  <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" />
+                  <Star className="size-3 shrink-0 fill-warning text-warning" />
                 ) : null}
                 <span className="truncate">{w.name}</span>
               </span>
-              <span className="shrink-0 text-[11px] tabular-nums opacity-70">{w.item_count}</span>
+              <span className="shrink-0 text-caption tabular-nums opacity-70">{w.item_count}</span>
             </button>
           ))}
         </div>
@@ -651,7 +695,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                 <h3 className="truncate text-base font-semibold tracking-tight">
                   {detail.name}
                   {detail.is_default ? (
-                    <span className="ml-2 align-middle text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                    <span className="ml-2 align-middle text-micro font-medium uppercase tracking-wide text-warning">
                       default
                     </span>
                   ) : null}
@@ -664,38 +708,38 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">
-                <Switch checked={live} onCheckedChange={setLive} label="Live" />
+                <Tooltip content="Re-pull quotes" side="bottom" delay={400}>
                 <Button
                   size="sm"
                   variant="secondary"
                   disabled={busy}
                   onClick={() => void selectList(detail.watchlist_id, live)}
-                  title="Re-pull quotes"
                 >
                   <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
                 </Button>
+                </Tooltip>
                 <Button
                   size="sm"
                   variant={showColumns ? "primary" : "secondary"}
                   onClick={() => setShowColumns((v) => !v)}
-                  title="Choose columns"
                 >
                   <Columns3 className="size-3.5" />
                   Columns
                 </Button>
                 {mayWrite ? (
                   <div className="relative" ref={menuRef}>
+                    <Tooltip content="More" side="bottom" delay={400}>
                     <Button
                       size="sm"
                       variant="secondary"
                       onClick={() => setMenuOpen((v) => !v)}
-                      title="More"
                       aria-label="More"
                     >
                       <Ellipsis className="size-3.5" />
                     </Button>
+                    </Tooltip>
                     {menuOpen ? (
-                      <div className="absolute right-0 top-full z-20 mt-1.5 w-48 overflow-hidden rounded-xl border border-border bg-card p-1 shadow-lg">
+                      <div className="absolute right-0 top-full z-20 mt-1.5 w-48 overflow-hidden rounded-xl border border-border bg-card p-1 ">
                         <button
                           type="button"
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-muted"
@@ -783,9 +827,9 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                       searching ? (
                         <ButtonLoader size={16} />
                       ) : draft ? (
+                        <Tooltip content="Clear" side="left" delay={400}>
                         <button
                           type="button"
-                          title="Clear"
                           onClick={() => {
                             setDraft("");
                             setSuggestions([]);
@@ -793,6 +837,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                         >
                           <X className="size-4" />
                         </button>
+                        </Tooltip>
                       ) : undefined
                     }
                     onKeyDown={(e) => {
@@ -824,7 +869,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                 </Button>
 
                 {suggestions.length > 0 ? (
-                  <ul className="absolute left-0 top-full z-20 mt-1 max-h-72 w-full max-w-xl overflow-auto rounded-xl border border-border bg-card py-1 shadow-lg">
+                  <ul data-lenis-prevent className="absolute left-0 top-full z-20 mt-1 max-h-72 w-full max-w-xl overflow-auto rounded-xl border border-border bg-card py-1 ">
                     {suggestions.map((s, i) => (
                       <li key={`${s.exchange}:${s.symbol}`}>
                         <button
@@ -835,7 +880,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                             setSuggestions([]);
                           }}
                           className={cn(
-                            "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px]",
+                            "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-body",
                             i === highlight ? "bg-primary/10" : "hover:bg-muted/60",
                           )}
                         >
@@ -845,9 +890,16 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                               <span className="ml-2 truncate text-muted-foreground">{s.name}</span>
                             ) : null}
                           </span>
-                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                          <span className="shrink-0 text-right">
+                            {(() => {
+                              const price = sugPrice(s, sugTicks, sugQuotes);
+                              return price !== undefined ? (
+                                <span className="block text-body font-semibold tabular-nums text-foreground">₹{formatValue(price, "currency")}</span>
+                              ) : null;
+                            })()}
+                            <span className="block text-caption tabular-nums text-muted-foreground">
                             {s.exchange}
-                            {s.bars ? ` · ${s.bars} bars` : " · no local data"}
+                            </span>
                           </span>
                         </button>
                       </li>
@@ -870,8 +922,8 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             {detail.items.length === 0 ? (
               <div className="mt-2" />
             ) : (
-              <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                <table className="w-full border-collapse text-[13px]">
+              <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+                <table className="w-full border-collapse text-body">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-left">
                       <th className="w-8 px-2 py-2" />
@@ -913,8 +965,8 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                             {/* Freshness is per row: a cached close shown next to a
                                 live one is the single most misleading thing this
                                 table could do. */}
-                            <span
-                              title={
+                            <Tooltip
+                              content={
                                 !row
                                   ? "loading"
                                   : row.error
@@ -923,6 +975,10 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                                       ? "cached close, not a live price"
                                       : "live"
                               }
+                              side="top"
+                              delay={400}
+                            >
+                              <span
                               className={cn(
                                 "block size-1.5 rounded-full",
                                 !row
@@ -930,22 +986,24 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                                   : row.error
                                     ? "bg-destructive"
                                     : row.stale
-                                      ? "bg-amber-500"
-                                      : "animate-pulse bg-emerald-500",
+                                        ? "bg-warning"
+                                        : "animate-pulse bg-gain",
                               )}
                             />
+                            </Tooltip>
                           </td>
                           <td className="px-3 py-1.5">
+                            <Tooltip content="Open chart" side="top" delay={400}>
                             <button
                               type="button"
                               className="text-left font-semibold hover:underline"
                               onClick={() => onOpenChart?.(symbol)}
-                              title="Open chart"
                             >
                               {symbol}
                             </button>
+                            </Tooltip>
                             {row?.name ? (
-                              <span className="ml-2 text-[11px] text-muted-foreground">
+                              <span className="ml-2 text-caption text-muted-foreground">
                                 {row.name}
                               </span>
                             ) : null}
@@ -960,7 +1018,7 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                                   "px-3 py-1.5 text-right tabular-nums",
                                   SIGNED_COLUMNS.has(c.key) && numeric !== null
                                     ? numeric >= 0
-                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      ? "text-gain"
                                       : "text-destructive"
                                     : "",
                                   numeric === null && "text-muted-foreground",
@@ -981,45 +1039,49 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
                                 <>
                                   {sort.length === 0 ? (
                                     <>
+                                      <Tooltip content="Move up" side="left" delay={400}>
                                   <button
                                     type="button"
-                                    title="Move up"
                                     disabled={busy || index === 0}
                                     onClick={() => void move(index, -1)}
-                                    className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                          className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
                                   >
                                     <ArrowUp className="size-3.5" />
                                   </button>
+                                      </Tooltip>
+                                      <Tooltip content="Move down" side="left" delay={400}>
                                   <button
                                     type="button"
-                                    title="Move down"
                                     disabled={busy || index === detail.items.length - 1}
                                     onClick={() => void move(index, 1)}
-                                    className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                          className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
                                   >
                                     <ArrowDown className="size-3.5" />
                                   </button>
+                                      </Tooltip>
                                     </>
                                   ) : null}
+                                  <Tooltip content="Remove from this list" side="left" delay={400}>
                                   <button
                                     type="button"
-                                    title="Remove from this list"
                                     disabled={busy}
                                     onClick={() => void removeSymbol(symbol)}
-                                    className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
+                                      className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
                                   >
                                     <X className="size-3.5" />
                                   </button>
+                                  </Tooltip>
                                 </>
                               ) : null}
+                              <Tooltip content="Open chart" side="left" delay={400}>
                               <button
                                 type="button"
-                                title="Open chart"
                                 onClick={() => onOpenChart?.(symbol)}
-                                className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
                               >
                                 <BarChart3 className="size-3.5" />
                               </button>
+                              </Tooltip>
                             </div>
                           </td>
                         </tr>
@@ -1033,13 +1095,13 @@ export default function WatchlistPanel({ permissions, onOpenChart }: Props) {
             {detail.items.length > 0 ? (
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-emerald-500" /> Live
+                  <span className="size-2 rounded-full bg-gain" /> Live
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-amber-500" /> Delayed
+                  <span className="size-2 rounded-full bg-warning" /> Delayed
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-rose-500" /> No data
+                  <span className="size-2 rounded-full bg-loss" /> No data
                 </span>
                 {!mayWrite ? <span className="ml-auto">View only</span> : null}
               </div>
@@ -1101,26 +1163,26 @@ function ColumnPicker({
 
   if (specs.length === 0) {
     return (
-      <div className="mt-3 rounded-xl border border-border p-3">
+      <div className="mt-3 rounded-lg border border-border p-3">
         <Hint>Loading…</Hint>
       </div>
     );
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+    <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/20 p-4">
       {groups.map(([group, items]) => (
         <div key={group} className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           <span className="w-20 shrink-0 text-xs text-muted-foreground">{groupLabel(group)}</span>
           {items.map((c) => {
             const on = selected.includes(c.key);
             return (
+              <Tooltip content={c.description} side="top" delay={400}>
               <button
                 key={c.key}
                 type="button"
                 disabled={disabled}
                 onClick={() => onToggle(c.key)}
-                title={c.description}
                 aria-pressed={on}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-50",
@@ -1132,6 +1194,7 @@ function ColumnPicker({
                 {on ? <Check className="size-3 text-primary" /> : null}
                 {columnLabel(c)}
               </button>
+              </Tooltip>
             );
           })}
         </div>
@@ -1154,10 +1217,10 @@ function SortButton({
   onClick: (additive: boolean) => void;
 }) {
   return (
+    <Tooltip content="Click to sort · Shift+click to add a second sort" side="top" delay={400}>
     <button
       type="button"
       onClick={(e) => onClick(e.shiftKey)}
-      title="Click to sort · Shift+click to add a second sort"
       className={cn(
         "group inline-flex items-center gap-1 font-semibold transition-colors hover:text-foreground",
         dir ? "text-foreground" : "",
@@ -1172,10 +1235,11 @@ function SortButton({
         <ArrowDown className="size-3 opacity-0 transition-opacity group-hover:opacity-40" />
       )}
       {rank !== null ? (
-        <span className="grid size-4 place-items-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+          <span className="grid size-4 place-items-center rounded-full bg-primary/15 text-micro font-semibold text-primary">
           {rank}
         </span>
       ) : null}
     </button>
+    </Tooltip>
   );
 }

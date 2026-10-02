@@ -2,16 +2,16 @@
  * AnalyticsPanel — post-trade attribution, made inspectable.
  *
  * SIGNAL → CONTEXT → SIZING → RISK → GATE → OMS → FILL → CLOSED TRADE
- *        → POST-TRADE ATTRIBUTION → FORWARD LEARNING DATASET
+ * → POST-TRADE ATTRIBUTION → FORWARD LEARNING DATASET
  *
  * This is the screen at the end of that chain. It answers three questions and
  * refuses to answer a fourth:
  *
- *   **What happened?**      Overview — P&L, hit rate, costs, slippage, holding.
- *   **Why did it happen?**  Attribution — the nine branches, and which of them
- *                           are *decisions* versus *execution outcomes*.
- *   **How well was it done?** MAE/MFE and Execution — the path the trade took
- *                           while it was open, and the quality of the fills.
+ * **What happened?** Overview — P&L, hit rate, costs, slippage, holding.
+ * **Why did it happen?** Attribution — the nine branches, and which of them
+ * are *decisions* versus *execution outcomes*.
+ * **How well was it done?** MAE/MFE and Execution — the path the trade took
+ * while it was open, and the quality of the fills.
  *
  * The fourth question — *which strategy is best?* — is deliberately not answered.
  * There is no ranking anywhere on this screen. A comparison across strategies,
@@ -66,7 +66,7 @@ import {
 import { Card, CardHeader, ErrorBox } from "./components/ui/card";
 import { Select } from "./components/ui/select";
 import { Badge, Callout, Stat } from "./components/ui/stat";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/motion/tabs";
 import {
   EM_DASH,
   BucketView,
@@ -100,9 +100,9 @@ import {
 type Tone = "good" | "bad" | "warn" | "info" | "flat";
 
 const TONE_TEXT: Record<Tone, string> = {
-  good: "text-emerald-600 dark:text-emerald-400",
+  good: "text-gain",
   bad: "text-destructive",
-  warn: "text-amber-600 dark:text-amber-400",
+  warn: "text-warning",
   info: "text-sky-600 dark:text-sky-400",
   flat: "text-muted-foreground",
 };
@@ -115,7 +115,7 @@ function BucketRow({ view, max }: { view: BucketView; max: number }) {
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[13px] font-medium">{view.label}</span>
+            <span className="truncate text-body font-medium">{view.label}</span>
             {view.suppressed ? (
               <Badge tone="warn" className="shrink-0">
                 n={view.n}
@@ -130,16 +130,16 @@ function BucketRow({ view, max }: { view: BucketView; max: number }) {
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <div className={`text-[13px] font-bold tabular-nums ${TONE_TEXT[view.netPnl == null ? "flat" : view.netPnl > 0 ? "good" : view.netPnl < 0 ? "bad" : "flat"]}`}>
+        <div className={`text-body font-semibold tabular-nums ${TONE_TEXT[view.netPnl == null ? "flat" : view.netPnl > 0 ? "good" : view.netPnl < 0 ? "bad" : "flat"]}`}>
             {money(view.netPnl)}
           </div>
-          <div className="text-[11px] tabular-nums text-muted-foreground">
+          <div className="text-caption tabular-nums text-muted-foreground">
             {view.n} trade{view.n === 1 ? "" : "s"}
             {view.winRate != null ? ` \u00b7 ${(view.winRate * 100).toFixed(0)}% win` : ""}
           </div>
         </div>
       </div>
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-muted-foreground">
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-caption tabular-nums text-muted-foreground">
         <span>
           {view.suppressed
             ? "mean withheld below the floor"
@@ -172,7 +172,7 @@ function BucketTable({
       <CardHeader title={title} sub={sub} />
       <div className="mt-2 px-0">
         {views.length === 0 ? (
-          <div className="py-3 text-[13px] text-muted-foreground">
+          <div className="py-3 text-body text-muted-foreground">
             No attributed trade falls into any bucket on this dimension yet.
           </div>
         ) : (
@@ -264,11 +264,11 @@ function OverviewTab({ summary }: { summary: AnalyticsSummary }) {
           sub="One trade carrying a book is the most common way a small sample lies about itself."
         />
         <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-border bg-muted/30 px-3.5 py-3">
-            <div className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+          <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-3">
+            <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
               Best trade as a share of gross profit
             </div>
-            <div className={`mt-1 text-[19px] font-bold tabular-nums ${bestShare != null && bestShare > 0.5 ? TONE_TEXT.warn : ""}`}>
+            <div className={`mt-1 text-xl font-semibold tabular-nums ${bestShare != null && bestShare > 0.5 ? TONE_TEXT.warn : ""}`}>
               {bestShare == null ? EM_DASH : `${(bestShare * 100).toFixed(0)}%`}
             </div>
             <div className="mt-0.5 text-[11.5px] text-muted-foreground">
@@ -279,11 +279,11 @@ function OverviewTab({ summary }: { summary: AnalyticsSummary }) {
                   : "No single trade dominates the gross profit."}
             </div>
           </div>
-          <div className="rounded-xl border border-border bg-muted/30 px-3.5 py-3">
-            <div className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+          <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-3">
+            <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
               Net P&L without the best trade
             </div>
-            <div className={`mt-1 text-[19px] font-bold tabular-nums ${summary.net_without_best == null ? "" : summary.net_without_best > 0 ? TONE_TEXT.good : TONE_TEXT.bad}`}>
+            <div className={`mt-1 text-xl font-semibold tabular-nums ${summary.net_without_best == null ? "" : summary.net_without_best > 0 ? TONE_TEXT.good : TONE_TEXT.bad}`}>
               {money(summary.net_without_best)}
             </div>
             <div className="mt-0.5 text-[11.5px] text-muted-foreground">
@@ -394,7 +394,7 @@ function ScatterChart({
 }) {
   if (points.length === 0) {
     return (
-      <div className="py-6 text-center text-[13px] text-muted-foreground">
+      <div className="py-6 text-center text-body text-muted-foreground">
         No trade has both a measured{" "}
         {axis === "mfe" ? "favourable" : "adverse"} excursion and a recorded outcome,
         so there is no relationship to plot.
@@ -421,9 +421,9 @@ function ScatterChart({
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label={`${axis.toUpperCase()} against outcome`}>
       {/* axes */}
-      <line x1={pad} y1={zeroY} x2={w - pad} y2={zeroY} stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+      <line x1={pad} y1={zeroY} x2={w - pad} y2={zeroY} className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="3 3" />
       {minX < 0 && maxX > 0 ? (
-        <line x1={zeroX} y1={pad} x2={zeroX} y2={h - pad} stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+        <line x1={zeroX} y1={pad} x2={zeroX} y2={h - pad} className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="3 3" />
       ) : null}
 
       {/* gridlines at the quartiles */}
@@ -446,9 +446,9 @@ function ScatterChart({
           cx={sx(p.x)}
           cy={sy(p.y)}
           r={p.forced ? 4.5 : 3.5}
-          fill={p.forced ? "#ef4444" : p.y >= 0 ? "#10b981" : "#f97316"}
+          className={p.forced ? "fill-loss" : p.y >= 0 ? "fill-gain" : "fill-warning"}
           fillOpacity={0.75}
-          stroke={p.forced ? "#ef4444" : "none"}
+          stroke={p.forced ? "var(--loss)" : "none"}
           strokeWidth={p.forced ? 1 : 0}
         >
           <title>
@@ -810,7 +810,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
   }, [tradeId]);
 
   if (error) return <ErrorBox>{error}</ErrorBox>;
-  if (!detail) return <div className="py-6 text-center text-[13px] text-muted-foreground">Loading attribution…</div>;
+  if (!detail) return <div className="py-6 text-center text-body text-muted-foreground">Loading attribution…</div>;
 
   const branches = branchViews(detail);
   const groups = codeGroups(detail.reason_codes ?? detail.attribution?.reason_codes);
@@ -845,10 +845,10 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         {branches.map((b) => (
           <div key={b.key} className="rounded-xl border border-border bg-card px-3.5 py-3">
-            <div className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+            <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
               {b.label}
             </div>
-            <div className={`mt-1 text-[15px] font-bold tabular-nums ${TONE_TEXT[b.tone]}`}>{b.headline}</div>
+            <div className={`mt-1 text-sm font-semibold tabular-nums ${TONE_TEXT[b.tone]}`}>{b.headline}</div>
             <div className="mt-1 text-[11.5px] leading-snug text-muted-foreground">{b.reading}</div>
           </div>
         ))}
@@ -856,7 +856,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
 
       {groups.length > 0 ? (
         <div className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+          <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
             Reason codes
           </div>
           <div className="mt-2 space-y-2">
@@ -885,7 +885,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
 
       {missing.length > 0 ? (
         <div className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+          <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
             What could not be resolved
           </div>
           <div className="mt-1.5 space-y-0.5 text-[12.5px] text-muted-foreground">
@@ -899,7 +899,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
       ) : null}
 
       {detail.input_fingerprint ? (
-        <div className="mt-4 border-t border-border pt-2 text-[11px] text-muted-foreground">
+        <div className="mt-4 border-t border-border pt-2 text-caption text-muted-foreground">
           Computed {detail.computed_at ? new Date(detail.computed_at).toLocaleString("en-IN") : EM_DASH} ·
           fingerprint {detail.input_fingerprint.slice(0, 12)}…
         </div>
@@ -942,7 +942,7 @@ function TradesTab({
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-[0.05em] text-muted-foreground">
+              <tr className="border-b border-border text-left text-caption uppercase tracking-[0.05em] text-muted-foreground">
                 <th className="px-3 pb-2 font-medium">Symbol</th>
                 <th className="px-3 pb-2 font-medium">Side</th>
                 <th className="px-3 pb-2 text-right font-medium">Net P&amp;L</th>
@@ -967,13 +967,13 @@ function TradesTab({
                   >
                     <td className="px-3 py-2 font-medium">{r.symbol}</td>
                     <td className="px-3 py-2 text-muted-foreground">{r.side}</td>
-                    <td className={`px-3 py-2 text-right font-bold tabular-nums ${TONE_TEXT[r.pnlTone]}`}>
+                    <td className={`px-3 py-2 text-right font-semibold tabular-nums ${TONE_TEXT[r.pnlTone]}`}>
                       {money(r.netPnl)}
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${TONE_TEXT[r.pnlTone]}`}>
                       {pct(r.netReturnPct)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                    <td className="px-3 py-2 text-right tabular-nums text-gain">
                       {r.mfePct == null ? EM_DASH : `${r.mfePct.toFixed(2)}%`}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-destructive">
@@ -1137,7 +1137,7 @@ export default function AnalyticsPanel() {
               <button
                 type="button"
                 onClick={() => setShowFilters((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition hover:text-foreground"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground"
               >
                 <Filter size={13} />
                 Filters
@@ -1147,7 +1147,7 @@ export default function AnalyticsPanel() {
                 type="button"
                 onClick={() => void load()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-50"
               >
                 <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
                 Refresh
@@ -1156,7 +1156,7 @@ export default function AnalyticsPanel() {
           }
         />
 
-        <div className="mt-3 rounded-xl bg-muted/40 px-3.5 py-2.5 text-[12.5px] text-muted-foreground">
+        <div className="mt-3 rounded-md bg-muted/40 px-3.5 py-2.5 text-[12.5px] text-muted-foreground">
           {scopeNote(counts, summary?.attribution_coverage)}
         </div>
 
@@ -1170,7 +1170,7 @@ export default function AnalyticsPanel() {
                 value={fStrategy}
                 onChange={(e) => setFStrategy(e.target.value)}
                 placeholder="any"
-                className="w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]"
+                className="w-full rounded-xl border border-border bg-card px-2.5 py-1.5 text-[12.5px]"
               />
             </label>
             <label className="text-[11.5px]">
@@ -1181,7 +1181,7 @@ export default function AnalyticsPanel() {
                 value={fSymbol}
                 onChange={(e) => setFSymbol(e.target.value)}
                 placeholder="any"
-                className="w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]"
+                className="w-full rounded-xl border border-border bg-card px-2.5 py-1.5 text-[12.5px]"
               />
             </label>
             <label className="text-[11.5px]">
@@ -1232,7 +1232,7 @@ export default function AnalyticsPanel() {
       {error ? <ErrorBox>{error}</ErrorBox> : null}
 
       {summary == null ? (
-        <div className="py-10 text-center text-[13px] text-muted-foreground">
+        <div className="py-10 text-center text-body text-muted-foreground">
           Loading attribution…
         </div>
       ) : (

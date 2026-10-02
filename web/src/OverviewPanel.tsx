@@ -1,37 +1,34 @@
 import { PnlCalendar } from "./components/ui/pnl-calendar";
-import { AlertTriangle, ChevronRight, RefreshCw, Shield } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { IconChevR } from "./icons";
 import { useCallback, useEffect, useState } from "react";
 import {
   getDashboardSummary,
-  getForwardEvidenceCounts,
   getHealth,
   getPositions,
-  getRiskStatus,
   getRunnerStatus,
   getTradeSignals,
   listDeployments,
   type DashboardSummary,
   type Deployment,
-  type ForwardEvidenceCounts,
   type Health,
   type Position,
-  type RiskStatus,
   type RunnerStatus,
   type TradeSignalsResponse,
 } from "./api";
+import { Button } from "./components/ui/button";
+import { Tooltip } from "./components/motion/tooltip";
+import { Card, Hint } from "./components/ui/card";
+import { AnimatedBadge } from "./components/motion/animated-badge";
+import { TiltCard } from "./components/motion/tilt-card";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
+import { formatInr as inrFmt, TYPOGRAPHY } from "./lib/theme";
 
 interface Props {
   onNavigate: (tab: string) => void;
 }
-
-const inrFmt = (n: number | null | undefined): string => {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  const sign = n < 0 ? "-" : "";
-  return `${sign}₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-};
 
 // ─── Status Badges ────────────────────────────────────────────────────────────
 type StatusType = "HEALTHY" | "WARNING" | "STALE" | "ERROR" | "NOT_ACTIVE";
@@ -42,10 +39,8 @@ export default function OverviewPanel({ onNavigate }: Props) {
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [positions, setPositions] = useState<Position[] | null>(null);
-  const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [signals, setSignals] = useState<TradeSignalsResponse | null>(null);
-  const [forwardCounts, setForwardCounts] = useState<ForwardEvidenceCounts | null>(null);
 
   const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,10 +61,8 @@ export default function OverviewPanel({ onNavigate }: Props) {
         apply(getRunnerStatus(), setRunner),
         apply(getDashboardSummary(), setSummary),
         apply(getPositions(), setPositions),
-        apply(getRiskStatus(), setRisk),
         apply(listDeployments(), (v) => setDeployments(v?.deployments ?? [])),
         apply(getTradeSignals(), setSignals),
-        apply(getForwardEvidenceCounts(), setForwardCounts),
       ]);
 
       const now = new Date();
@@ -94,27 +87,30 @@ export default function OverviewPanel({ onNavigate }: Props) {
 
   // Derived Values
   const openPosCount = summary?.positions?.count ?? positions?.length ?? 0;
-  const dayPnl = summary?.positions?.day_pnl ?? null;
-  const dayPnlPct = summary?.positions?.day_pnl_pct ?? null;
-  const investedCapital = summary?.positions?.invested ?? null;
-  const grossExposurePct =
-    risk?.limits?.capital && investedCapital !== null
-      ? (investedCapital / risk.limits.capital) * 100
-      : null;
+  // `total_day_pnl` folds in whatever was already realized by closing a
+  // position earlier today — `day_pnl` alone only prices what is *still*
+  // open, so a trade opened and closed for a profit today used to vanish
+  // from "Today" the moment it was flattened.
+  const dayPnl = summary?.positions?.total_day_pnl ?? summary?.positions?.day_pnl ?? null;
+  // The backend's percentage is unrealized-P&L-over-invested-capital, which
+  // is meaningless once nothing is left open (it reads 0.00% next to a real
+  // non-zero rupee figure) — so it only makes sense to show alongside an
+  // actual open book.
+  const dayPnlPct = openPosCount > 0 ? (summary?.positions?.day_pnl_pct ?? null) : null;
 
   // Market hours determination
   const isMarketHours = runner?.in_market_hours ?? true;
+  // A healthy socket only means our backend and the broker bridge are up. When
+  // the market itself is closed there are no live prices to stream, so the
+  // light must not claim "Streaming" next to a "Market Closed" light.
   const feedStatus: StatusType =
-    wsConnected && bridgeActive ? "HEALTHY" : wsConnected ? "WARNING" : "ERROR";
+  !isMarketHours ? "NOT_ACTIVE" : wsConnected && bridgeActive ? "HEALTHY" : wsConnected ? "WARNING" : "ERROR";
   const brokerStatus: StatusType = health?.session_active ? "HEALTHY" : "ERROR";
 
   const tradingOn: boolean | null = health ? !health.kill_switch : null;
   const runningDeployments = deployments.filter((d) => d.status === "RUNNING");
   const runningPnl = runningDeployments.reduce((acc, d) => acc + (d.pnl?.total_pnl ?? 0), 0);
   const waiting = (signals?.signals ?? []).filter((s) => s.status === "PENDING");
-  const forwardTotal = forwardCounts?.total_genuine_forward ?? 0;
-  const drawdown = summary?.performance?.current_drawdown_pct ?? 0;
-  const inUsePct = grossExposurePct ?? 0;
 
   // `runner.running` only means the background loop is alive, not that anything
   // is being traded. Say what it is actually doing, in order of what blocks it.
@@ -136,7 +132,7 @@ export default function OverviewPanel({ onNavigate }: Props) {
   const lights: { key: string; label: string; status: StatusType; word: string }[] = [
     { key: "market", label: "Market", status: isMarketHours ? "HEALTHY" : "NOT_ACTIVE", word: isMarketHours ? "Open" : "Closed" },
     { key: "broker", label: "Broker", status: health ? brokerStatus : "NOT_ACTIVE", word: !health ? "Checking…" : health.session_active ? "Connected" : "Offline" },
-    { key: "prices", label: "Live prices", status: feedStatus, word: feedStatus === "HEALTHY" ? "Streaming" : feedStatus === "WARNING" ? "Waiting" : "Off" },
+    { key: "prices", label: "Live prices", status: feedStatus, word: !isMarketHours ? "Market closed" : feedStatus === "HEALTHY" ? "Streaming" : feedStatus === "WARNING" ? "Waiting" : "Off" },
     { key: "auto", label: "Strategies", status: auto.status, word: auto.word },
   ];
 
@@ -149,154 +145,127 @@ export default function OverviewPanel({ onNavigate }: Props) {
     todo.push({ id: "prices", tone: "warn", text: "Live prices are off right now." });
   }
 
-  const pnlTone = dayPnl === null ? "text-muted-foreground" : dayPnl > 0 ? "text-emerald-500" : dayPnl < 0 ? "text-rose-500" : "text-foreground";
-  const ringTone = inUsePct >= 90 ? "stroke-rose-500" : inUsePct >= 70 ? "stroke-amber-500" : "stroke-primary";
+  const pnlTone = dayPnl === null ? "text-muted-foreground" : dayPnl > 0 ? "text-gain" : dayPnl < 0 ? "text-loss" : "text-foreground";
 
   return (
-    <div className="space-y-4 pb-12">
-      {/* Refresh: the only chrome above the content. The mode is already the app-wide
-          banner at the top of every page, so it is not repeated here. */}
-      <div className="flex items-center justify-end">
-        <button
+    <div className="space-y-6 pb-12">
+      {/* Hero: mesh backdrop, headline + actions in one row, session status docked
+ to its footer. One surface, one reading path. */}
+      <section className="gradient-mesh overflow-hidden rounded-[20px] border border-border">
+        <div className="px-6 pt-6 sm:px-8">
+          <div className="flex items-center justify-between gap-3">
+          <p className="text-micro font-normal uppercase tracking-[0.1px] text-muted-foreground">Forward &middot; Paper trading</p>
+          <Tooltip content={lastRefreshedAt ? `Updated ${lastRefreshedAt}` : "Refresh"} side="bottom" delay={400}>
+              <Button
+                variant="outline"
+                size="icon"
           onClick={() => loadData(true)}
           disabled={refreshing}
-          title={lastRefreshedAt ? `Updated ${lastRefreshedAt}` : "Refresh"}
           aria-label="Refresh"
-          className="grid size-8 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground"
+                className="size-8 rounded-lg border-border bg-card/60 text-muted-foreground backdrop-blur-sm hover:text-foreground"
         >
           <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-        </button>
+              </Button>
+            </Tooltip>
       </div>
+          <div className="flex flex-col gap-5 pb-7 pt-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-[600px]">
+            <h1 className="max-w-[640px] text-display text-foreground sm:text-5xl sm:leading-[1.15] sm:tracking-[-0.96px]">How am I doing today?</h1>
+            <p className="mt-2 max-w-[520px] text-base font-light leading-[1.4] text-muted-foreground">Live prices, open trades, and proof on prices the strategy has never seen &mdash; in one quiet ledger.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:pb-1">
+            <Button variant="primary" size="md" onClick={() => onNavigate("strategies")}>Start a strategy</Button>
+            </div>
+          </div>
+        </div>
+        {/* Refresh lives in the hero eyebrow row, so it never owns a row alone. */}
 
-      {/* Status strip: four lights instead of a table of rows. */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border lg:grid-cols-4">
+        {/* Status strip docked to the hero footer: the four things that decide
+ whether the app can do its job, read as one surface with the hero. */}
+        <div className="grid grid-cols-2 gap-px border-t border-border bg-border/80 lg:grid-cols-4 dark:bg-white/10">
         {lights.map((l) => (
-          <div key={l.key} className="flex items-center gap-3 bg-card px-5 py-4">
+          <div key={l.key} className="flex items-center gap-3 bg-white/85 px-6 py-3.5 backdrop-blur-sm dark:bg-card/80">
             <span className="relative grid size-3 place-items-center">
               {l.status === "HEALTHY" && (
-                <span className="absolute inline-flex size-3 animate-ping rounded-full bg-emerald-500/40" />
+                  <span className="absolute inline-flex size-2.5 animate-ping rounded-full bg-gain/20" />
               )}
               <span
                 className={cn(
-                  "relative size-2.5 rounded-full",
-                  l.status === "HEALTHY" ? "bg-emerald-500" : l.status === "NOT_ACTIVE" ? "bg-muted-foreground/40" : l.status === "WARNING" ? "bg-amber-500" : "bg-rose-500",
+                    "relative size-2 rounded-full ring-2 ring-card",
+                    l.status === "HEALTHY"
+                      ? "bg-gain"
+                      : l.status === "NOT_ACTIVE"
+                        ? "bg-muted-foreground/30"
+                        : l.status === "WARNING"
+                          ? "bg-warning"
+                          : "bg-destructive",
                 )}
               />
             </span>
             <div className="min-w-0">
-              <div className="text-[13px] font-medium text-foreground">{l.label}</div>
+                <div className="text-body font-medium text-foreground">{l.label}</div>
               <div className="truncate text-xs text-muted-foreground">{l.word}</div>
             </div>
           </div>
         ))}
       </div>
+      </section>
 
-      {/* Three big answers: how am I doing, how much is at work, is trading on. */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <button
-          type="button"
+      {/* Today, full width: the one answer the dashboard leads with. */}
+      <TiltCard
           onClick={() => onNavigate("trading")}
-          className="rounded-2xl border border-border bg-card p-5 text-left transition-colors hover:border-foreground/20"
+        className="cursor-pointer rounded-xl border border-border bg-white p-6 text-left shadow-[rgba(0,55,112,0.08)_0_1px_3px] transition-colors hover:border-primary/40 sm:p-7 dark:bg-card"
         >
-          <div className="text-xs text-muted-foreground">Today</div>
-          <div className={cn("mt-3 text-4xl font-semibold tracking-tight tabular-nums", pnlTone)}>
+        <div className="flex h-full flex-col justify-between gap-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className={TYPOGRAPHY.eyebrow}>Today</div>
+            <span className="flex items-center gap-0.5 text-xs font-medium text-primary dark:text-primary-subdued">Open trading <IconChevR size={12} /></span>
+          </div>
+          <div>
+            <div className={cn(TYPOGRAPHY.metricHero, pnlTone)}>
             {dayPnl === null ? "—" : `${dayPnl > 0 ? "+" : ""}${inrFmt(dayPnl)}`}
           </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            {dayPnl === null
-              ? "Nothing to report yet"
-              : `${dayPnlPct !== null ? `${dayPnlPct > 0 ? "+" : ""}${dayPnlPct.toFixed(2)}% · ` : ""}${openPosCount} open ${openPosCount === 1 ? "trade" : "trades"}`}
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border/60 pt-4">
+              <div>
+              <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Day P&amp;L</div>
+              <div className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{dayPnlPct !== null ? `${dayPnlPct > 0 ? "+" : ""}${dayPnlPct.toFixed(2)}%` : "—"}</div>
           </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate("risk")}
-          className="flex items-center gap-5 rounded-2xl border border-border bg-card p-5 text-left transition-colors hover:border-foreground/20"
-        >
-          <div className="relative size-20 shrink-0">
-            <svg viewBox="0 0 100 100" className="size-20 -rotate-90">
-              <circle cx="50" cy="50" r="42" fill="none" strokeWidth="9" className="stroke-muted" />
-              <circle
-                cx="50"
-                cy="50"
-                r="42"
-                fill="none"
-                strokeWidth="9"
-                strokeLinecap="round"
-                strokeDasharray={`${(2 * Math.PI * 42 * Math.min(Math.max(inUsePct, 0), 100)) / 100} ${2 * Math.PI * 42}`}
-                className={cn("transition-all duration-500", ringTone)}
-              />
-            </svg>
-            <div className="absolute inset-0 grid place-items-center text-base font-semibold tabular-nums">
-              {Math.round(inUsePct)}%
+              <div>
+              <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Open trades</div>
+              <div className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{openPosCount}</div>
             </div>
           </div>
-          <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Money in use</div>
-            <div className="mt-1 text-sm font-medium text-foreground">
-              {investedCapital ? inrFmt(investedCapital) : "Nothing invested"}
-            </div>
-            {risk?.limits?.capital ? (
-              <div className="text-xs text-muted-foreground">of {inrFmt(risk.limits.capital)}</div>
-            ) : null}
-            {drawdown < 0 ? (
-              <div className="mt-1 text-xs text-rose-500">Down {Math.abs(drawdown).toFixed(1)}% from peak</div>
-            ) : null}
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate("risk")}
-          className="flex items-center gap-4 rounded-2xl border border-border bg-card p-5 text-left transition-colors hover:border-foreground/20 md:col-span-2 xl:col-span-1"
-        >
-          <span
-            className={cn(
-              "grid size-14 shrink-0 place-items-center rounded-2xl",
-              tradingOn === null ? "bg-muted text-muted-foreground" : tradingOn ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500",
-            )}
-          >
-            {tradingOn === false ? <AlertTriangle className="size-7" /> : <Shield className="size-7" />}
-          </span>
-          <div>
-            <div className="text-xs text-muted-foreground">Trading</div>
-            <div className="mt-1 text-xl font-semibold tracking-tight">
-              {tradingOn === null ? "Checking…" : tradingOn ? "On" : "Paused"}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {tradingOn === null ? "\u00a0" : tradingOn ? "Safety switch is off" : "Safety switch is on"}
             </div>
           </div>
-        </button>
-      </div>
+      </TiltCard>
 
       {/* Only when something needs a person. */}
       {todo.length > 0 ? (
-        <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+        <Card className="divide-y divide-border overflow-hidden">
           {todo.map((t) => (
             <div key={t.id} className="flex items-center justify-between gap-4 px-5 py-3.5">
               <div className="flex items-center gap-3 text-sm">
-                <span className={cn("size-2 shrink-0 rounded-full", t.tone === "bad" ? "bg-rose-500" : "bg-amber-500")} />
+              <span className={cn("size-2 shrink-0 rounded-full", t.tone === "bad" ? "bg-loss" : "bg-warning")} />
                 {t.text}
               </div>
               {t.action ? (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => onNavigate(t.action!.tab)}
-                  className="shrink-0 rounded-full border border-border px-3 py-1 text-xs font-medium transition-colors hover:bg-muted"
+                  className="rounded-full"
                 >
                   {t.action.label}
-                </button>
+                </Button>
               ) : null}
             </div>
           ))}
-        </div>
+        </Card>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-5 md:grid-cols-2">
         {/* Strategies: a count, not a table. */}
-        <div className="rounded-2xl border border-border bg-card p-5">
+        <Card className="p-6">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Strategies running</span>
             <button
@@ -304,7 +273,7 @@ export default function OverviewPanel({ onNavigate }: Props) {
               onClick={() => onNavigate("paper")}
               className="flex items-center gap-0.5 text-xs text-primary hover:underline"
             >
-              {runningDeployments.length > 0 ? "Manage" : "Start one"} <ChevronRight className="size-3" />
+              {runningDeployments.length > 0 ? "Manage" : "Start one"} <IconChevR size={12} />
             </button>
           </div>
           <div className="mt-3 flex items-baseline gap-3">
@@ -313,7 +282,7 @@ export default function OverviewPanel({ onNavigate }: Props) {
               <span
                 className={cn(
                   "text-sm font-medium tabular-nums",
-                  runningPnl > 0 ? "text-emerald-500" : runningPnl < 0 ? "text-rose-500" : "text-muted-foreground",
+                  runningPnl > 0 ? "text-gain" : runningPnl < 0 ? "text-loss" : "text-muted-foreground",
                 )}
               >
                 {runningPnl > 0 ? "+" : ""}
@@ -321,13 +290,13 @@ export default function OverviewPanel({ onNavigate }: Props) {
               </span>
             ) : null}
           </div>
-          <div className="mt-2 text-xs text-muted-foreground">
+          <Hint className="mt-2">
             {runningDeployments.length > 0 ? "Practising with live prices" : "None yet"}
-          </div>
-        </div>
+          </Hint>
+        </Card>
 
         {/* Signals: who is waiting for a decision. */}
-        <div className="rounded-2xl border border-border bg-card p-5">
+        <Card className="p-6">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Signals waiting for you</span>
             <button
@@ -335,7 +304,7 @@ export default function OverviewPanel({ onNavigate }: Props) {
               onClick={() => onNavigate("signals")}
               className="flex items-center gap-0.5 text-xs text-primary hover:underline"
             >
-              Review <ChevronRight className="size-3" />
+              Review <IconChevR size={12} />
             </button>
           </div>
           <div className="mt-3 text-4xl font-semibold tracking-tight tabular-nums">{waiting.length}</div>
@@ -343,43 +312,28 @@ export default function OverviewPanel({ onNavigate }: Props) {
             <div className="mt-3 space-y-1.5">
               {waiting.slice(0, 3).map((s) => (
                 <div key={s.id} className="flex items-center gap-2.5 text-sm">
-                  <span
-                    className={cn(
-                      "w-11 rounded-full py-0.5 text-center text-[10px] font-semibold",
-                      s.action === "BUY" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500",
-                    )}
+                <AnimatedBadge
+                status={s.action === "BUY" ? "success" : "danger"}
+                size="sm"
                   >
                     {s.action === "BUY" ? "Buy" : "Sell"}
-                  </span>
+                  </AnimatedBadge>
                   <span className="font-medium">{s.symbol.replace("-EQ", "")}</span>
                   <span className="ml-auto tabular-nums text-muted-foreground">₹{s.entry_price.toFixed(2)}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-2 text-xs text-muted-foreground">Nothing waiting</div>
+            <Hint className="mt-2">Nothing waiting</Hint>
           )}
-        </div>
+        </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-5 xl:grid-cols-2">
         <PnlCalendar scope="paper" title="Paper trades, all strategies" note="Some paper results are sized at ₹1,00,000 a trade." />
         <PnlCalendar scope="real" title="My portfolio" note="Daily change in what you hold." />
       </div>
 
-      {/* Proof: a progress bar rather than a paragraph. */}
-      <div className="rounded-2xl border border-border bg-card p-5">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground">Real practice trades collected</span>
-          <span className="tabular-nums text-foreground">{forwardTotal} of 50</span>
-        </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-500"
-            style={{ width: `${Math.min((forwardTotal / 50) * 100, 100)}%` }}
-          />
-        </div>
-      </div>
     </div>
   );
 }

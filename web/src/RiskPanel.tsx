@@ -103,20 +103,20 @@ export default function RiskPanel() {
     <div className="space-y-4">
       <div
         className={cn(
-          "rounded-xl border p-4",
+          "rounded-md border p-4",
           on
             ? "border-destructive/50 bg-destructive/[0.07]"
-            : "border-emerald-500/40 bg-emerald-500/[0.06]",
+            : "border-gain/40 bg-gain/[0.06]",
         )}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span
               className={cn(
-                "grid size-10 place-items-center rounded-lg",
+                "grid size-10 place-items-center rounded-md",
                 on
                   ? "bg-destructive/15 text-destructive"
-                  : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+                  : "border border-gain/20 bg-gain/[0.08] text-gain",
               )}
             >
               {on ? <ShieldOff size={18} /> : <ShieldCheck size={18} />}
@@ -286,13 +286,13 @@ function Kpi({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl bg-muted/40 p-3.5">
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-md bg-muted/40 p-3.5">
+      <div className="flex items-center gap-1.5 text-caption uppercase tracking-wide text-muted-foreground">
         {icon}
         {label}
       </div>
       <div className="mt-1 text-xl font-medium tabular-nums">{value}</div>
-      {hint ? <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div> : null}
+      {hint ? <div className="mt-0.5 text-caption text-muted-foreground">{hint}</div> : null}
     </div>
   );
 }
@@ -302,9 +302,9 @@ function Row({ label, value, hint }: { label: string; value: string; hint?: stri
     <div className="flex items-baseline justify-between gap-3 border-b border-border/50 pb-2">
       <span className="text-[12.5px] text-muted-foreground">
         {label}
-        {hint ? <span className="ml-1.5 text-[11px] opacity-70">({hint})</span> : null}
+        {hint ? <span className="ml-1.5 text-caption opacity-70">({hint})</span> : null}
       </span>
-      <span className="text-[13px] font-medium tabular-nums">{value}</span>
+      <span className="text-body font-medium tabular-nums">{value}</span>
     </div>
   );
 }

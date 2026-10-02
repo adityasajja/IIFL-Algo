@@ -8,10 +8,10 @@ import {
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
-import { Switch } from "./components/ui/switch";
+import { Switch } from "./components/motion/switch";
 import { useToast } from "./components/ui/toast-context";
 import { formatIst } from "./lib/format";
 import { ChevronDown } from "lucide-react";
@@ -184,7 +184,7 @@ export default function BriefingPanel() {
         )}
         {message && (
           <div className="px-5 pb-5">
-            <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-background p-4 font-mono text-xs leading-relaxed">
+          <pre data-lenis-prevent className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-4 font-mono text-xs leading-relaxed">
               {message}
             </pre>
           </div>
@@ -205,16 +205,16 @@ export default function BriefingPanel() {
           <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", showAutomation && "rotate-180")} />
         </button>
         {showAutomation ? (
-          <div className="space-y-3 border-t border-border p-5 text-[13px]">
+          <div className="space-y-3 border-t border-border p-5 text-body">
             <div>
               <Hint>1 · Refresh data after the market closes (4 PM):</Hint>
-              <code className="mt-1 block overflow-x-auto rounded-xl border border-border bg-background p-3 font-mono text-xs">
+              <code className="mt-1 block overflow-x-auto rounded-lg border border-border bg-background p-3 font-mono text-xs">
                 {SYNC_CMD}
               </code>
             </div>
             <div>
               <Hint>2 · Send the brief before the market opens (8:45 AM):</Hint>
-              <code className="mt-1 block overflow-x-auto rounded-xl border border-border bg-background p-3 font-mono text-xs">
+              <code className="mt-1 block overflow-x-auto rounded-lg border border-border bg-background p-3 font-mono text-xs">
                 {BRIEF_CMD}
               </code>
             </div>

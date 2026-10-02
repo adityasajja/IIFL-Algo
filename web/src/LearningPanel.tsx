@@ -73,9 +73,9 @@ import {
 } from "./lib/learning-view";
 
 const TONE_CLASS: Record<Tone, string> = {
-  good: "text-emerald-500",
+  good: "text-gain",
   bad: "text-destructive",
-  warn: "text-amber-500",
+  warn: "text-warning",
   muted: "text-muted-foreground",
 };
 
@@ -92,21 +92,35 @@ export function LearningPanel() {
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      setOverview(await learningOverview(windowDays));
+      const [overviewRes, readinessRes] = await Promise.allSettled([
+        learningOverview(windowDays),
+        learningReadiness(),
+      ]);
+
+      if (overviewRes.status === "fulfilled") {
+        setOverview(overviewRes.value);
       setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "could not load the learning report");
+      } else {
+        setError(
+          overviewRes.reason instanceof Error
+            ? overviewRes.reason.message
+            : "could not load the learning report"
+        );
+      }
+
+      if (readinessRes.status === "fulfilled") {
+        setReadiness(readinessRes.value);
+        setReadinessError("");
+      } else {
+        setReadiness(null);
+        setReadinessError(
+          readinessRes.reason instanceof Error
+            ? readinessRes.reason.message
+            : "could not load readiness"
+        );
+      }
     } finally {
       setBusy(false);
-    }
-    // Readiness is a separate, cheaper read. A failure here must not take
-    // down the whole screen — the section says why it is missing instead.
-    try {
-      setReadiness(await learningReadiness());
-      setReadinessError("");
-    } catch (err) {
-      setReadiness(null);
-      setReadinessError(err instanceof Error ? err.message : "could not load readiness");
     }
   }, [windowDays]);
 
@@ -197,10 +211,10 @@ export function LearningPanel() {
 // ---------------------------------------------------------------------------
 
 const STATE_BADGE: Record<Tone, string> = {
-  good: "text-emerald-500 border-emerald-500/20 bg-emerald-500/10",
-  bad: "text-destructive border-destructive/20 bg-destructive/10",
-  warn: "text-amber-500 border-amber-500/20 bg-amber-500/10",
-  muted: "text-muted-foreground border-border/60 bg-muted/20",
+  good: "text-gain border-gain/20 bg-gain/[0.08]",
+  bad: "text-destructive border-destructive/20 bg-destructive/[0.08]",
+  warn: "text-warning border-warning/20 bg-warning/[0.08]",
+  muted: "text-muted-foreground border-border/60 bg-muted/40",
 };
 
 function bandTotals(strategies: ReadinessStrategy[]): { band: string; trades: number }[] {
@@ -227,7 +241,7 @@ function ReadinessSection({
     return (
       <Card className="p-5">
         <h3 className="text-sm font-semibold tracking-tight">Learning Readiness</h3>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Readiness is unavailable: {error}. The rest of this screen is unaffected.
         </p>
       </Card>
@@ -257,41 +271,41 @@ function ReadinessSection({
         <h3 className="text-sm font-semibold tracking-tight">Learning Readiness</h3>
         <Badge>research only — changes nothing</Badge>
       </div>
-      <p className="mt-1 text-[12px] text-muted-foreground">
+      <p className="mt-1 text-xs text-muted-foreground">
         Whether each strategy is accumulating enough genuine forward evidence for
         analysis. States are labels, not actions: nothing here pauses trading,
         edits a strategy, or touches risk.
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Strategies tracked</div>
+        <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+        <div className="text-caption uppercase tracking-wide text-muted-foreground">Strategies tracked</div>
           <div className="mt-1 text-lg font-semibold tabular-nums">
             <NumberTicker value={totals.strategies} />
           </div>
-          <div className="text-[10px] text-muted-foreground">{totals.forward} forward trades</div>
+          <div className="text-micro text-muted-foreground">{totals.forward} forward trades</div>
         </div>
         {states.map((s) => (
-          <div key={s.label} className="rounded-xl border border-border/60 bg-muted/20 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</div>
+          <div key={s.label} className="rounded-lg border border-border/60 bg-muted/20 p-3">
+          <div className="text-caption uppercase tracking-wide text-muted-foreground">{s.label}</div>
             <div className={`mt-1 text-lg font-semibold tabular-nums ${TONE_CLASS[s.tone]}`}>
               <NumberTicker value={s.count} />
             </div>
-            <div className="text-[10px] text-muted-foreground">strategies</div>
+            <div className="text-micro text-muted-foreground">strategies</div>
           </div>
         ))}
       </div>
 
       {readiness.strategies.length === 0 ? (
-        <div className="mt-4 rounded-lg border border-dashed border-border/60 p-4 text-center text-[12px] text-muted-foreground">
+        <div className="mt-4 rounded-md border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
           No forward evidence yet. The first closed paper trade starts the count;
           10 clears the minimum, 50 opens analysis.
         </div>
       ) : (
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-[12px]">
+          <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-border/60 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-border/60 text-left text-micro uppercase tracking-wider text-muted-foreground">
                 <th className="px-2 py-1.5 font-medium">Strategy</th>
                 <th className="px-2 py-1.5 font-medium">Forward trades</th>
                 <th className="px-2 py-1.5 font-medium">Next gate</th>
@@ -307,7 +321,7 @@ function ReadinessSection({
                   <tr key={row.id} className="border-b border-border/40 last:border-0">
                     <td className="px-2 py-1.5">
                       <div className="font-medium text-foreground">{row.name}</div>
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-micro text-muted-foreground">
                         {row.version}
                         {s.deployment ? ` · ${s.deployment.mode} ${s.deployment.status}` : ""}
                         {s.open_forward_trades > 0 ? ` · ${s.open_forward_trades} open` : ""}
@@ -318,7 +332,7 @@ function ReadinessSection({
                       <span className={TONE_CLASS[row.gateTone]}>{row.gate}</span>
                     </td>
                     <td className="px-2 py-1.5">
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATE_BADGE[row.stateTone]}`}>
+                    <span className={`rounded-full border px-2 py-0.5 text-micro font-medium uppercase tracking-wider ${STATE_BADGE[row.stateTone]}`}>
                         {row.stateLabel}
                       </span>
                     </td>
@@ -334,17 +348,17 @@ function ReadinessSection({
 
       {bands.length > 0 ? (
         <div className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="text-caption font-medium uppercase tracking-wide text-muted-foreground">
             Context score evidence
           </div>
           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {bands.map((b) => (
-              <div key={b.band} className="rounded-xl border border-border/60 bg-muted/20 p-3">
-                <div className="text-[11px] text-muted-foreground">Score {b.band.replace("-", "–")}</div>
+              <div key={b.band} className="rounded-lg border border-border/60 bg-muted/20 p-3">
+              <div className="text-caption text-muted-foreground">Score {b.band.replace("-", "–")}</div>
                 <div className="mt-1 text-lg font-semibold tabular-nums">
                   <NumberTicker value={b.trades} />
                 </div>
-                <div className="text-[10px] text-muted-foreground">forward trades</div>
+                <div className="text-micro text-muted-foreground">forward trades</div>
               </div>
             ))}
           </div>
@@ -353,10 +367,10 @@ function ReadinessSection({
 
       {readiness.strategies.map((s) => (
         <details key={s.strategy_id} className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-          <summary className="cursor-pointer text-[12px] font-medium text-foreground">
+          <summary className="cursor-pointer text-xs font-medium text-foreground">
             {s.strategy_name} — evidence detail
           </summary>
-          <div className="mt-2 space-y-2 text-[12px] text-muted-foreground">
+          <div className="mt-2 space-y-2 text-xs text-muted-foreground">
             {s.state_reasons.map((reason, i) => (
               <p key={i}>• {reason}</p>
             ))}
@@ -423,12 +437,12 @@ function ReadinessSection({
           {readiness.quality_issues.map((q) => (
             <div
               key={q.code}
-              className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-500"
+              className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/[0.08] px-3 py-2 text-xs text-warning"
             >
               <AlertTriangle className="size-4 shrink-0" />
               <span>
                 <strong>{q.code}</strong> ×{q.count} ({q.severity}) — {q.explanation}{" "}
-                <span className="font-mono text-[11px]">{q.sample_refs.join(", ")}</span>
+                <span className="font-mono text-caption">{q.sample_refs.join(", ")}</span>
               </span>
             </div>
           ))}
@@ -436,7 +450,7 @@ function ReadinessSection({
       ) : null}
 
       {(readiness.limitations || []).length > 0 ? (
-        <div className="mt-3 text-[11px] text-muted-foreground">
+        <div className="mt-3 text-caption text-muted-foreground">
           {readiness.limitations.map((note, i) => (
             <p key={i}>• {note}</p>
           ))}
@@ -472,7 +486,7 @@ function Header({
             <FlaskConical className="size-4 text-muted-foreground" />
             <h2 className="text-base font-semibold tracking-tight">Learning</h2>
           </div>
-          <p className="mt-1.5 text-[13px] text-muted-foreground">
+          <p className="mt-1.5 text-body text-muted-foreground">
             What your past trades say about your strategies. Read only.
           </p>
         </div>
@@ -530,8 +544,8 @@ function Header({
 
       <EvidenceStrip summary={overview.dataset} />
 
-      <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-2.5">
-        <p className={`text-[13px] ${TONE_CLASS[report.tone]}`}>{report.text}</p>
+      <div className="mt-4 rounded-lg border border-border/60 bg-muted/30 px-3.5 py-2.5">
+        <p className={`text-body ${TONE_CLASS[report.tone]}`}>{report.text}</p>
       </div>
     </Card>
   );
@@ -551,16 +565,16 @@ function EvidenceStrip({ summary }: { summary: LearningDatasetSummary }) {
   const evidence = evidenceView(summary);
 
   return (
-    <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3">
+    <div className="mt-4 rounded-lg border border-border/60 bg-muted/30 px-3.5 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          <span className="text-caption uppercase tracking-wide text-muted-foreground">
             How much is proven
           </span>
           <Badge>{evidence.gradeLabel}</Badge>
         </div>
       </div>
-      <p className={`mt-1.5 text-[13px] ${TONE_CLASS[evidence.tone]}`}>{evidence.note}</p>
+      <p className={`mt-1.5 text-body ${TONE_CLASS[evidence.tone]}`}>{evidence.note}</p>
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Figure label="Total" value={<NumberTicker value={evidence.total} locale />} />
         <Figure
@@ -592,10 +606,10 @@ function sourceLine(overview: LearningOverview): string {
 
 function Figure({ label, value, sub }: { label: string; value: ReactNode; sub?: string }) {
   return (
-    <div className="rounded-xl border border-border/60 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="rounded-lg border border-border/60 px-3 py-2">
+      <div className="text-caption uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-lg tabular-nums">{value}</div>
-      {sub ? <div className="text-[11px] text-muted-foreground">{sub}</div> : null}
+      {sub ? <div className="text-caption text-muted-foreground">{sub}</div> : null}
     </div>
   );
 }
@@ -611,8 +625,8 @@ function EmptyBook({ state }: { state: ReturnType<typeof emptyState> }) {
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div>
           <h3 className="text-sm font-medium">{state.title}</h3>
-          <p className="mt-1 text-[13px] text-muted-foreground">{state.detail}</p>
-          <p className="mt-2 text-[13px] text-muted-foreground">
+          <p className="mt-1 text-body text-muted-foreground">{state.detail}</p>
+          <p className="mt-2 text-body text-muted-foreground">
             Nothing on this screen is a zero. A figure that could not be measured
             is left blank and named, because a printed zero reads as a result.
           </p>
@@ -635,7 +649,7 @@ function MissingFeatures({ missing }: { missing: Record<string, string> }) {
       />
       <ul className="mt-3 space-y-2">
         {entries.map(([feature, reason]) => (
-          <li key={feature} className="flex items-start gap-2 text-[13px]">
+          <li key={feature} className="flex items-start gap-2 text-body">
             <Badge>{feature}</Badge>
             <span className="text-muted-foreground">{reason}</span>
           </li>
@@ -658,10 +672,10 @@ function DriftSection({ drift }: { drift: LearningDrift }) {
         sub="Whether the strategy is doing live what it did in testing"
         action={<Badge>{drift.strategy}</Badge>}
       />
-      <p className={`mt-3 text-[13px] ${TONE_CLASS[tone]}`}>{drift.headline}</p>
+      <p className={`mt-3 text-body ${TONE_CLASS[tone]}`}>{drift.headline}</p>
 
       {isRefusal(drift.headline) ? (
-        <ul className="mt-3 space-y-1 text-[13px] text-muted-foreground">
+        <ul className="mt-3 space-y-1 text-body text-muted-foreground">
           {drift.limitations.map((l) => (
             <li key={l}>— {l}</li>
           ))}
@@ -682,19 +696,19 @@ function DriftSection({ drift }: { drift: LearningDrift }) {
 
       {drift.findings.length ? (
         <div className="mt-4">
-          <h4 className="text-[13px] font-medium">Findings</h4>
+          <h4 className="text-body font-medium">Findings</h4>
           <ul className="mt-2 space-y-2">
             {findingViews(orderFindings(drift.findings)).map((f, i) => (
               <li
                 key={`${f.kind}-${i}`}
-                className="rounded-xl border border-border/60 px-3.5 py-2.5"
+                className="rounded-lg border border-border/60 px-3.5 py-2.5"
               >
-                <p className={`text-[13px] ${TONE_CLASS[f.tone]}`}>{f.statement}</p>
+                <p className={`text-body ${TONE_CLASS[f.tone]}`}>{f.statement}</p>
                 {f.evidence ? (
-                  <p className="mt-0.5 text-[12px] text-muted-foreground">{f.evidence}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{f.evidence}</p>
                 ) : null}
                 {f.confidence ? (
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-caption text-muted-foreground">
                     confidence {f.confidence}
                     {f.sample ? ` · n=${f.sample}` : ""}
                   </p>
@@ -714,14 +728,14 @@ function PairTable({ pair }: { pair: DriftPair }) {
   return (
     <div className="mt-4">
       <div className="flex items-center justify-between">
-        <h4 className="text-[13px] font-medium">
+        <h4 className="text-body font-medium">
           {pair.reference} ({pair.reference_n}) vs {pair.comparison} ({pair.comparison_n})
         </h4>
         <Badge>{pair.status}</Badge>
       </div>
 
       <div className="mt-2 overflow-x-auto">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-xs">
           <thead className="text-left text-muted-foreground">
             <tr className="border-b border-border/60">
               <th className="py-1.5 pr-3 font-normal">metric</th>
@@ -767,13 +781,13 @@ function PairTable({ pair }: { pair: DriftPair }) {
       </div>
 
       {blocked.length ? (
-        <div className="mt-2 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-2.5">
-          <p className="text-[12px] text-muted-foreground">
+        <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 px-3.5 py-2.5">
+          <p className="text-xs text-muted-foreground">
             {blocked.length} metric(s) were recorded on both sides but the samples
             are too small to score. These are <strong>not measured</strong>, which
             is not the same as unchanged:
           </p>
-          <ul className="mt-1 space-y-0.5 text-[12px] text-muted-foreground">
+          <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
             {blocked.map((m) => (
               <li key={m.metric}>— {m.label}: {m.reason}</li>
             ))}
@@ -782,7 +796,7 @@ function PairTable({ pair }: { pair: DriftPair }) {
       ) : null}
 
       {unrecorded.length ? (
-        <p className="mt-2 text-[12px] text-muted-foreground">
+        <p className="mt-2 text-xs text-muted-foreground">
           {unrecorded.length} metric(s) were never recorded by one of the sources:{" "}
           {unrecorded.map((m) => m.label).join(", ")}. A missing column is a gap in
           the record, not a null result.
@@ -790,7 +804,7 @@ function PairTable({ pair }: { pair: DriftPair }) {
       ) : null}
 
       {typeof pair.regime?.summary === "string" ? (
-        <p className="mt-2 text-[12px] text-muted-foreground">
+        <p className="mt-2 text-xs text-muted-foreground">
           Regime mix: {String(pair.regime.summary)}
         </p>
       ) : null}
@@ -816,7 +830,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
       {analysis.caveats.length ? (
         <ul className="mt-3 space-y-1">
           {analysis.caveats.map((c) => (
-            <li key={c} className="flex items-start gap-1.5 text-[12px] text-amber-500">
+            <li key={c} className="flex items-start gap-1.5 text-xs text-warning">
               <AlertTriangle className="mt-0.5 size-3 shrink-0" />
               {c}
             </li>
@@ -825,7 +839,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
       ) : null}
 
       {analysis.notable.length === 0 ? (
-        <p className="mt-3 text-[13px] text-muted-foreground">
+        <p className="mt-3 text-body text-muted-foreground">
           No bucket separated from its baseline after the multiple-comparisons
           correction. That is the expected result on a small sample, and it is
           reported rather than filled with the best-looking bucket.
@@ -835,18 +849,18 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
       {analysis.breakdowns.map((bd) => (
         <div key={bd.axis} className="mt-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-[13px] font-medium">{bd.label}</h4>
-            <span className="text-[11px] text-muted-foreground">
+            <h4 className="text-body font-medium">{bd.label}</h4>
+            <span className="text-caption text-muted-foreground">
               coverage {coverageLabel(bd)}
             </span>
           </div>
           {bd.buckets.length === 0 ? (
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               No trade in the sample carries a value for this axis.
             </p>
           ) : (
             <div className="mt-2 overflow-x-auto">
-              <table className="w-full text-[12px]">
+              <table className="w-full text-xs">
                 <thead className="text-left text-muted-foreground">
                   <tr className="border-b border-border/60">
                     <th className="py-1.5 pr-3 font-normal">bucket</th>
@@ -869,7 +883,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
                       <td className="py-1.5 pr-3 text-right tabular-nums">
                         {b.winRate}
                         {b.winRateCi ? (
-                          <span className="ml-1 text-[10px] text-muted-foreground">
+                          <span className="ml-1 text-micro text-muted-foreground">
                             {b.winRateCi}
                           </span>
                         ) : null}
@@ -883,15 +897,15 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
                       </td>
                       <td className="py-1.5 pr-3">
                         {b.sampleAdequacy === "adequate" ? (
-                          <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+                          <span className="rounded-md border border-gain/20 bg-gain/[0.08] px-1.5 py-0.5 text-micro font-medium text-gain">
                             Adequate
                           </span>
                         ) : b.sampleAdequacy === "small_sample" ? (
-                          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">
+                          <span className="rounded-md border border-warning/20 bg-warning/[0.08] px-1.5 py-0.5 text-micro font-medium text-warning">
                             Small Sample
                           </span>
                         ) : (
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                             Suppressed
                           </span>
                         )}
@@ -917,7 +931,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
       ))}
 
       {starved.length ? (
-        <p className="mt-3 text-[12px] text-muted-foreground">
+        <p className="mt-3 text-xs text-muted-foreground">
           {starved.length} axis/axes produced no judgeable bucket:{" "}
           {starved.map((s) => s.axis).join(", ")}.
         </p>
@@ -946,7 +960,7 @@ function BacktestVsForwardSection({
         }
       />
       {comparison.limitations.length ? (
-        <ul className="mt-3 space-y-1 text-[13px] text-muted-foreground">
+        <ul className="mt-3 space-y-1 text-body text-muted-foreground">
           {comparison.limitations.map((l) => (
             <li key={l}>— {l}</li>
           ))}
@@ -959,19 +973,19 @@ function BacktestVsForwardSection({
 
       {comparison.findings.length ? (
         <div className="mt-4">
-          <h4 className="text-[13px] font-medium">Forward Drift Findings</h4>
+          <h4 className="text-body font-medium">Forward Drift Findings</h4>
           <ul className="mt-2 space-y-2">
             {findingViews(orderFindings(comparison.findings)).map((f, i) => (
               <li
                 key={`${f.kind}-${i}`}
-                className="rounded-xl border border-border/60 px-3.5 py-2.5"
+                className="rounded-lg border border-border/60 px-3.5 py-2.5"
               >
-                <p className={`text-[13px] ${TONE_CLASS[f.tone]}`}>{f.statement}</p>
+                <p className={`text-body ${TONE_CLASS[f.tone]}`}>{f.statement}</p>
                 {f.evidence ? (
-                  <p className="mt-0.5 text-[12px] text-muted-foreground">{f.evidence}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{f.evidence}</p>
                 ) : null}
                 {f.confidence ? (
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-caption text-muted-foreground">
                     confidence {f.confidence}
                     {f.sample ? ` · n=${f.sample}` : ""}
                   </p>
@@ -1000,7 +1014,7 @@ function ObservationHistorySection({
         action={<Badge>{observations.length} findings</Badge>}
       />
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-xs">
           <thead className="text-left text-muted-foreground">
             <tr className="border-b border-border/60">
               <th className="py-1.5 pr-3 font-normal">date</th>
@@ -1020,11 +1034,11 @@ function ObservationHistorySection({
               return (
                 <tr key={obs.observation_id} className="border-b border-border/30 last:border-0">
                   <td className="py-1.5 pr-3 tabular-nums">{obs.date}</td>
-                  <td className="py-1.5 pr-3 font-mono text-[11px]">{obs.strategy_id}</td>
+                  <td className="py-1.5 pr-3 font-mono text-caption">{obs.strategy_id}</td>
                   <td className="py-1.5 pr-3 font-medium">{obs.condition_bucket}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{obs.sample_size}</td>
                   <td className="py-1.5 pr-3">
-                    <span className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-mono">
+                    <span className="rounded-lg border border-border/60 bg-muted/40 px-1.5 py-0.5 text-micro font-mono">
                       {obs.evidence_class}
                     </span>
                   </td>
@@ -1055,22 +1069,22 @@ function ReportSection({ report }: { report: LearningReport }) {
         sub={`${report.as_of} · ${report.window_days}d baseline`}
         action={<Badge>{report.trades_today} closed today</Badge>}
       />
-      <p className={`mt-3 text-[13px] ${TONE_CLASS[view.tone]}`}>{view.text}</p>
+      <p className={`mt-3 text-body ${TONE_CLASS[view.tone]}`}>{view.text}</p>
 
       {report.observations.length ? (
         <div className="mt-4">
-          <h4 className="text-[13px] font-medium">
+          <h4 className="text-body font-medium">
             Observations
-            <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+            <span className="ml-2 text-caption font-normal text-muted-foreground">
               advisory — no parameter value is proposed
             </span>
           </h4>
           <ul className="mt-2 space-y-2">
             {report.observations.map((o, i) => (
-              <li key={`${o.kind}-${i}`} className="rounded-xl border border-border/60 px-3.5 py-2.5">
-                <p className="text-[13px]">{o.statement}</p>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">{o.evidence}</p>
-                <p className="text-[11px] text-muted-foreground">
+              <li key={`${o.kind}-${i}`} className="rounded-lg border border-border/60 px-3.5 py-2.5">
+                <p className="text-body">{o.statement}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{o.evidence}</p>
+                <p className="text-caption text-muted-foreground">
                   confidence {o.confidence} · n={o.sample_size}
                 </p>
               </li>
@@ -1081,8 +1095,8 @@ function ReportSection({ report }: { report: LearningReport }) {
 
       {report.unusual.length ? (
         <div className="mt-4">
-          <h4 className="text-[13px] font-medium">Unusual</h4>
-          <ul className="mt-1 space-y-1 text-[12px] text-muted-foreground">
+          <h4 className="text-body font-medium">Unusual</h4>
+          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
             {report.unusual.map((u) => (
               <li key={u}>— {u}</li>
             ))}
@@ -1103,7 +1117,7 @@ function Limitations({ limitations }: { limitations: string[] }) {
       />
       <ul className="mt-3 space-y-1.5">
         {limitations.map((l) => (
-          <li key={l} className="text-[12px] text-muted-foreground">
+          <li key={l} className="text-xs text-muted-foreground">
             — {l}
           </li>
         ))}
@@ -1125,9 +1139,9 @@ function DailyLearningCycleSection({
 }) {
   const statusColor =
     cycle?.status === "SUCCESS"
-      ? "text-emerald-500 border-emerald-500/20 bg-emerald-500/10"
+      ? "text-gain border border-gain/20 bg-gain/[0.08]"
       : cycle?.status === "PARTIAL" || cycle?.status === "INSUFFICIENT_SAMPLE"
-      ? "text-amber-500 border-amber-500/20 bg-amber-500/10"
+        ? "text-warning border border-warning/20 bg-warning/[0.08]"
       : cycle?.status === "ERROR"
       ? "text-destructive border-destructive/20 bg-destructive/10"
       : "text-muted-foreground border-border/60 bg-muted/20";
@@ -1139,20 +1153,20 @@ function DailyLearningCycleSection({
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold tracking-tight">Latest Learning Cycle</h3>
             {cycle ? (
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${statusColor}`}>
+              <span className={`rounded-full border px-2 py-0.5 text-micro font-medium uppercase tracking-wider ${statusColor}`}>
                 {cycle.status}
               </span>
             ) : (
               <Badge>No run recorded</Badge>
             )}
           </div>
-          <p className="mt-1 text-[12px] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Automated post-session learning cycle: collects genuine forward paper trades, generates hypotheses, and updates research queue.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="text-right text-[11px] text-muted-foreground">
+          <div className="text-right text-caption text-muted-foreground">
             <div>Next scheduled: <span className="font-medium text-foreground">Post-session (15:45 IST)</span></div>
             {cycle?.completed_at ? (
               <div>Last run: <span className="font-medium text-foreground">{new Date(cycle.completed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({cycle.runtime_seconds}s)</span></div>
@@ -1171,7 +1185,7 @@ function DailyLearningCycleSection({
       </div>
 
       {message ? (
-        <div className="mt-3 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-[12px] font-mono">
+        <div className="mt-3 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-xs font-mono">
           {message}
         </div>
       ) : null}
@@ -1179,37 +1193,37 @@ function DailyLearningCycleSection({
       {cycle ? (
         <>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
-              <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Trades Processed</div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="text-caption text-muted-foreground uppercase tracking-wide">Trades Processed</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.trades_processed}</div>
-              <div className="text-[10px] text-muted-foreground">Forward paper</div>
+              <div className="text-micro text-muted-foreground">Forward paper</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
-              <div className="text-[11px] text-muted-foreground uppercase tracking-wide">New Observations</div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="text-caption text-muted-foreground uppercase tracking-wide">New Observations</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.observations_generated}</div>
-              <div className="text-[10px] text-muted-foreground">n ≥ 10 & significant</div>
+              <div className="text-micro text-muted-foreground">n ≥ 10 & significant</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
-              <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Hypotheses</div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="text-caption text-muted-foreground uppercase tracking-wide">Hypotheses</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.hypotheses_generated}</div>
-              <div className="text-[10px] text-muted-foreground">Research candidates</div>
+              <div className="text-micro text-muted-foreground">Research candidates</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
-              <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Optimization Candidates</div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="text-caption text-muted-foreground uppercase tracking-wide">Optimization Candidates</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.candidates_generated}</div>
-              <div className="text-[10px] text-muted-foreground">Adaptive parameters</div>
+              <div className="text-micro text-muted-foreground">Adaptive parameters</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
-              <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Recommendations</div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="text-caption text-muted-foreground uppercase tracking-wide">Recommendations</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-primary">{cycle.recommendations_generated}</div>
-              <div className="text-[10px] text-muted-foreground">PROPOSED / In queue</div>
+              <div className="text-micro text-muted-foreground">PROPOSED / In queue</div>
             </div>
           </div>
 
           {/* Strategy diagnostic callouts */}
           <div className="mt-4 space-y-2">
             {cycle.insufficient_data_strategies && cycle.insufficient_data_strategies.length > 0 ? (
-              <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-500">
+              <div className="flex items-center gap-2 rounded-md border border-warning/20 bg-warning/[0.08] px-3 py-2 text-xs text-warning">
                 <AlertTriangle className="size-4 shrink-0" />
                 <span>
                   <strong>Insufficient Forward Data (n &lt; 10):</strong>{" "}
@@ -1219,7 +1233,7 @@ function DailyLearningCycleSection({
             ) : null}
 
             {cycle.drift_detected && Object.entries(cycle.drift_detected).some(([_, detected]) => detected) ? (
-              <div className="flex items-center gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-500">
+              <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/[0.08] px-3 py-2 text-xs text-destructive">
                 <AlertTriangle className="size-4 shrink-0" />
                 <span>
                   <strong>Statistical Drift Detected:</strong>{" "}
@@ -1232,7 +1246,7 @@ function DailyLearningCycleSection({
             ) : null}
 
             {cycle.notes && cycle.notes.length > 0 ? (
-              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-[12px]">
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                 <div className="font-medium text-foreground mb-1">Cycle Notes & Explanations:</div>
                 <ul className="space-y-1 text-muted-foreground">
                   {cycle.notes.map((note, idx) => (
@@ -1246,7 +1260,7 @@ function DailyLearningCycleSection({
             ) : null}
 
             {cycle.errors && cycle.errors.length > 0 ? (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-[12px] text-destructive">
+              <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
                 <div className="font-medium mb-1">Cycle Errors:</div>
                 <ul className="space-y-1">
                   {cycle.errors.map((err, idx) => (
@@ -1261,7 +1275,7 @@ function DailyLearningCycleSection({
           </div>
         </>
       ) : (
-        <div className="mt-3 rounded-lg border border-dashed border-border/60 p-4 text-center text-[12px] text-muted-foreground">
+        <div className="mt-3 rounded-md border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
           No automated cycle has executed yet. Click &quot;Run Daily Cycle&quot; to process available forward paper trades.
         </div>
       )}

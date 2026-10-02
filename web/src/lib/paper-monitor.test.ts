@@ -5,19 +5,19 @@
  * plausible wrong answer which would look right on screen:
  *
  * - `controlGates` mirrors the repository's `WHERE` clauses. Getting it wrong
- *   offers the user a button the server rejects, which teaches them the button
- *   is broken rather than that the state is terminal.
+ * offers the user a button the server rejects, which teaches them the button
+ * is broken rather than that the state is terminal.
  * - `fmtMoneyOrDash` / `fmtPctOrDash` decide how a *null* P&L prints. Printing
- *   `null` as `₹0` turns "we have not measured this yet" into "you made
- *   nothing", which is the exact confusion the API's nullable field exists to
- *   prevent.
+ * `null` as `₹0` turns "we have not measured this yet" into "you made
+ * nothing", which is the exact confusion the API's nullable field exists to
+ * prevent.
  * - `toChain` collapses duplicate stage events. A deployment emits an `order`
- *   entry for both `SUBMITTED` and `ACKNOWLEDGED`; drawing two arrows for one
- *   link in the chain misrepresents the pipeline.
+ * entry for both `SUBMITTED` and `ACKNOWLEDGED`; drawing two arrows for one
+ * link in the chain misrepresents the pipeline.
  * - `deployReadiness` refuses a deployment with no symbols. The runner resolves
- *   its universe from `config.symbols` and nowhere else, so a deployment created
- *   without them is RUNNING and evaluating an empty list forever — running, and
- *   doing nothing, with no error anywhere.
+ * its universe from `config.symbols` and nowhere else, so a deployment created
+ * without them is RUNNING and evaluating an empty list forever — running, and
+ * doing nothing, with no error anywhere.
  */
 import { describe, expect, it } from "vitest";
 
@@ -52,6 +52,7 @@ const event = (over: Partial<TimelineEvent> = {}): TimelineEvent => ({
   outcome: "observed",
   reason: null,
   order_id: "o1",
+  side: null,
   detail: {},
   ...over,
 });
@@ -285,11 +286,11 @@ describe("parseSymbols", () => {
   });
 
   it("de-duplicates and drops empties", () => {
-    expect(parseSymbols("INFY-EQ, INFY-EQ,,  ,")).toEqual(["INFY-EQ"]);
+    expect(parseSymbols("INFY-EQ, INFY-EQ,, ,")).toEqual(["INFY-EQ"]);
   });
 
   it("returns nothing for blank input rather than a list with an empty string", () => {
-    expect(parseSymbols("   ")).toEqual([]);
+    expect(parseSymbols(" ")).toEqual([]);
     expect(parseSymbols("")).toEqual([]);
   });
 });

@@ -26,6 +26,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { SharedLayoutBg } from "@/components/motion/shared-layout-bg";
+import { Tooltip } from "./tooltip";
 import {
   EASE_DRAWER,
   EASE_OUT,
@@ -469,7 +470,7 @@ function MobileSidebar({
         }}
         className={cn(
           "pointer-events-auto fixed inset-y-0 flex h-dvh w-(--sidebar-width-mobile) max-w-[88vw] flex-col overflow-hidden",
-          "border-border bg-background shadow-2xl will-change-transform",
+          "border-border bg-background will-change-transform",
           side === "left" ? "left-0 border-r" : "right-0 border-l",
           !context.openMobile && "pointer-events-none",
           className,
@@ -570,8 +571,8 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
             variant === "sidebar" &&
               (side === "left" ? "border-border border-r" : "border-border border-l"),
             variant === "floating" &&
-              "m-2 h-[calc(100svh-1rem)] rounded-2xl border border-border shadow-sm",
-            variant === "inset" && "m-2 h-[calc(100svh-1rem)] rounded-2xl",
+            "m-2 h-[calc(100svh-1rem)] rounded-lg border border-border ",
+            variant === "inset" && "m-2 h-[calc(100svh-1rem)] rounded-md",
             panelClassName,
           )}
         >
@@ -617,7 +618,7 @@ export const AnimatedSidebarTrigger = forwardRef<
         if (!event.defaultPrevented) context.toggleSidebar();
       }}
       className={cn(
-        "inline-flex size-10 shrink-0 items-center justify-center rounded-xl outline-none",
+          "inline-flex size-10 shrink-0 items-center justify-center rounded-md outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         className,
       )}
@@ -650,7 +651,7 @@ export const AnimatedSidebarClose = forwardRef<
         else context.setOpen(false);
       }}
       className={cn(
-        "inline-flex size-10 shrink-0 items-center justify-center rounded-xl outline-none",
+          "inline-flex size-10 shrink-0 items-center justify-center rounded-md outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
@@ -708,7 +709,7 @@ export const AnimatedSidebarInset = forwardRef<
       data-slot="sidebar-inset"
       className={cn(
         "relative flex min-h-svh min-w-0 flex-1 flex-col bg-background",
-        "md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-2xl md:peer-data-[variant=inset]:shadow-sm",
+          "md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded md:peer-data-[variant=inset]:",
         className,
       )}
     />
@@ -793,7 +794,7 @@ export const AnimatedSidebarGroupLabel = forwardRef<
       aria-hidden={collapsed}
       data-slot="sidebar-group-label"
       className={cn(
-        "mb-1 h-7 overflow-hidden px-2 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground transition-opacity",
+          "mb-1 h-7 overflow-hidden px-2 text-micro font-medium uppercase tracking-[0.14em] text-muted-foreground transition-opacity",
         collapsed ? "opacity-0" : "opacity-100",
         className,
       )}
@@ -833,7 +834,7 @@ export const AnimatedSidebarMenu = forwardRef<
       ref={forwardedRef as React.Ref<HTMLElement>}
       as="ul"
       inset={0}
-      pillClassName="rounded-xl bg-muted/70"
+        pillClassName="rounded-lg bg-primary/[0.08] dark:bg-primary/[0.18]"
       pillContainerClassName="inset-y-auto top-0 h-9"
       data-slot="sidebar-menu"
       className={cn("flex w-full min-w-0 list-none flex-col gap-0.5", className)}
@@ -967,7 +968,7 @@ export function AnimatedSidebarMenuSubButton({
   );
 
   const interactiveClassName = cn(
-    "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-xs outline-none",
+    "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs outline-none",
     "text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
     "focus-visible:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
     isActive && "bg-muted/70 text-foreground",
@@ -1065,19 +1066,24 @@ export function AnimatedSidebarMenuButton({
 
   const content = (
     <>
-      {isActive ? (
+      {isActive && !panel.collapsed ? (
         <motion.span
           layoutId={context.layoutId}
           transition={context.reduce ? { duration: 0 } : SPRING_LAYOUT}
-          className="absolute inset-0 rounded-xl bg-muted"
+          className="absolute inset-0 rounded-lg bg-primary/[0.08] dark:bg-primary/[0.18]"
         />
       ) : null}
       {icon ? (
         <span
           aria-hidden="true"
-          className="relative z-10 grid size-5 shrink-0 place-items-center"
+          className={cn(
+            "relative z-10 grid size-5 shrink-0 place-items-center",
+            panel.collapsed && isActive && "size-9 rounded-xl bg-primary/15 text-primary dark:bg-primary/25 dark:text-white",
+          )}
         >
+          <span className="grid place-items-center transition-transform duration-200 ease-out motion-reduce:transform-none group-hover:-translate-y-[1px] group-hover:scale-[1.12] group-active:scale-95">
           {icon}
+          </span>
         </span>
       ) : null}
       <motion.span
@@ -1129,10 +1135,10 @@ export function AnimatedSidebarMenuButton({
   );
 
   const interactiveClassName = cn(
-    "relative flex min-h-9 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-3 text-left text-sm font-medium outline-none",
+    "relative flex min-h-9 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-3 text-left text-sm font-medium outline-none group",
     "text-muted-foreground transition-colors hover:text-foreground",
     "focus-visible:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
-    isActive && "text-foreground",
+    isActive && "text-primary hover:text-primary dark:text-primary-subdued dark:hover:text-primary-subdued",
     // In the icon rail the item is just an icon. Side padding and the label gap left only
     // 14px of room for a 20px icon box, so the icon spilled 3px right of centre in a
     // 38x36 highlight. A square button with the icon centred fixes both.
@@ -1141,7 +1147,7 @@ export function AnimatedSidebarMenuButton({
     className,
   );
 
-  return href ? (
+  const button = href ? (
     <motion.a
       href={href}
       target={target}
@@ -1153,7 +1159,6 @@ export function AnimatedSidebarMenuButton({
       aria-expanded={ariaExpanded}
       aria-disabled={disabled || undefined}
       aria-label={panel.collapsed ? textLabel : undefined}
-      title={panel.collapsed ? textLabel : undefined}
       tabIndex={disabled ? -1 : undefined}
       onClick={select}
       whileTap={context.reduce || disabled ? undefined : { scale: 0.98 }}
@@ -1169,7 +1174,6 @@ export function AnimatedSidebarMenuButton({
       aria-current={isActive ? "page" : undefined}
       aria-expanded={ariaExpanded}
       aria-label={panel.collapsed ? textLabel : undefined}
-      title={panel.collapsed ? textLabel : undefined}
       onClick={select}
       whileTap={context.reduce || disabled ? undefined : { scale: 0.98 }}
       transition={SPRING_PRESS}
@@ -1178,4 +1182,15 @@ export function AnimatedSidebarMenuButton({
       {content}
     </motion.button>
   );
+  // In the icon rail there is room for no label, so the name moves into a
+  // tooltip. The native title attribute would paint the browser's own black
+  // box next to it, so it stays off and the beui label is the only one.
+  if (panel.collapsed && textLabel) {
+    return (
+      <Tooltip content={textLabel} side="right" delay={400} wrapperClassName="w-full justify-center">
+        {button}
+      </Tooltip>
+    );
+  }
+  return button;
 }

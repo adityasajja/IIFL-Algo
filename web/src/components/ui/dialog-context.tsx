@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { Button } from "./button";
-import { Input } from "./input";
+import { Input } from "../motion/input";
 import { MorphingModal } from "./modal";
 
 /**
@@ -102,7 +102,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
           >
             <h2 className="text-base font-semibold tracking-tight">{shown.opts.title}</h2>
             {shown.opts.description ? (
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-body leading-relaxed text-muted-foreground">
                 {shown.opts.description}
               </p>
             ) : null}

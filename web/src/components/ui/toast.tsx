@@ -79,7 +79,7 @@ const STATUS_CLASS: Record<ToastStatus, string> = {
   neutral: "text-muted-foreground bg-primary/[0.05]",
   info: "text-primary bg-primary/10",
   loading: "text-primary bg-primary/10",
-  success: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400",
+  success: "text-gain bg-gain/[0.08]",
   error: "text-destructive bg-destructive/10",
 };
 
@@ -262,7 +262,7 @@ const ToastItem = memo(function ToastItem({
       className="pointer-events-auto relative will-change-transform"
       style={{ zIndex: 20 - index }}
     >
-      <div className="relative overflow-hidden rounded-2xl border border-border bg-card/95 p-3 shadow-2xl backdrop-blur-xl">
+      <div className="relative overflow-hidden rounded-xl border border-border bg-card/95 p-3 backdrop-blur-xl">
         <div className="flex items-start gap-3">
           <motion.span
             layout

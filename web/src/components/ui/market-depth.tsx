@@ -24,13 +24,13 @@ export function MarketDepthLadder({
 
   if (!live) {
     return (
-      <div className="rounded-xl border border-border/70 bg-card/60 p-4 text-center">
-        <div className="flex items-center justify-center gap-2 text-[12px] font-semibold text-muted-foreground">
+      <div className="rounded-lg border border-border/70 bg-card/60 p-4 text-center">
+        <div className="flex items-center justify-center gap-2 text-xs font-semibold text-muted-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
           5-Level Market Depth
           <span className="font-normal text-muted-foreground/80">({symbol})</span>
         </div>
-        <p className="mt-2 text-[12px] text-muted-foreground">
+        <p className="mt-2 text-xs text-muted-foreground">
           {ltp
             ? <>LTP ₹{ltp.toFixed(2)} · awaiting depth feed from the bridge.</>
             : "Awaiting live data from the bridge. Most small-cap symbols do not publish a 5-level feed."}
@@ -48,17 +48,17 @@ export function MarketDepthLadder({
   const askRatio = 100 - bidRatio;
 
   return (
-    <div className="rounded-xl border border-border/70 bg-card/60 p-3 text-[12px]">
+    <div className="rounded-lg border border-border/70 bg-card/60 p-3 text-xs">
       <div className="mb-2 flex items-center justify-between border-b border-border/50 pb-2">
         <div className="flex items-center gap-1.5 font-semibold text-foreground">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="h-2 w-2 rounded-full bg-gain animate-pulse" />
           Market Depth <span className="font-normal text-muted-foreground text-xs">({symbol})</span>
         </div>
-        <div className="flex items-center gap-2 text-[11px] font-medium">
-          <span className="text-emerald-500">{bidRatio}% Buy</span>
+        <div className="flex items-center gap-2 text-caption font-medium">
+          <span className="text-gain">{bidRatio}% Buy</span>
           <div className="h-1.5 w-14 overflow-hidden rounded-full bg-destructive/30">
             <div
-              className="h-full bg-emerald-500 transition-all duration-300"
+              className="h-full bg-gain transition-all duration-300"
               style={{ width: `${bidRatio}%` }}
             />
           </div>
@@ -66,7 +66,7 @@ export function MarketDepthLadder({
         </div>
       </div>
 
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center justify-between px-2 pb-1">
+      <div className="text-micro uppercase tracking-wider text-muted-foreground font-semibold flex items-center justify-between px-2 pb-1">
         <span>Orders</span>
         <span>Quantity</span>
         <span>Price (Click to copy)</span>
@@ -81,7 +81,7 @@ export function MarketDepthLadder({
               key={`ask-${i}`}
               onClick={() => onSelectPrice?.(a.price)}
               title={`Click to set Limit price ₹${a.price.toFixed(2)}`}
-              className="group relative flex items-center justify-between px-2 py-1 rounded text-[11.5px] tabular-nums cursor-pointer overflow-hidden transition-colors hover:bg-destructive/15"
+              className="group relative flex items-center justify-between px-2 py-1 rounded-lg text-[11.5px] tabular-nums cursor-pointer overflow-hidden transition-colors hover:bg-destructive/15"
             >
               <div
                 className="absolute inset-y-0 right-0 bg-destructive/10 pointer-events-none transition-all duration-300"
@@ -98,9 +98,9 @@ export function MarketDepthLadder({
       </div>
 
       {/* Center LTP Separator Bar */}
-      <div className="my-1.5 flex items-center justify-between px-2 py-1 rounded bg-muted/40 border-y border-border/60 text-xs font-semibold">
+      <div className="my-1.5 flex items-center justify-between px-2 py-1 rounded-md bg-muted/40 border-y border-border/60 text-xs font-semibold">
         <span className="text-[10.5px] text-muted-foreground uppercase tracking-wider">Last Traded Price</span>
-        <span className="tabular-nums font-bold text-foreground">
+        <span className="tabular-nums font-semibold text-foreground">
           ₹{ltp ? ltp.toFixed(2) : "—"}
         </span>
       </div>
@@ -114,15 +114,15 @@ export function MarketDepthLadder({
               key={`bid-${i}`}
               onClick={() => onSelectPrice?.(b.price)}
               title={`Click to set Limit price ₹${b.price.toFixed(2)}`}
-              className="group relative flex items-center justify-between px-2 py-1 rounded text-[11.5px] tabular-nums cursor-pointer overflow-hidden transition-colors hover:bg-emerald-500/15"
+              className="group relative flex items-center justify-between px-2 py-1 rounded-lg text-[11.5px] tabular-nums cursor-pointer overflow-hidden transition-colors hover:bg-gain/15"
             >
               <div
-                className="absolute inset-y-0 right-0 bg-emerald-500/10 pointer-events-none transition-all duration-300"
+                className="absolute inset-y-0 right-0 bg-gain/10 pointer-events-none transition-all duration-300"
                 style={{ width: `${widthPct}%` }}
               />
               <span className="relative z-10 text-muted-foreground/75 text-[10.5px]">{b.orders}</span>
               <span className="relative z-10 font-medium text-foreground/85">{b.quantity.toLocaleString("en-IN")}</span>
-              <span className="relative z-10 font-semibold text-emerald-500 group-hover:underline">
+              <span className="relative z-10 font-semibold text-gain group-hover:underline">
                 ₹{b.price.toFixed(2)}
               </span>
             </div>

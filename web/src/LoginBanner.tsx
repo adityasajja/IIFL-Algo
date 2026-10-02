@@ -2,7 +2,7 @@ import { BrandMark } from "./components/ui/brand-mark";
 import { useState } from "react";
 import { getLoginStatus, loginSubmit, type LoginStatus } from "./api";
 import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { MorphingModal } from "./components/ui/modal";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 
@@ -71,7 +71,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
         <div className="text-center">
           <BrandMark className="mx-auto mb-4 size-11" />
           <h2 className="text-lg font-semibold tracking-tight">Log in to IIFL</h2>
-          <p className="mt-1.5 text-[13px] text-muted-foreground">Your session has expired.</p>
+          <p className="mt-1.5 text-body text-muted-foreground">Your session has expired.</p>
           <div className="mt-5 grid gap-2.5">
             <Button
               size="lg"
@@ -82,14 +82,14 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
               {opening ? "Opening…" : "Log in"}
             </Button>
             {error ? (
-              <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-left text-xs leading-relaxed text-destructive">
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-left text-xs leading-relaxed text-destructive">
                 {error}
               </p>
             ) : null}
             <button
               type="button"
               onClick={() => setView("manual")}
-              className="text-[13px] font-medium text-primary hover:underline"
+              className="text-body font-medium text-primary hover:underline"
             >
               Use an auth code
             </button>
@@ -107,7 +107,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
       ) : (
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Paste your auth code</h2>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+          <p className="mt-1.5 text-body leading-relaxed text-muted-foreground">
             Sign in at the URL first, then copy <code className="font-mono">clientId</code> and{" "}
             <code className="font-mono">authCode</code> from the address bar.
           </p>

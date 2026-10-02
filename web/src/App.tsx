@@ -16,38 +16,42 @@ import {
 import {
   BarChart3,
   Bell,
-  Ellipsis,
+  Brain,
   Briefcase,
+  ChartPie,
+  Ellipsis,
+  Eye,
   FlaskConical,
   Home,
-  ListChecks,
+  House,
+  Layers,
   LogIn,
   LogOut,
   Palette,
   PanelLeft,
   Radio,
   Search,
-  Server,
   ShieldAlert,
   SlidersHorizontal,
+  TrendingUp,
 } from "lucide-react";
 import { useCallback, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 const AlertsPanel = lazy(() => import("./AlertsPanel"));
 import { PageLoader } from "./components/ui/loading";
 import AuthGate from "./AuthGate";
-const BacktestPanel = lazy(() => import("./BacktestPanel"));
 const BacktestWorkflowPanel = lazy(() => import("./BacktestWorkflowPanel"));
 const ChartsPanel = lazy(() => import("./ChartsPanel"));
 const CustomScannerPanel = lazy(() => import("./CustomScannerPanel"));
-const ExecutionModePanel = lazy(() => import("./ExecutionModePanel"));
 const TradeSignalsPanel = lazy(() => import("./TradeSignalsPanel"));
 const WatchlistPanel = lazy(() => import("./WatchlistPanel"));
 import { Button } from "./components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
+import { Tooltip } from "./components/motion/tooltip";
 import { CommandPalette, type CommandItem } from "./components/ui/command-palette";
-import { GlobalTickerBar } from "./components/ui/global-ticker-bar";
 import { EnvironmentBanner } from "./components/ui/environment-banner";
 import { ThemeToggle } from "./components/ui/theme-toggle";
 import LoginBanner from "./LoginBanner";
+import { ModeDetails, ModePill, useExecutionMode } from "./ModeSwitch";
 const PortfolioPanel = lazy(() => import("./PortfolioPanel"));
 const PortfolioControlCenter = lazy(() => import("./PortfolioControlCenter"));
 const BriefingPanel = lazy(() => import("./BriefingPanel"));
@@ -58,36 +62,23 @@ const OptimizationPanel = lazy(() => import("./OptimizationPanel").then((m) => (
 import OverviewPanel from "./OverviewPanel";
 const PaperDeploymentPanel = lazy(() => import("./PaperDeploymentPanel"));
 const ResearchPanel = lazy(() => import("./ResearchPanel"));
-const EvidencePanel = lazy(() => import("./EvidencePanel"));
-const RiskPanel = lazy(() => import("./RiskPanel"));
 const StrategiesPanel = lazy(() => import("./StrategiesPanel"));
 const ScannerPanel = lazy(() => import("./ScannerPanel"));
 const ScreenerPanel = lazy(() => import("./ScreenerPanel"));
+import { SCREEN_PRESET_KEY } from "./MarketMood";
 const MarketIntelligencePanel = lazy(() => import("./MarketIntelligencePanel"));
 const SignalExplorerPanel = lazy(() => import("./SignalExplorerPanel"));
-const SystemPanel = lazy(() => import("./SystemPanel"));
 import {
   appLogout,
   getHealth,
   getLoginStatus,
+  logoutSession,
   type Health,
   type LoginStatus,
 } from "./api";
 import { useSession } from "./lib/useSession";
-import {
-  IconBell,
-  IconBrief,
-  IconAttribution,
-  IconBrain,
-  IconFlask,
-  IconHome,
-  IconLayers,
-  IconRadio,
-  IconScan,
-  IconServer,
-  IconShield,
-} from "./icons";
 import { cn } from "./lib/utils";
+import { setVisibleInterval } from "./lib/visibleInterval";
 
 export type Tab =
   | "dashboard"
@@ -100,30 +91,26 @@ export type Tab =
   | "evidence"
   | "learning"
   | "analytics"
-  | "optimization"
-  | "risk"
-  | "system";
+  | "optimization";
 
 export type MarketsSub = "intelligence" | "scanner" | "custom" | "screener" | "charts";
 export type SignalsSub = "today" | "brief" | "alerts" | "queue" | "context";
-export type EvidenceSub = "backtest" | "workflow" | "research" | "measured" | "findings";
-export type TradingSub = "portfolio" | "control-center" | "mode";
+export type EvidenceSub = "backtest" | "research" | "measured";
+export type TradingSub = "portfolio" | "control-center";
 
 /**
  * Navigation follows the trader's loop, not the codebase's module list:
  * see the world → decide → act → track → learn → improve → maintain.
  *
- * Dashboard    = where am I
- * Markets      = what is happening
- * Strategies   = what I would do about it, and whether it works
- * Signals      = what it is telling me right now
- * Trading      = what I have done
- * Paper        = what the system is doing on its own, with my money as paper
- * Evidence     = proof, out of sample
- * Learning     = what the trade history says
+ * Dashboard = where am I
+ * Markets = what is happening
+ * Strategies = what I would do about it, and whether it works
+ * Signals = what it is telling me right now
+ * Trading = what I have done (positions, control center & risk policies, execution mode)
+ * Paper = what the system is doing on its own, with my money as paper
+ * Evidence = proof, out of sample
+ * Learning = what the trade history says
  * Optimization = controlled parameter adaptation with user approval
- * Risk         = how much can go wrong
- * System       = is the machinery healthy
  *
  * Paper sits beside Trading under "Act" rather than inside it, because it is a
  * different activity: Trading is you placing orders, Paper is a deployed
@@ -141,46 +128,42 @@ type NavItem = { id: Tab; name: string; icon: (p: { size?: number }) => ReactNod
  * palette still reaches every page.
  */
 const PRIMARY: NavItem[] = [
-  { id: "dashboard", name: "Dashboard", icon: IconHome },
-  { id: "signals", name: "Signals", icon: IconBell },
-  { id: "markets", name: "Markets", icon: IconScan },
-  { id: "watchlist", name: "Watchlist", icon: ListChecks },
-  { id: "trading", name: "Trading", icon: IconBrief },
+  { id: "dashboard", name: "Dashboard", icon: House },
+  { id: "signals", name: "Signals", icon: Bell },
+  { id: "markets", name: "Markets", icon: TrendingUp },
+  { id: "watchlist", name: "Watchlist", icon: Eye },
+  { id: "trading", name: "Trading", icon: Briefcase },
 ];
 
 const MORE: NavItem[] = [
-  { id: "strategies", name: "Strategies", icon: IconLayers },
-  { id: "paper", name: "Paper", icon: IconRadio },
-  { id: "evidence", name: "Evidence", icon: IconFlask },
-  { id: "learning", name: "Learning", icon: IconBrain },
-  { id: "analytics", name: "Attribution", icon: IconAttribution },
+  { id: "strategies", name: "Strategies", icon: Layers },
+  { id: "paper", name: "Paper", icon: Radio },
+  { id: "evidence", name: "Evidence", icon: FlaskConical },
+  { id: "learning", name: "Learning", icon: Brain },
+  { id: "analytics", name: "Attribution", icon: ChartPie },
   { id: "optimization", name: "Optimization", icon: SlidersHorizontal },
-  { id: "risk", name: "Risk", icon: IconShield },
-  { id: "system", name: "System", icon: IconServer },
 ];
 
-const TITLES: Record<Tab, { title: string; sub: string }> = {
-  dashboard: { title: "Dashboard", sub: "Where you stand right now" },
-  watchlist: { title: "Watchlist", sub: "Your own symbols, your own columns" },
-  markets: { title: "Markets", sub: "How the market is doing, plus scans and charts" },
-  strategies: { title: "Strategies", sub: "What is running, and the rules you have built" },
-  signals: { title: "Signals", sub: "What the market is doing and what is worth your attention" },
-  trading: { title: "Trading", sub: "Positions, holdings, margin, order book — and what mode you are in" },
-  paper: { title: "Paper", sub: "Deploy a strategy version, watch it trade, and stop it" },
-  evidence: { title: "Evidence", sub: "Proof on prices the strategy has never seen" },
-  learning: { title: "Learning", sub: "What the trade history says — findings only, never changes" },
-  analytics: { title: "Attribution", sub: "What happened to each closed trade, why, and how well it was executed" },
-  optimization: { title: "Optimization", sub: "Test improved versions of your strategies" },
-  risk: { title: "Risk", sub: "Live limits, exposure and the kill switch" },
-  system: { title: "System", sub: "Data, broker session and health" },
+const TITLES: Record<Tab, { title: string }> = {
+  dashboard: { title: "Dashboard" },
+  watchlist: { title: "Watchlist" },
+  markets: { title: "Markets" },
+  strategies: { title: "Strategies" },
+  signals: { title: "Signals" },
+  trading: { title: "Trading" },
+  paper: { title: "Paper" },
+  evidence: { title: "Evidence" },
+  learning: { title: "Learning" },
+  analytics: { title: "Attribution" },
+  optimization: { title: "Optimization" },
 };
 
 /** Avatar tint per role, so authority is legible at a glance in the sidebar. */
 const ROLE_TONE: Record<string, string> = {
   owner: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
-  admin: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  trader: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  researcher: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  admin: "border border-warning/20 bg-warning/[0.08] text-warning",
+  trader: "border border-gain/20 bg-gain/[0.08] text-gain",
+  researcher: "border border-primary/20 bg-primary/[0.08] text-primary",
   viewer: "bg-muted text-muted-foreground",
 };
 
@@ -196,8 +179,6 @@ const VALID_TABS = new Set<Tab>([
   "learning",
   "analytics",
   "optimization",
-  "risk",
-  "system",
 ]);
 
 /** Old tab ids → their new home. Keeps saved links and bookmarks working. */
@@ -210,6 +191,7 @@ const LEGACY_TABS: Record<string, Tab> = {
   signals: "signals",
   briefing: "signals",
   portfolio: "trading",
+  risk: "trading",
   research: "evidence",
   backtest: "evidence",
   // Anything that used to mean "a strategy running by itself" now belongs to
@@ -233,6 +215,7 @@ const LEGACY_SUB: Partial<Record<string, string>> = {
   briefing: "brief",
   research: "research",
   backtest: "backtest",
+  risk: "control-center",
 };
 
 function parseHash(raw: string): { tab: Tab; sub?: string } | null {
@@ -277,7 +260,18 @@ function MarketsTabContainer({
           { id: "charts" as MarketsSub, label: "Charts" },
         ]}
       />
-      {sub === "intelligence" && <MarketIntelligencePanel />}
+      {sub === "intelligence" && (
+        <MarketIntelligencePanel
+          onOpenScreen={(p) => {
+            try {
+              sessionStorage.setItem(SCREEN_PRESET_KEY, JSON.stringify(p.tree));
+            } catch {
+              /* private mode: the screener just opens with its default */
+            }
+            onSubChange("screener" as MarketsSub);
+          }}
+        />
+      )}
       {sub === "scanner" && <ScannerPanel onOpenChart={onOpenChart} />}
       {sub === "custom" && <CustomScannerPanel onOpenChart={onOpenChart} />}
       {sub === "screener" && <ScreenerPanel onOpenChart={onOpenChart} />}
@@ -318,7 +312,11 @@ function SignalsTabContainer({
   );
 }
 
-// ─── Trading: what I have done, and what mode I am in ─────────────────────────
+// ─── Trading: what I have done, plus the mode switch in the header row ─────
+// "mode" used to be a third tab; stale #trading/mode links fall back to portfolio.
+function asTradingSub(s?: string): TradingSub {
+  return s === "control-center" || s === "portfolio" ? s : "portfolio";
+}
 function TradingTabContainer({
   sub,
   onSubChange,
@@ -326,20 +324,24 @@ function TradingTabContainer({
   sub: TradingSub;
   onSubChange: (s: TradingSub) => void;
 }) {
+  const safe = asTradingSub(sub);
+  const ex = useExecutionMode();
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
       <SubTabs
-        value={sub}
+          value={safe}
         onChange={onSubChange}
         options={[
-          { id: "control-center" as TradingSub, label: "Portfolio Control Center" },
-          { id: "portfolio" as TradingSub, label: "Positions & orders" },
-          { id: "mode" as TradingSub, label: "Execution mode" },
+            { id: "control-center" as TradingSub, label: "Paper trading" },
+            { id: "portfolio" as TradingSub, label: "Broker account" },
         ]}
       />
-      {sub === "control-center" && <PortfolioControlCenter />}
-      {sub === "portfolio" && <PortfolioPanel />}
-      {sub === "mode" && <ExecutionModePanel />}
+        <ModePill ex={ex} />
+      </div>
+      <ModeDetails ex={ex} />
+      {safe === "control-center" && <PortfolioControlCenter />}
+      {safe === "portfolio" && <PortfolioPanel />}
     </div>
   );
 }
@@ -353,25 +355,45 @@ function EvidenceTabContainer({
   onSubChange: (s: EvidenceSub) => void;
 }) {
   const [researchTab, setResearchTab] = useState<"harness" | "measured">("harness");
+  const safe: EvidenceSub = sub === "backtest" || sub === "research" || sub === "measured" ? sub : "backtest";
   return (
     <div className="space-y-4">
       <SubTabs
-        value={sub}
+        value={safe}
         onChange={onSubChange}
         options={[
           { id: "backtest" as EvidenceSub, label: "Backtest" },
-          { id: "research" as EvidenceSub, label: "Walk-forward" },
+          { id: "research" as EvidenceSub, label: "Validate" },
           { id: "measured" as EvidenceSub, label: "Results" },
-          { id: "findings" as EvidenceSub, label: "Findings" },
-          { id: "workflow" as EvidenceSub, label: "Older backtest" },
         ]}
       />
-      {sub === "backtest" && <BacktestWorkflowPanel />}
-      {sub === "research" && <ResearchPanel forcedTab={researchTab} onTabChange={setResearchTab} />}
-      {sub === "measured" && <ResearchPanel forcedTab="measured" onTabChange={setResearchTab} />}
-      {sub === "findings" && <EvidencePanel />}
-      {sub === "workflow" && <BacktestPanel />}
+      {safe === "backtest" && <BacktestWorkflowPanel />}
+      {safe === "research" && <ResearchPanel forcedTab={researchTab} onTabChange={setResearchTab} />}
+      {safe === "measured" && <ResearchPanel forcedTab="measured" onTabChange={setResearchTab} />}
     </div>
+  );
+}
+
+/** IST wall clock, ticking every second — the market's own timezone regardless
+ * of where the browser is, since a session/kill-switch timestamp only means
+ * something next to the clock the market itself runs on. */
+function LiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const time = now.toLocaleTimeString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  return (
+    <span className="hidden items-center gap-1.5 rounded-full border border-border/80 bg-card/60 px-2.5 py-1 text-xs text-muted-foreground tabular-nums sm:inline-flex">
+      {time} <span className="text-muted-foreground/60">IST</span>
+    </span>
   );
 }
 
@@ -385,23 +407,15 @@ function SubTabs<T extends string>({
   options: { id: T; label: string }[];
 }) {
   return (
-    <div className="flex w-fit overflow-hidden rounded-lg border border-border/60 text-sm font-semibold">
+    <Tabs value={value} onValueChange={(v) => onChange(v as T)} variant="pill">
+      <TabsList>
       {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          onClick={() => onChange(o.id)}
-          className={cn(
-            "px-4 py-1.5 transition-colors",
-            value === o.id
-              ? "bg-primary text-primary-foreground"
-              : "bg-background text-muted-foreground hover:text-foreground",
-          )}
-        >
+          <TabsTrigger key={o.id} value={o.id}>
           {o.label}
-        </button>
+          </TabsTrigger>
       ))}
-    </div>
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -415,11 +429,9 @@ export default function App() {
     (initial.sub as SignalsSub) ?? "today",
   );
   const [evidenceSub, setEvidenceSub] = useState<EvidenceSub>(
-    (initial.sub as EvidenceSub) ?? "backtest",
+    initial.sub === "backtest" || initial.sub === "research" || initial.sub === "measured" ? initial.sub : "backtest",
   );
-  const [tradingSub, setTradingSub] = useState<TradingSub>(
-    (initial.sub as TradingSub) ?? "portfolio",
-  );
+  const [tradingSub, setTradingSub] = useState<TradingSub>(asTradingSub(initial.sub));
 
   // Who is using the dashboard, and what they may do. This is the *platform*
   // account; the IIFL broker session below is a separate credential.
@@ -474,15 +486,15 @@ export default function App() {
       localStorage.setItem("atr.tab", route.sub ? `${route.tab}/${route.sub}` : route.tab);
       if (route.tab === "markets" && route.sub) setMarketsSub(route.sub as MarketsSub);
       if (route.tab === "signals" && route.sub) setSignalsSub(route.sub as SignalsSub);
-      if (route.tab === "evidence" && route.sub) setEvidenceSub(route.sub as EvidenceSub);
-      if (route.tab === "trading" && route.sub) setTradingSub(route.sub as TradingSub);
+      if (route.tab === "evidence" && route.sub) setEvidenceSub(route.sub === "backtest" || route.sub === "research" || route.sub === "measured" ? route.sub : "backtest");
+      if (route.tab === "trading" && route.sub) setTradingSub(asTradingSub(route.sub));
     };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
   const [theme, setTheme] = useState<"dark" | "light">(
-    () => (localStorage.getItem("atr.theme") as "dark" | "light") ?? "dark",
+    () => (localStorage.getItem("atr.theme") as "dark" | "light") ?? "light",
   );
   const [health, setHealth] = useState<Health | null>(null);
   const [auth, setAuth] = useState<LoginStatus | null>(null);
@@ -495,6 +507,16 @@ export default function App() {
       setHealth(null);
     }
   }, []);
+
+  const disconnectBroker = useCallback(async () => {
+    try {
+      await logoutSession();
+    } catch {
+      // Same reasoning as signOut above: refresh health regardless so the UI
+      // never keeps claiming "Broker connected" after the user asked to disconnect.
+    }
+    void refreshHealth();
+  }, [refreshHealth]);
 
   // A transient failure must NOT blank the session state. The login modal reads
   // `login_url` off this object, so nulling it here left the user staring at a
@@ -517,7 +539,7 @@ export default function App() {
   useEffect(() => {
     void refreshHealth();
     void refreshAuth();
-    const t = setInterval(() => {
+    const t = setVisibleInterval(() => {
       void refreshHealth();
       void refreshAuth();
     }, 15000);
@@ -571,7 +593,7 @@ export default function App() {
   const paletteItems: CommandItem[] = useMemo(
     () => [
       { id: "go-dashboard", label: "Go to Dashboard", group: "Navigate", icon: Home, hint: "1", keywords: ["overview", "home", "status"], onSelect: () => setTab("dashboard") },
-      { id: "go-watchlist", label: "Go to Watchlist", group: "Navigate", icon: ListChecks, hint: "2", keywords: ["watchlist", "my symbols", "columns", "favourites", "track"], onSelect: () => setTab("watchlist") },
+      { id: "go-watchlist", label: "Go to Watchlist", group: "Navigate", icon: Eye, hint: "2", keywords: ["watchlist", "my symbols", "columns", "favourites", "track"], onSelect: () => setTab("watchlist") },
       { id: "go-markets", label: "Go to Markets", group: "Navigate", icon: Search, hint: "3", keywords: ["scanner", "momentum", "charts", "scan"], onSelect: () => setTab("markets") },
       { id: "go-strategies", label: "Go to Strategies", group: "Navigate", icon: BarChart3, hint: "4", keywords: ["registry", "validated", "paper", "models"], onSelect: () => setTab("strategies") },
       { id: "go-signals", label: "Go to Signals", group: "Navigate", icon: Bell, hint: "5", keywords: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning"], onSelect: () => setTab("signals") },
@@ -579,8 +601,7 @@ export default function App() {
       { id: "go-paper", label: "Go to Paper", group: "Navigate", icon: Radio, hint: "7", keywords: ["deploy", "deployment", "paper trading", "simulate", "monitor", "strategy running", "pause", "stop", "reset", "capital"], onSelect: () => setTab("paper") },
       { id: "go-evidence", label: "Go to Evidence (walk-forward)", group: "Navigate", icon: FlaskConical, hint: "8", keywords: ["research", "validate", "out of sample", "deflated sharpe", "backtest", "measured"], onSelect: () => setTab("evidence") },
       { id: "go-optimization", label: "Go to Strategy Optimization", group: "Navigate", icon: SlidersHorizontal, hint: "opt", keywords: ["optimization", "adaptive", "parameters", "walk-forward", "robustness", "recommendation"], onSelect: () => setTab("optimization") },
-      { id: "go-risk", label: "Go to Risk", group: "Navigate", icon: ShieldAlert, hint: "9", keywords: ["kill switch", "limits", "exposure", "halt", "stop"], onSelect: () => setTab("risk") },
-      { id: "go-system", label: "Go to System", group: "Navigate", icon: Server, hint: "0", keywords: ["cache", "contracts", "session", "health", "history"], onSelect: () => setTab("system") },
+      { id: "go-risk", label: "Go to Portfolio Controls & Risk", group: "Navigate", icon: ShieldAlert, hint: "9", keywords: ["kill switch", "limits", "exposure", "halt", "stop", "risk", "policy"], onSelect: () => { setTradingSub("control-center"); setTab("trading", "control-center"); } },
       { id: "toggle-theme", label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", group: "View", icon: Palette, keywords: ["appearance"], onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
       { id: "login", label: "Log in with IIFL", group: "Session", icon: LogIn, keywords: ["auth", "session", "broker"], onSelect: () => setShowLogin(true) },
       { id: "sign-out", label: "Sign out", group: "Session", icon: LogOut, keywords: ["logout", "account", "leave", "end session"], onSelect: () => void signOut() },
@@ -606,7 +627,7 @@ export default function App() {
       </div>
     );
   }
-  if (sessionState === "anonymous") {
+  if (sessionState === "anonymous" && (typeof window === "undefined" || !new URLSearchParams(window.location.search).has("preview"))) {
     return <AuthGate onAuthenticated={adoptSession} />;
   }
   if (sessionState === "offline") {
@@ -619,12 +640,12 @@ export default function App() {
   }
 
   return (
-    <AnimatedSidebarProvider>
+    <AnimatedSidebarProvider defaultOpen={false}>
       <AnimatedSidebar ariaLabel="Forward navigation" collapsible="icon">
         <AnimatedSidebarHeader className="p-3 pb-2">
           <div className="flex min-h-11 items-center gap-3 overflow-hidden px-2">
             <BrandMark className="size-7" />
-            <span className="truncate text-[15px] font-semibold tracking-tight text-foreground group-data-[state=collapsed]/sidebar:hidden">
+            <span className="truncate text-sm font-semibold tracking-tight text-foreground group-data-[state=collapsed]/sidebar:hidden">
               Forward
             </span>
           </div>
@@ -640,7 +661,7 @@ export default function App() {
                     <AnimatedSidebarMenuItem key={it.id}>
                       <AnimatedSidebarMenuButton
                         isActive={tab === it.id}
-                        icon={<Icon size={16} />}
+                        icon={<Icon size={18} />}
                         onSelect={() => setTab(it.id)}
                       >
                         {it.name}
@@ -649,7 +670,7 @@ export default function App() {
                   );
                 })}
                 <AnimatedSidebarMenuItem>
-                  <AnimatedSidebarMenuButton icon={<Ellipsis size={16} />} onSelect={toggleMore}>
+                  <AnimatedSidebarMenuButton icon={<Ellipsis size={18} />} onSelect={toggleMore}>
                     {moreOpen ? "Less" : "More"}
                   </AnimatedSidebarMenuButton>
                 </AnimatedSidebarMenuItem>
@@ -659,7 +680,7 @@ export default function App() {
                     <AnimatedSidebarMenuItem key={it.id}>
                       <AnimatedSidebarMenuButton
                         isActive={tab === it.id}
-                        icon={<Icon size={16} />}
+                        icon={<Icon size={18} />}
                         onSelect={() => setTab(it.id)}
                       >
                         {it.name}
@@ -676,16 +697,17 @@ export default function App() {
           {/* Who is signed in. Distinct from the broker session below it: this is
               the platform account (what you may change), that is the IIFL session
               (what you may trade). Both matter, neither implies the other. */}
-          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1">
+          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded p-1 group-data-[state=collapsed]/sidebar:justify-center">
+          <Tooltip content={`${principal?.username ?? "?"} · ${principal?.role ?? ""}`} side="right" delay={400}>
             <span
-              title={`${principal?.username ?? "?"} · ${principal?.role ?? ""}`}
               className={cn(
-                "grid size-9 shrink-0 place-items-center rounded-full text-[11px] font-bold uppercase",
+                  "grid size-9 shrink-0 place-items-center rounded-full text-caption font-semibold uppercase",
                 ROLE_TONE[principal?.role ?? ""] ?? "bg-muted text-muted-foreground",
               )}
             >
               {accountInitials}
             </span>
+            </Tooltip>
             <span className="min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
               <span className="block truncate text-sm font-medium text-foreground">
                 {principal?.display_name || principal?.username}
@@ -694,80 +716,130 @@ export default function App() {
                 {principal?.auth_method === "anonymous" ? "auth disabled" : principal?.role}
               </span>
             </span>
+            <Tooltip content="Sign out" side="right" delay={400}>
             <button
               type="button"
               onClick={() => void signOut()}
-              title="Sign out"
               aria-label="Sign out"
               className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-data-[state=collapsed]/sidebar:hidden"
             >
               <LogOut aria-hidden="true" className="size-4" />
             </button>
+            </Tooltip>
           </div>
 
-          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded-xl p-1">
+          <div className="flex min-h-11 w-full items-center gap-3 overflow-hidden rounded p-1 group-data-[state=collapsed]/sidebar:justify-center">
             <span className="flex min-w-0 flex-1 items-center gap-2.5 px-1 group-data-[state=collapsed]/sidebar:hidden">
               <i
                 className={cn(
                   "size-2 shrink-0 rounded-full",
-                  health?.session_active ? "bg-emerald-500" : "bg-muted-foreground/40",
+                  health?.session_active ? "bg-gain" : "bg-muted-foreground/40",
                 )}
               />
               <span className="truncate text-sm text-muted-foreground">
                 {health?.session_active ? "Broker connected" : "Broker not connected"}
               </span>
             </span>
+            {health?.session_active && (
+              <Tooltip content="Disconnect broker" side="right" delay={400}>
+                <button
+                  type="button"
+                  onClick={() => void disconnectBroker()}
+                  aria-label="Disconnect broker"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-data-[state=collapsed]/sidebar:hidden"
+                >
+                  <LogOut aria-hidden="true" className="size-4" />
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip content="Collapse sidebar (Ctrl+B)" side="right" delay={400}>
             <AnimatedSidebarTrigger
-              title="Collapse sidebar (Ctrl+B)"
               aria-label="Collapse sidebar"
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-data-[state=collapsed]/sidebar:size-9 group-data-[state=collapsed]/sidebar:rounded-xl"
             >
               <PanelLeft aria-hidden="true" className="size-4" />
             </AnimatedSidebarTrigger>
+            </Tooltip>
           </div>
         </AnimatedSidebarFooter>
       </AnimatedSidebar>
 
       <AnimatedSidebarInset>
-        {/* Environment banner sits above everything, including the ticker bar —
-            the whole point is that it cannot be missed or scrolled past. */}
+        {/* Environment banner sits above everything else — the whole point is
+ that it cannot be missed or scrolled past. */}
         <EnvironmentBanner
           env={health?.env}
           executionMode={health?.execution_mode}
           killSwitch={health?.kill_switch}
         />
-        {health?.session_active && <GlobalTickerBar onSelectSymbol={openChart} />}
         <main
           className={cn(
-            "min-w-0 pb-16",
+            "mx-auto min-w-0 w-full max-w-[1200px] px-6 pb-16",
             tab === "markets" && marketsSub === "charts"
-              ? "px-4 max-md:px-2 pb-4"
-              : "px-8 max-md:px-4",
+            ? "max-md:px-4 pb-8"
+            : "max-md:px-4",
           )}
         >
-        <div className="mb-6 flex h-14 items-center justify-between gap-4 border-b border-border/60">
+          <div className="mb-8 flex min-h-[72px] items-center justify-between gap-4 border-b border-border bg-white/80 py-4 dark:bg-transparent">
           <div className="flex min-w-0 items-center gap-3">
+              {/* The sidebar's own trigger lives in its footer, which is exactly
+ what a closed mobile drawer hides — nothing could ever open it.
+ This is the only way in on a phone-width viewport. */}
+              <Tooltip content="Open menu" side="bottom" delay={400}>
+                <AnimatedSidebarTrigger
+                  aria-label="Open menu"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+                >
+                  <PanelLeft aria-hidden="true" className="size-4" />
+                </AnimatedSidebarTrigger>
+              </Tooltip>
             <div className="min-w-0">
-              <div className="truncate text-base font-semibold tracking-tight text-foreground">{meta.title}</div>
-              <div className="truncate text-xs text-muted-foreground">{meta.sub}</div>
+                <div className="truncate text-heading text-foreground">{meta.title}</div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+              {health?.execution_mode === "live" ? (
+                <Tooltip content="System is transmitting live orders with real capital to IIFL" side="bottom" delay={400}>
+                  <button
+                    type="button"
+                    onClick={() => setTab("trading")}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/[0.08] px-2.5 py-1 text-caption font-semibold text-destructive animate-pulse"
+                  >
+                    <span className="size-1.5 rounded-full bg-loss" />
+                    REAL / LIVE
+                  </button>
+                </Tooltip>
+              ) : (
+                <Tooltip content="Paper mode active: Signals and orders are simulated locally. No real money or broker orders are placed." side="bottom" delay={400}>
+                  <button
+                    type="button"
+                    onClick={() => setTab("trading")}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gain/20 bg-gain/[0.08] px-2.5 py-1 text-caption font-semibold text-gain"
+                  >
+                    <FlaskConical className="size-3" />
+                    PAPER MODE
+                  </button>
+                </Tooltip>
+              )}
+
+              <LiveClock />
+
             {!health?.session_active && (
               <Button size="sm" variant="outline" onClick={() => setShowLogin(true)} className="h-7 text-xs px-2.5">
                 Log in
               </Button>
             )}
 
+              <Tooltip content="Command palette (Ctrl+K)" side="bottom" delay={400}>
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              title="Command palette (Ctrl+K)"
               className="hidden items-center gap-1.5 rounded-full border border-border/80 bg-card/60 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
             >
               <Search className="h-3 w-3" />
-              <kbd className="rounded border border-border/80 bg-muted/50 px-1 text-[10px]">⌘K</kbd>
+              <kbd className="rounded-lg border border-border/80 bg-muted/50 px-1 text-micro">⌘K</kbd>
             </button>
+              </Tooltip>
 
             <ThemeToggle
               isDark={theme === "dark"}
@@ -813,8 +885,6 @@ export default function App() {
         {tab === "learning" && <LearningPanel />}
         {tab === "analytics" && <AnalyticsPanel />}
         {tab === "optimization" && <OptimizationPanel />}
-        {tab === "risk" && <RiskPanel />}
-        {tab === "system" && <SystemPanel />}
         </Suspense>
         </main>
       </AnimatedSidebarInset>

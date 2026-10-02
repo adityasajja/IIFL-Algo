@@ -6,7 +6,7 @@ import { cn } from "./lib/utils";
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${inr(Math.abs(n))}`;
 const tone = (n: number | null | undefined) =>
-  !n ? "text-foreground" : n > 0 ? "text-emerald-500" : "text-rose-500";
+  !n ? "text-foreground" : n > 0 ? "text-gain" : "text-loss";
 
 type RunnerRow = { deployment_id: string; state?: string; symbols?: number; skipped_reason?: string | null };
 
@@ -40,7 +40,11 @@ function RunCard({ d, name, pnl, runner, onManage }: {
   const held = (pnl?.positions ?? []).filter((p) => p.quantity !== 0);
   const shown = all ? held : held.slice(0, 5);
   const total = pnl?.total_pnl ?? 0;
-  const today = pnl?.today_pnl ?? 0;
+  // `today_pnl` is `null` when the log has no fill before the session
+  // boundary — distinct from `0`, which would claim a flat day that was
+  // never lived. Coalescing it away here would silently relabel "not
+  // measured yet" as "no change today".
+  const today = pnl?.today_pnl;
 
   return (
     <Card>
@@ -53,7 +57,7 @@ function RunCard({ d, name, pnl, runner, onManage }: {
             <i
               className={cn(
                 "size-2 rounded-full",
-                d.status === "PAUSED" ? "bg-amber-500" : runner?.state === "ERROR" ? "bg-rose-500" : "bg-emerald-500",
+                d.status === "PAUSED" ? "bg-warning" : runner?.state === "ERROR" ? "bg-loss" : "bg-gain",
               )}
             />
             {statusOf(d, runner)}
@@ -69,17 +73,21 @@ function RunCard({ d, name, pnl, runner, onManage }: {
             value={pnl ? `${signed(total)}${pnl.total_pct != null ? ` (${pnl.total_pct.toFixed(2)}%)` : ""}` : "—"}
             className={tone(total)}
           />
-          <Stat label="Today" value={pnl ? signed(today) : "—"} className={tone(today)} />
+          <Stat
+            label="Today"
+            value={pnl ? (today == null ? "not measured" : signed(today)) : "—"}
+            className={tone(today)}
+          />
           <Stat label="Holding" value={pnl ? `${held.length} stock${held.length === 1 ? "" : "s"}` : "—"} />
           <Stat label="Practice money" value={inr(d.capital)} />
         </div>
 
         {pnl && held.length === 0 ? (
-          <div className="rounded-xl bg-muted/40 px-3.5 py-3 text-[13px] text-muted-foreground">No trades yet.</div>
+          <div className="rounded-md bg-muted/40 px-3.5 py-3 text-body text-muted-foreground">{total !== 0 ? "No open positions." : "No trades yet."}</div>
         ) : (
-          <div className="divide-y divide-border/60 rounded-xl border border-border/60">
+          <div className="divide-y divide-border/60 rounded-lg border border-border/60">
             {shown.map((p) => (
-              <div key={p.symbol} className="flex items-center justify-between gap-3 px-3.5 py-2 text-[13px]">
+              <div key={p.symbol} className="flex items-center justify-between gap-3 px-3.5 py-2 text-body">
                 <span className="font-medium">{p.symbol}</span>
                 <span className="text-muted-foreground tabular-nums">
                   {p.quantity} @ {p.avg_price.toFixed(2)}

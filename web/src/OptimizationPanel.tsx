@@ -12,8 +12,14 @@ import {
   runOptimizationCycle,
 } from "./api";
 import { Select } from "./components/ui/select";
+import { Button } from "./components/ui/button";
+import { Card, EmptyState } from "./components/ui/card";
+import { surface, surfaceInset } from "./components/ui/surface";
+import { Badge, Callout } from "./components/ui/stat";
+import { toneText, type Tone } from "./lib/tone";
+import { cn } from "./lib/utils";
 import { StrategyExperimentLab } from "./StrategyExperimentLab";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { useDialog } from "./components/ui/dialog-context";
 
 export const OptimizationPanel: React.FC = () => {
@@ -148,8 +154,8 @@ export const OptimizationPanel: React.FC = () => {
   };
 
   return (
-    <div style={{ color: "var(--foreground)" }}>
-      <div style={{ marginBottom: 16 }}>
+    <div className="text-foreground">
+      <div className="mb-4">
         <Tabs
           value={activeSubTab}
           onValueChange={(v) => setActiveSubTab(v as "lab" | "recommendations")}
@@ -167,17 +173,17 @@ export const OptimizationPanel: React.FC = () => {
       ) : (
         <>
           {/* Top Header */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+          <div className="flex justify-between items-start mb-5">
             <div>
-              <h1 style={{ fontSize: "24px", fontWeight: 700, margin: "0 0 6px 0", color: "var(--foreground)", letterSpacing: "-0.02em" }}>
+              <h1 className="m-0 mb-1.5 text-xl font-semibold tracking-tight text-foreground">
                 Controlled Strategy Optimization
               </h1>
-              <p style={{ margin: 0, color: "var(--muted-foreground)", fontSize: "14px" }}>
+              <p className="m-0 text-muted-foreground text-sm">
                 Forward Evidence → Hypothesis → Candidate Parameter Change → Backtest → Walk-Forward Validation → Robustness Check → User Approval → New Immutable Version
               </p>
             </div>
 
-        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+            <div className="flex gap-3 items-center">
           <Select
             value={selectedStrategyId}
             onChange={setSelectedStrategyId}
@@ -187,143 +193,97 @@ export const OptimizationPanel: React.FC = () => {
             }))}
           />
 
-          <button
-            onClick={handleRunOptimization}
-            disabled={runningOpt || !selectedStrategyId}
-            style={{
-              padding: "8px 18px",
-              backgroundColor: runningOpt ? "var(--border)" : "#2563eb",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: runningOpt ? "not-allowed" : "pointer",
-              transition: "background-color 0.15s ease",
-            }}
-          >
+              <Button onClick={handleRunOptimization} disabled={runningOpt || !selectedStrategyId}>
             {runningOpt ? "Evaluating Candidates..." : "Run Optimization Cycle"}
-          </button>
+              </Button>
         </div>
       </div>
 
       {/* Strict Safety Guarantee Banner */}
-      <div
-        style={{
-          backgroundColor: "rgba(30, 41, 59, 0.7)",
-          border: "1px solid #3b82f6",
-          borderRadius: "8px",
-          padding: "14px 18px",
-          marginBottom: "24px",
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-        }}
-      >
-        <div style={{ fontSize: "20px" }}>🛡️</div>
-        <div style={{ fontSize: "13px", color: "var(--foreground)", lineHeight: 1.5 }}>
-          <strong style={{ color: "#60a5fa" }}>Safety Boundaries Enforced:</strong> Automatic live strategy modification is strictly prohibited.
-          Only parameters explicitly designated as <code style={{ color: "#38bdf8" }}>adaptive: true</code> are tuned.
-          Approval never overwrites existing version <code style={{ color: "#a5b4fc" }}>V_N</code>; it generates <code style={{ color: "#a5b4fc" }}>V_{'{N+1}'}</code> with full audit provenance.
+          <div className={cn(surface, "mb-6 flex items-center gap-3 border-info px-4 py-3.5")}>
+            <div className="text-xl">🛡️</div>
+            <div className="text-body text-foreground leading-normal">
+            <strong className="text-info">Safety Boundaries Enforced:</strong> Automatic live strategy modification is strictly prohibited.
+            Only parameters explicitly designated as <code className="text-info">adaptive: true</code> are tuned.
+            Approval never overwrites existing version <code className="text-primary-soft">V_N</code>; it generates <code className="text-primary-soft">V_{'{N+1}'}</code> with full audit provenance.
         </div>
       </div>
 
       {/* Messages */}
       {error && (
-        <div style={{ padding: "12px 16px", backgroundColor: "#ef444420", border: "1px solid #ef4444", borderRadius: "6px", color: "#fca5a5", marginBottom: "20px", fontSize: "14px" }}>
-          ⚠️ {error}
+            <div className="mb-5">
+              <Callout tone="bad">⚠️ {error}</Callout>
         </div>
       )}
       {successMessage && (
-        <div style={{ padding: "12px 16px", backgroundColor: "#10b98120", border: "1px solid #10b981", borderRadius: "6px", color: "#6ee7b7", marginBottom: "20px", fontSize: "14px" }}>
-          ✓ {successMessage}
+            <div className="mb-5">
+              <Callout tone="good">✓ {successMessage}</Callout>
         </div>
       )}
 
       {/* Adaptive Parameters Grid */}
-      <div style={{ backgroundColor: "var(--card)", border: "1px solid var(--card)", borderRadius: "8px", padding: "18px", marginBottom: "28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <h3 style={{ fontSize: "15px", fontWeight: 600, margin: 0, color: "#f1f5f9" }}>
+          <Card padding="md" className="mb-7">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-sm font-semibold m-0 text-foreground">
             Configured Adaptive Parameters ({Object.keys(adaptiveParams).length})
           </h3>
-          <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
+              <span className="text-xs text-muted-foreground">
             Only these parameters may be optimized
           </span>
         </div>
 
         {Object.keys(adaptiveParams).length === 0 ? (
-          <div style={{ padding: "16px", textAlign: "center", color: "var(--muted-foreground)", fontSize: "13px" }}>
+              <div className="p-4 text-center text-muted-foreground text-body">
             No parameters are marked adaptive on this strategy. To optimize, declare parameters under <code>adaptive_parameters</code> in the strategy definition.
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px" }}>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
             {Object.values(adaptiveParams).map((p) => (
-              <div
-                key={p.name}
-                style={{
-                  backgroundColor: "var(--card)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "6px",
-                  padding: "12px",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                  <span style={{ fontWeight: 600, color: "#38bdf8", fontSize: "13px" }}>{p.name}</span>
-                  <span style={{ fontSize: "11px", backgroundColor: "#0284c720", color: "#38bdf8", padding: "2px 6px", borderRadius: "4px" }}>
+                  <div key={p.name} className={cn(surfaceInset, "bg-card p-3")}>
+                    <div className="flex justify-between mb-1.5">
+                      <span className="font-semibold text-info text-body">{p.name}</span>
+                      <span className="text-caption bg-info/13 text-info py-0.5 px-1.5 rounded-md">
                     {p.block}
                   </span>
                 </div>
-                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "6px" }}>
-                  Current: <strong style={{ color: "var(--foreground)" }}>{p.current}</strong> | Range: [{p.minimum} - {p.maximum}]
+                    <div className="text-xs text-muted-foreground mb-1.5">
+                    Current: <strong className="text-foreground">{p.current}</strong> | Range: [{p.minimum} - {p.maximum}]
                 </div>
-                <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>
+                    <div className="text-caption text-muted-foreground">
                   Step size: {p.step} {p.description ? `• ${p.description}` : ""}
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
+          </Card>
 
       {/* Recommendations Section */}
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h2 style={{ fontSize: "18px", fontWeight: 600, margin: 0, color: "var(--foreground)" }}>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold m-0 text-foreground">
             Optimization Recommendations ({recommendations.length})
           </h2>
-          <span style={{ fontSize: "13px", color: "var(--muted-foreground)" }}>
+              <span className="text-body text-muted-foreground">
             Requires explicit user approval before version generation
           </span>
         </div>
 
         {loading ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "var(--muted-foreground)" }}>Loading recommendations...</div>
+          <div className="p-10 text-center text-muted-foreground">Loading recommendations...</div>
         ) : recommendations.length === 0 ? (
-          <div style={{ padding: "48px", textAlign: "center", backgroundColor: "var(--card)", border: "1px dashed var(--border)", borderRadius: "8px", color: "var(--muted-foreground)" }}>
+              <EmptyState>
             No recommendations generated yet. Click <strong>"Run Optimization Cycle"</strong> above to evaluate forward observations against backtests and walk-forward validation.
-          </div>
+              </EmptyState>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div className="flex flex-col gap-5">
             {recommendations.map((rec) => {
               const isRecommended = rec.status === "RECOMMENDED";
               const isApproved = rec.status === "APPROVED";
               const isApplied = rec.status === "APPLIED";
               const isRejected = rec.status === "REJECTED";
 
-              const statusBg = isRecommended
-                ? "#10b98120"
-                : isApproved
-                ? "#3b82f620"
-                : isApplied
-                ? "#8b5cf620"
-                : "#ef444420";
-              const statusColor = isRecommended
-                ? "#34d399"
-                : isApproved
-                ? "#60a5fa"
-                : isApplied
-                ? "#c084fc"
-                : "#f87171";
+              const statusTone: Tone = isRecommended ? "good" : isApproved || isApplied ? "info" : "bad";
 
               const baseM = rec.baseline_metrics || {};
               const candM = rec.candidate_metrics || {};
@@ -331,244 +291,168 @@ export const OptimizationPanel: React.FC = () => {
               const rob = rec.robustness_results || {};
 
               return (
-                <div
-                  key={rec.recommendation_id}
-                  style={{
-                    backgroundColor: "var(--card)",
-                    border: `1px solid ${isRecommended ? "#10b98140" : "var(--card)"}`,
-                    borderRadius: "8px",
-                    overflow: "hidden",
-                    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                  }}
-                >
+                <div key={rec.recommendation_id} className={cn(surface, "overflow-hidden", isRecommended && "border-gain/40")}>
                   {/* Card Header */}
-                  <div
-                    style={{
-                      padding: "14px 20px",
-                      backgroundColor: "var(--card)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      borderBottom: "1px solid var(--border)",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <span style={{ fontSize: "16px", fontWeight: 700, color: "var(--foreground)" }}>
+                      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <span className="text-base font-semibold text-foreground">
                         Parameter: {rec.parameter}
                       </span>
+                          <Badge tone={statusTone}>{rec.status}</Badge>
                       <span
-                        style={{
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          padding: "3px 10px",
-                          borderRadius: "9999px",
-                          backgroundColor: statusBg,
-                          color: statusColor,
-                          border: `1px solid ${statusColor}40`,
-                        }}
-                      >
-                        {rec.status}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          padding: "2px 8px",
-                          borderRadius: "4px",
-                          backgroundColor: "var(--border)",
-                          color: "var(--foreground)",
-                        }}
+                      className="text-caption py-0.5 px-2 rounded-md bg-border text-foreground"
                       >
                         Confidence: {rec.confidence.toUpperCase()}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
+                        <div className="text-xs text-muted-foreground">
                       Source Version: V{rec.source_strategy_version}
                       {rec.target_strategy_version && ` → Target Version: V${rec.target_strategy_version}`}
                     </div>
                   </div>
 
                   {/* Card Body: Comparison */}
-                  <div style={{ padding: "20px" }}>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        gap: "24px",
-                        backgroundColor: "#141e33",
-                        border: "1px solid var(--card)",
-                        borderRadius: "8px",
-                        padding: "16px",
-                        marginBottom: "16px",
-                      }}
-                    >
+                      <div className="p-5">
+                        <div className="mb-4 grid grid-cols-2 gap-6 rounded-lg border border-border bg-muted/40 p-4">
                       {/* Current Version */}
                       <div>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                           CURRENT VERSION (V{rec.source_strategy_version})
                         </div>
-                        <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--foreground)", marginBottom: "12px" }}>
+                            <div className="text-xl font-semibold text-foreground mb-3">
                           {rec.current_value}
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", color: "var(--muted-foreground)" }}>
-                          <div>Profit Factor: <strong style={{ color: "var(--foreground)" }}>{baseM.profit_factor ?? "N/A"}</strong></div>
-                          <div>Sharpe Ratio: <strong style={{ color: "var(--foreground)" }}>{baseM.sharpe ?? "N/A"}</strong></div>
-                          <div>Max Drawdown: <strong style={{ color: "var(--foreground)" }}>{baseM.max_drawdown_pct ? `${baseM.max_drawdown_pct}%` : "N/A"}</strong></div>
-                          <div>Win Rate: <strong style={{ color: "var(--foreground)" }}>{baseM.win_rate_pct ? `${baseM.win_rate_pct}%` : "N/A"}</strong></div>
-                          <div>Trades: <strong style={{ color: "var(--foreground)" }}>{baseM.num_trades ?? 0}</strong></div>
+                            <div className="flex flex-col gap-1.5 text-body text-muted-foreground">
+                            <div>Profit Factor: <strong className="text-foreground">{baseM.profit_factor ?? "N/A"}</strong></div>
+                            <div>Sharpe Ratio: <strong className="text-foreground">{baseM.sharpe ?? "N/A"}</strong></div>
+                            <div>Max Drawdown: <strong className="text-foreground">{baseM.max_drawdown_pct ? `${baseM.max_drawdown_pct}%` : "N/A"}</strong></div>
+                            <div>Win Rate: <strong className="text-foreground">{baseM.win_rate_pct ? `${baseM.win_rate_pct}%` : "N/A"}</strong></div>
+                            <div>Trades: <strong className="text-foreground">{baseM.num_trades ?? 0}</strong></div>
                         </div>
                       </div>
 
                       {/* Proposed Version */}
-                      <div style={{ borderLeft: "1px solid var(--card)", paddingLeft: "24px" }}>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                          <div className="border-l border-border pl-6">
+                            <div className="text-xs font-semibold text-info uppercase tracking-wider mb-2">
                           PROPOSED VERSION
                         </div>
-                        <div style={{ fontSize: "20px", fontWeight: 700, color: "#38bdf8", marginBottom: "12px" }}>
+                            <div className="text-xl font-semibold text-info mb-3">
                           {rec.proposed_value}
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", color: "var(--muted-foreground)" }}>
+                            <div className="flex flex-col gap-1.5 text-body text-muted-foreground">
                           <div>
-                            Profit Factor: <strong style={{ color: "#34d399" }}>{candM.profit_factor ?? "N/A"}</strong>
+                          Profit Factor: <strong className="text-gain">{candM.profit_factor ?? "N/A"}</strong>
                             {baseM.profit_factor && candM.profit_factor && (
-                              <span style={{ fontSize: "11px", marginLeft: "6px", color: candM.profit_factor >= baseM.profit_factor ? "#34d399" : "#f87171" }}>
+                              <span className={cn("ml-1.5 text-caption", toneText[candM.profit_factor >= baseM.profit_factor ? "good" : "bad"])}>
                                 ({baseM.profit_factor} → {candM.profit_factor})
                               </span>
                             )}
                           </div>
                           <div>
-                            Sharpe Ratio: <strong style={{ color: "#34d399" }}>{candM.sharpe ?? "N/A"}</strong>
+                          Sharpe Ratio: <strong className="text-gain">{candM.sharpe ?? "N/A"}</strong>
                             {baseM.sharpe && candM.sharpe && (
-                              <span style={{ fontSize: "11px", marginLeft: "6px", color: candM.sharpe >= baseM.sharpe ? "#34d399" : "#f87171" }}>
+                              <span className={cn("ml-1.5 text-caption", toneText[candM.sharpe >= baseM.sharpe ? "good" : "bad"])}>
                                 ({baseM.sharpe} → {candM.sharpe})
                               </span>
                             )}
                           </div>
                           <div>
-                            Max Drawdown: <strong style={{ color: "#38bdf8" }}>{candM.max_drawdown_pct ? `${candM.max_drawdown_pct}%` : "N/A"}</strong>
+                          Max Drawdown: <strong className="text-info">{candM.max_drawdown_pct ? `${candM.max_drawdown_pct}%` : "N/A"}</strong>
                             {baseM.max_drawdown_pct && candM.max_drawdown_pct && (
-                              <span style={{ fontSize: "11px", marginLeft: "6px", color: candM.max_drawdown_pct <= baseM.max_drawdown_pct ? "#34d399" : "#f87171" }}>
+                              <span className={cn("ml-1.5 text-caption", toneText[candM.max_drawdown_pct <= baseM.max_drawdown_pct ? "good" : "bad"])}>
                                 ({baseM.max_drawdown_pct}% → {candM.max_drawdown_pct}%)
                               </span>
                             )}
                           </div>
                           <div>
-                            Win Rate: <strong style={{ color: "var(--foreground)" }}>{candM.win_rate_pct ? `${candM.win_rate_pct}%` : "N/A"}</strong>
+                          Win Rate: <strong className="text-foreground">{candM.win_rate_pct ? `${candM.win_rate_pct}%` : "N/A"}</strong>
                           </div>
                           <div>
-                            Trades: <strong style={{ color: "var(--foreground)" }}>{candM.num_trades ?? 0}</strong>
+                          Trades: <strong className="text-foreground">{candM.num_trades ?? 0}</strong>
                           </div>
                         </div>
                       </div>
                     </div>
 
                     {/* Evidence & Validation Details Grid */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "16px", fontSize: "12px" }}>
-                      <div style={{ backgroundColor: "var(--card)", padding: "12px", borderRadius: "6px" }}>
-                        <div style={{ color: "var(--muted-foreground)", marginBottom: "4px", fontWeight: 600 }}>FORWARD EVIDENCE</div>
-                        <div style={{ color: "var(--foreground)", fontWeight: 500 }}>
+                        <div className="grid grid-cols-3 gap-3 mb-4 text-xs">
+                          <div className="bg-card p-3 rounded-md">
+                          <div className="text-muted-foreground mb-1 font-semibold">FORWARD EVIDENCE</div>
+                            <div className="text-foreground font-medium">
                           {rec.sample_size} trades observed
                         </div>
-                        <div style={{ color: "var(--muted-foreground)", fontSize: "11px", marginTop: "4px" }}>
+                            <div className="text-muted-foreground text-caption mt-1">
                           {rec.source_observations?.statement || rec.source_observations?.kind || "Genuine paper-forward evidence"}
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: "var(--card)", padding: "12px", borderRadius: "6px" }}>
-                        <div style={{ color: "var(--muted-foreground)", marginBottom: "4px", fontWeight: 600 }}>WALK-FORWARD VALIDATION</div>
-                        <div style={{ color: wfM.passed ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                          <div className="bg-card p-3 rounded-md">
+                          <div className="text-muted-foreground mb-1 font-semibold">WALK-FORWARD VALIDATION</div>
+                          <div className={cn("font-semibold", toneText[wfM.passed ? "good" : "bad"])}>
                           {wfM.passed ? "Passed OOS Validation" : "Failed OOS"}
                         </div>
-                        <div style={{ color: "var(--muted-foreground)", fontSize: "11px", marginTop: "4px" }}>
+                            <div className="text-muted-foreground text-caption mt-1">
                           OOS PF: {wfM.out_of_sample_profit_factor ?? "N/A"} | Eff: {wfM.efficiency_ratio ?? "N/A"}
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: "var(--card)", padding: "12px", borderRadius: "6px" }}>
-                        <div style={{ color: "var(--muted-foreground)", marginBottom: "4px", fontWeight: 600 }}>ROBUSTNESS SCAN</div>
-                        <div style={{ color: rob.is_stable ? "#38bdf8" : "#f87171", fontWeight: 600 }}>
+                          <div className="bg-card p-3 rounded-md">
+                          <div className="text-muted-foreground mb-1 font-semibold">ROBUSTNESS SCAN</div>
+                          <div className={cn("font-semibold", toneText[rob.is_stable ? "info" : "bad"])}>
                           {rob.is_stable ? "Stable Plateau" : "Isolated Peak (Overfitting Risk)"}
                         </div>
-                        <div style={{ color: "var(--muted-foreground)", fontSize: "11px", marginTop: "4px" }}>
+                            <div className="text-muted-foreground text-caption mt-1">
                           {rob.sensitivity_verdict || (rob.stable_range ? `Stable between ${rob.stable_range[0]} and ${rob.stable_range[1]}` : "")}
                         </div>
                       </div>
                     </div>
 
                     {/* Optimization Reason */}
-                    <div style={{ fontSize: "13px", color: "var(--foreground)", backgroundColor: "var(--card)50", padding: "10px 14px", borderRadius: "6px", marginBottom: "16px" }}>
-                      <span style={{ color: "var(--muted-foreground)", fontWeight: 600 }}>Evaluation Synthesis: </span>
+                        <div className="mb-4 rounded-md bg-muted/40 px-3.5 py-2.5 text-body text-foreground">
+                        <span className="text-muted-foreground font-semibold">Evaluation Synthesis: </span>
                       {rec.reason}
                     </div>
 
                     {/* Action Controls */}
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
+                        <div className="flex justify-end gap-3 items-center">
                       {isRecommended && (
                         <>
-                          <button
+                              <Button
+                                variant="outline"
                             onClick={() => handleReject(rec.recommendation_id)}
                             disabled={actionLoading === rec.recommendation_id}
-                            style={{
-                              padding: "7px 16px",
-                              backgroundColor: "transparent",
-                              color: "#f87171",
-                              border: "1px solid #ef444450",
-                              borderRadius: "6px",
-                              fontSize: "13px",
-                              fontWeight: 600,
-                              cursor: "pointer",
-                            }}
                           >
                             Reject
-                          </button>
-                          <button
+                              </Button>
+                              <Button
                             onClick={() => handleApprove(rec.recommendation_id)}
                             disabled={actionLoading === rec.recommendation_id}
-                            style={{
-                              padding: "7px 18px",
-                              backgroundColor: "#10b981",
-                              color: "#ffffff",
-                              border: "none",
-                              borderRadius: "6px",
-                              fontSize: "13px",
-                              fontWeight: 600,
-                              cursor: "pointer",
-                            }}
                           >
                             {actionLoading === rec.recommendation_id ? "Processing..." : "Approve Recommendation"}
-                          </button>
+                              </Button>
                         </>
                       )}
 
                       {isApproved && (
-                        <button
+                            <Button
                           onClick={() => handleApply(rec.recommendation_id)}
                           disabled={actionLoading === rec.recommendation_id}
-                          style={{
-                            padding: "8px 20px",
-                            backgroundColor: "#2563eb",
-                            color: "#ffffff",
-                            border: "none",
-                            borderRadius: "6px",
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                          }}
                         >
                           {actionLoading === rec.recommendation_id
                             ? "Applying..."
                             : `Apply & Generate Immutable Version (V${rec.source_strategy_version} → V${rec.source_strategy_version + 1})`}
-                        </button>
+                            </Button>
                       )}
 
                       {isApplied && (
-                        <span style={{ fontSize: "13px", color: "#c084fc", fontWeight: 600 }}>
+                            <span className="text-body font-semibold text-info">
                           ✓ Applied to Strategy Version V{rec.target_strategy_version}
                         </span>
                       )}
 
                       {isRejected && (
-                        <span style={{ fontSize: "13px", color: "#f87171" }}>
+                            <span className="text-body text-loss">
                           Rejected {rec.rejection_reason ? `(${rec.rejection_reason})` : ""}
                         </span>
                       )}

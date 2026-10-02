@@ -29,12 +29,12 @@ const MORPH: Transition = { type: "spring", duration: 0.5, bounce: 0.22 };
 // "md" (h-11) matches the app's other form controls (Input, Button); "sm" fits
 // dense inline rows like the screener's condition builder.
 const ROW: Record<"sm" | "md", string> = {
-  sm: "flex h-8 w-full items-center justify-between gap-1.5 px-2.5 text-[13px]",
-  md: "flex h-11 w-full items-center justify-between gap-2 px-3.5 text-sm",
+  sm: "flex h-8 w-full items-center justify-between gap-1.5 px-2.5 text-body",
+  md: "flex h-10 min-h-[40px] w-full items-center justify-between gap-2 px-3 text-sm font-light",
 };
 const RADIUS: Record<"sm" | "md", { trigger: number; panel: number }> = {
-  sm: { trigger: 8, panel: 12 },
-  md: { trigger: 12, panel: 16 },
+  sm: { trigger: 9999, panel: 12 },
+  md: { trigger: 9999, panel: 12 },
 };
 
 const LIST: Variants = {
@@ -237,7 +237,7 @@ export function MorphSelectTrigger({
       <div
         aria-hidden
         inert
-        className={cn(ROW[ctx.size], "invisible rounded-xl border border-border")}
+        className={cn(ROW[ctx.size], "invisible rounded-lg border border-border")}
       >
         {children}
         <ChevronDown className={ctx.size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} />
@@ -259,7 +259,7 @@ export function MorphSelectTrigger({
             style={{ borderRadius: RADIUS[ctx.size].trigger }}
             className={cn(
               ROW[ctx.size],
-              "absolute inset-x-0 top-0 z-10 border border-border bg-transparent text-foreground outline-none transition-colors",
+              "absolute inset-x-0 top-0 z-10 border border-border bg-card text-foreground outline-none transition-colors",
               "hover:border-(--color-border-strong) focus-visible:ring-2 focus-visible:ring-foreground/20",
               "disabled:pointer-events-none disabled:opacity-50",
               className,
@@ -306,7 +306,7 @@ export function MorphSelectContent({
             transition={ctx.reduce ? { duration: 0 } : MORPH}
             style={{ borderRadius: RADIUS[ctx.size].panel }}
             className={cn(
-              "absolute inset-x-0 top-0 z-30 overflow-hidden border border-border bg-card shadow-lg",
+              "absolute inset-x-0 top-0 z-30 overflow-hidden border border-border bg-card shadow-[rgba(0,55,112,0.08)_0_8px_24px,rgba(0,55,112,0.04)_0_2px_6px] ",
               className,
             )}
           >
@@ -342,7 +342,8 @@ export function MorphSelectContent({
               initial="hidden"
               animate="show"
               variants={ctx.reduce ? undefined : LIST}
-              className="p-1"
+              data-lenis-prevent
+              className="max-h-64 overflow-y-auto p-1"
             >
               {children}
             </motion.ul>
@@ -385,7 +386,7 @@ export function MorphSelectItem({
         onClick={() => ctx.select(value)}
         className={cn(
           "flex w-full items-center justify-between gap-2 rounded-lg text-left outline-none transition-colors",
-          ctx.size === "sm" ? "px-2 py-1 text-[13px]" : "px-2.5 py-1.5 text-sm",
+          ctx.size === "sm" ? "px-2 py-1 text-body" : "px-2.5 py-1.5 text-sm",
           selected
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted",

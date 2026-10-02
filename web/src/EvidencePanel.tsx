@@ -13,12 +13,12 @@ import { cn } from "./lib/utils";
  * these results was individually correct when it was first produced, and
  * collectively they were misleading.
  *
- *  - A +480% index that was really +124% once a look-ahead universe selection
- *    was removed.
- *  - A "factor" that returned +4.07%/month when the market rose and -2.06% when
- *    it fell — beta in a costume.
- *  - Five risk overlays that beat buy-and-hold on the full window and lost on
- *    every second half.
+ * - A +480% index that was really +124% once a look-ahead universe selection
+ * was removed.
+ * - A "factor" that returned +4.07%/month when the market rose and -2.06% when
+ * it fell — beta in a costume.
+ * - Five risk overlays that beat buy-and-hold on the full window and lost on
+ * every second half.
  *
  * So the panel is built the other way round from a normal results page. The
  * verdict comes first, the headline number second, and the evidence that
@@ -70,7 +70,7 @@ export default function EvidencePanel() {
         <div className="px-5 pb-4">
           <Callout tone="warn">
             Produce the findings and their verdicts:
-            <code className="mt-2 block rounded bg-muted/60 px-2 py-1 text-[12px]">
+            <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               .venv/Scripts/python.exe scripts/research_honest_verdicts.py
             </code>
           </Callout>
@@ -202,16 +202,16 @@ function FindingCard({ finding }: { finding: EvidenceFinding }) {
       </div>
 
       <div className="space-y-3 px-5 py-4">
-        <div className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+        <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
           Why this verdict
         </div>
         <ul className="space-y-1.5">
           {verdict.reasons.map((r, i) => (
-            <li key={i} className="flex gap-2 text-[13px] leading-relaxed">
+            <li key={i} className="flex gap-2 text-body leading-relaxed">
               <AlertTriangle
                 className={cn(
                   "mt-0.5 h-3.5 w-3.5 shrink-0",
-                  ok ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400",
+                  ok ? "text-muted-foreground" : "text-warning",
                 )}
               />
               <span className={ok ? "text-muted-foreground" : ""}>{r}</span>

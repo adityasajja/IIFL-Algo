@@ -1,4 +1,4 @@
-import { Star } from "lucide-react";
+import { IconStar } from "./icons";
 import { useCallback, useEffect, useState } from "react";
 import {
   getForwardTracker,
@@ -16,24 +16,22 @@ import {
   type InsightsSettings,
 } from "./api";
 import { Button } from "./components/ui/button";
-import { ErrorBox } from "./components/ui/card";
+import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
+import { Badge, Stat } from "./components/ui/stat";
+import { AnimatedBadge } from "./components/motion/animated-badge";
 import { PageLoader } from "./components/ui/loading";
-import { Switch } from "./components/ui/switch";
+import { Switch } from "./components/motion/switch";
+import { Tooltip } from "./components/motion/tooltip";
 import { useToast } from "./components/ui/toast-context";
 import { formatIst } from "./lib/format";
+import { formatInr as inr, formatPct as signed } from "./lib/theme";
 import { cn } from "./lib/utils";
 
 const TONE = {
-  good: "bg-emerald-500/10 text-emerald-500",
-  bad: "bg-rose-500/10 text-rose-500",
-  warn: "bg-amber-500/10 text-amber-500",
-  flat: "bg-muted text-muted-foreground",
-};
-
-const SETUP_TONE: Record<string, string> = {
-  strong_rs: TONE.good,
-  oversold: TONE.warn,
-  resting_leader: TONE.flat,
+  good: "bg-gain/[0.08] text-gain border border-gain/20",
+  bad: "bg-destructive/[0.08] text-destructive border border-destructive/20",
+  warn: "bg-warning/[0.08] text-warning border border-warning/20",
+  flat: "bg-muted/50 text-muted-foreground border border-border/60",
 };
 
 const FLAG_TONE: Record<HoldingFlag["kind"], string> = {
@@ -43,8 +41,6 @@ const FLAG_TONE: Record<HoldingFlag["kind"], string> = {
   lagging: TONE.flat,
 };
 
-const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
-const signed = (n: number, d = 1) => `${n > 0 ? "+" : ""}${n.toFixed(d)}%`;
 const dateLabel = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
@@ -119,7 +115,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
       {error && <ErrorBox>{error}</ErrorBox>}
 
       {/* The market, in a word, and what changed. */}
-      <div className="rounded-2xl border border-border bg-card p-5">
+      <Card className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
@@ -129,14 +125,14 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               <span className="text-xs text-muted-foreground">market</span>
             </div>
             <p className="mt-3 max-w-xl text-sm">{m.headline}</p>
-            <p className="mt-1 max-w-xl text-xs text-muted-foreground">{m.context}</p>
+            <Hint className="mt-1 max-w-xl">{m.context}</Hint>
           </div>
           {m.nifty_close != null && (
             <div className="text-right">
               <div className="text-xs text-muted-foreground">Nifty 50</div>
               <div className="text-2xl font-semibold tabular-nums">{inr(m.nifty_close)}</div>
               {m.nifty_change_1d_pct != null && (
-                <div className={cn("text-xs tabular-nums", m.nifty_change_1d_pct >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                <div className={cn("text-xs tabular-nums", m.nifty_change_1d_pct >= 0 ? "text-gain" : "text-loss")}>
                   {signed(m.nifty_change_1d_pct, 2)} today
                 </div>
               )}
@@ -148,29 +144,27 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
             <span className="text-xs text-muted-foreground">Since last time</span>
             {digest.changes.map((c) => (
-              <span key={c} className="rounded-full bg-amber-500/10 px-2.5 py-1 text-xs text-amber-500">
+              <Badge key={c} tone="warn">
                 {c}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
         {digest.stale && digest.data_as_of && (
-          <div className="mt-3 text-xs text-amber-500">
+          <div className="mt-3 text-xs text-warning">
             Stock data is from {dateLabel(digest.data_as_of)} ({digest.stale_days} days old), so the lists below describe that day.
           </div>
         )}
-      </div>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
         {/* Things worth considering buying, only setups that held up in history. */}
-        <div className="rounded-2xl border border-border bg-card">
-          <div className="flex items-baseline justify-between px-5 pt-5">
-            <span className="text-sm font-semibold">Worth a look</span>
-            <span className="text-xs text-muted-foreground" title="Only setups that beat the average in both halves of the history.">
-              backed by history
-            </span>
-          </div>
-          {marketNote && <div className="px-5 pt-2 text-xs text-amber-500">{marketNote}</div>}
+        <Card>
+          <CardHeader
+            title="Worth a look"
+            sub="backed by history · beat the average in both halves"
+          />
+          {marketNote && <div className="px-5 pt-2 text-xs text-warning">{marketNote}</div>}
           {digest.ideas.length === 0 ? (
             <div className="px-5 py-8 text-sm text-muted-foreground">Nothing matches today.</div>
           ) : (
@@ -180,16 +174,14 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Your holdings, described honestly. */}
-        <div className="rounded-2xl border border-border bg-card">
-          <div className="flex items-baseline justify-between px-5 pt-5">
-            <span className="text-sm font-semibold">Your holdings</span>
-            {held.source === "snapshot" && held.as_of && (
-              <span className="text-xs text-muted-foreground">as of {formatIst(held.as_of)}</span>
-            )}
-          </div>
+        <Card>
+          <CardHeader
+            title="Your holdings"
+            sub={held.source === "snapshot" && held.as_of ? `as of ${formatIst(held.as_of)}` : undefined}
+          />
           {held.items.length === 0 ? (
             <div className="px-5 py-8 text-sm text-muted-foreground">No holdings on record yet.</div>
           ) : (
@@ -201,7 +193,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
                       {h.symbol}
                     </button>
                     {h.pnl_pct != null && (
-                      <span className={cn("text-sm tabular-nums", h.pnl_pct >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                      <span className={cn("text-sm tabular-nums", h.pnl_pct >= 0 ? "text-gain" : "text-loss")}>
                         {signed(h.pnl_pct, 0)}
                       </span>
                     )}
@@ -209,7 +201,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
                   <div className="mt-2 space-y-1.5">
                     {h.flags.map((f) => (
                       <div key={f.kind} className="flex items-start gap-2 text-xs" title={f.note}>
-                        <span className={cn("mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", FLAG_TONE[f.kind])}>
+                      <span className={cn("mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-caption font-medium", FLAG_TONE[f.kind])}>
                           {f.title}
                         </span>
                         <span className="text-muted-foreground">{f.detail}</span>
@@ -225,7 +217,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               )}
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {plan && <GapPlanCard plan={plan} onOpenChart={onOpenChart} />}
@@ -234,7 +226,7 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
 
       {/* What to be told, and when. */}
       {settings && (
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card px-5 py-4">
+        <Card className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <Switch checked={settings.enabled} onCheckedChange={(v) => void update({ enabled: v })} label={`Message me daily at ${settings.send_after}`} />
             <Switch checked={settings.market_changes} onCheckedChange={(v) => void update({ market_changes: v })} label="Market changes" />
@@ -247,10 +239,10 @@ export default function TodayPanel({ onOpenChart }: { onOpenChart?: (symbol: str
               {sending ? "Sending…" : "Send now"}
             </Button>
           </div>
-        </div>
+        </Card>
       )}
 
-      <p className="px-1 text-[11px] text-muted-foreground">{digest.disclaimer}</p>
+      <Hint className="px-1 text-caption">{digest.disclaimer}</Hint>
     </div>
   );
 }
@@ -267,15 +259,22 @@ function IdeaRow({ idea, onOpenChart }: { idea: InsightIdea; onOpenChart?: (symb
           <button type="button" onClick={() => onOpenChart?.(idea.symbol)} className="font-semibold hover:underline">
             {idea.symbol}
           </button>
-          <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", SETUP_TONE[idea.setup] ?? TONE.flat)}>
+          <AnimatedBadge
+          status={idea.setup === "strong_rs" ? "success" : idea.setup === "oversold" ? "warning" : "neutral"}
+            size="sm"
+          >
             {idea.setup_label}
-          </span>
-          {idea.is_new && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">New</span>}
-          {idea.on_watchlist && <Star className="size-3 fill-amber-500 text-amber-500" aria-label="On your watchlist" />}
+          </AnimatedBadge>
+          {idea.is_new && (
+            <AnimatedBadge status="info" size="sm" pulse>
+              New
+            </AnimatedBadge>
+          )}
+          {idea.on_watchlist && <span className="text-warning" aria-label="On your watchlist"><IconStar size={12} /></span>}
         </div>
         <div className="text-right">
           <div className="text-sm font-medium tabular-nums">{inr(idea.price)}</div>
-          <div className={cn("text-xs tabular-nums", idea.change_1d_pct >= 0 ? "text-emerald-500" : "text-rose-500")}>
+          <div className={cn("text-xs tabular-nums", idea.change_1d_pct >= 0 ? "text-gain" : "text-loss")}>
             {signed(idea.change_1d_pct, 2)}
           </div>
         </div>
@@ -289,50 +288,43 @@ function IdeaRow({ idea, onOpenChart }: { idea: InsightIdea; onOpenChart?: (symb
   );
 }
 
-const STATE_TONE: Record<ForwardTracker["state"], string> = {
-  collecting: TONE.flat,
-  working: TONE.good,
-  not_working: TONE.bad,
-  inconclusive: TONE.warn,
-};
-
 /** The forward test: signals written down before the week, graded after it. */
 function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onOpenChart?: (symbol: string) => void }) {
   const pct = Math.min(100, (t.graded / t.needed) * 100);
+  const animStatus = t.state === "working" ? "success" : t.state === "not_working" ? "danger" : t.state === "inconclusive" ? "warning" : "neutral";
   return (
-    <div className="rounded-2xl border border-border bg-card p-5">
+    <Card className="p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-sm font-semibold">Live test</span>
-        <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-medium", STATE_TONE[t.state])}>{t.verdict}</span>
+        <AnimatedBadge status={animStatus} pulse={t.state === "working"} size="sm">
+          {t.verdict}
+        </AnimatedBadge>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <Hint className="mt-1">
         {t.description}. Each Friday's picks are written down, then graded a week later on whether they gained 2% or more.
-      </p>
+      </Hint>
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        <div>
-          <div className="text-xs text-muted-foreground">Hit rate</div>
-          <div className="text-2xl font-semibold tabular-nums">{t.hit_rate_pct == null ? "—" : `${t.hit_rate_pct}%`}</div>
-          <div className="text-[11px] text-muted-foreground">
-            {t.range_pct ? `likely ${t.range_pct[0]}–${t.range_pct[1]}%` : "no graded picks yet"}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-muted-foreground">Any stock</div>
-          <div className="text-2xl font-semibold tabular-nums">{t.base_rate_pct}%</div>
-          <div className="text-[11px] text-muted-foreground">ordinary rate</div>
-        </div>
-        <div>
-          <div className="text-xs text-muted-foreground">Avg week</div>
-          <div className={cn("text-2xl font-semibold tabular-nums", t.avg_net_pct == null ? "" : t.avg_net_pct >= 0 ? "text-emerald-500" : "text-rose-500")}>
-            {t.avg_net_pct == null ? "—" : signed(t.avg_net_pct, 2)}
-          </div>
-          <div className="text-[11px] text-muted-foreground">after costs</div>
-        </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Stat
+          label="Hit rate"
+          value={t.hit_rate_pct == null ? "—" : `${t.hit_rate_pct}%`}
+          sub={t.range_pct ? `likely ${t.range_pct[0]}–${t.range_pct[1]}%` : "no graded picks yet"}
+        />
+        <Stat
+        label="Any stock"
+        value={`${t.base_rate_pct}%`}
+        sub="ordinary rate"
+        />
+        <Stat
+          label="Avg week"
+          value={t.avg_net_pct == null ? "—" : signed(t.avg_net_pct, 2)}
+          sub="after costs"
+          tone={t.avg_net_pct == null ? "neutral" : t.avg_net_pct >= 0 ? "good" : "bad"}
+        />
       </div>
 
       <div className="mt-4">
-        <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+        <div className="mb-1 flex justify-between text-caption text-muted-foreground">
           <span>{t.graded} of {t.needed} picks graded</span>
           <span>{t.open.length} waiting on this week</span>
         </div>
@@ -345,19 +337,19 @@ function TrackerCard({ tracker: t, onOpenChart }: { tracker: ForwardTracker; onO
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">This week's picks</span>
           {t.open.map((s) => (
-            <button
-              key={`${s.entry_date}-${s.symbol}`}
-              type="button"
+            <Tooltip key={`${s.entry_date}-${s.symbol}`} content={`Picked ${s.entry_date} at ${inr(s.entry_close)}`} side="top" delay={400}>
+            <Button
+            size="sm"
+            variant="outline"
               onClick={() => onOpenChart?.(s.symbol)}
-              className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium hover:bg-accent"
-              title={`Picked ${s.entry_date} at ${inr(s.entry_close)}`}
             >
               {s.symbol}
-            </button>
+              </Button>
+            </Tooltip>
           ))}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -367,22 +359,12 @@ const EXIT_LABEL = { target: "Hit target", stop: "Stopped out", friday: "Sold Fr
 function PlanStat({ label, stats }: { label: string; stats: GapPlanStats }) {
   const good = (stats.avg_net_pct ?? 0) > 0;
   return (
-    <div className="rounded-xl bg-muted/40 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      {stats.graded === 0 ? (
-        <div className="mt-1 text-sm text-muted-foreground">No graded trades yet</div>
-      ) : (
-        <>
-          <div className={cn("mt-1 text-xl font-semibold tabular-nums", good ? "text-emerald-500" : "text-rose-500")}>
-            {signed(stats.avg_net_pct ?? 0, 2)}
-            <span className="ml-1 text-xs font-normal text-muted-foreground">per trade</span>
-          </div>
-          <div className="text-[11px] text-muted-foreground">
-            {stats.win_rate_pct}% hit target · {stats.graded} trades · {stats.weeks} {stats.weeks === 1 ? "week" : "weeks"}
-          </div>
-        </>
-      )}
-    </div>
+    <Stat
+      label={label}
+      value={stats.graded === 0 ? "No trades" : `${signed(stats.avg_net_pct ?? 0, 2)}`}
+      sub={stats.graded === 0 ? "Waiting on data" : `${stats.win_rate_pct}% hit target · ${stats.graded} trades`}
+      tone={stats.graded === 0 ? "neutral" : good ? "good" : "bad"}
+    />
   );
 }
 
@@ -391,14 +373,14 @@ function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (s
   const w = p.this_week;
   const pct = Math.min(100, (p.live.graded / p.needed) * 100);
   return (
-    <div className="rounded-2xl border border-border bg-card p-5">
+    <Card className="p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-sm font-semibold">Monday gap plan</span>
-        <span className="text-[11px] text-muted-foreground">paper trades, no money at risk</span>
+        <Badge tone="flat">paper trades, no money at risk</Badge>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <Hint className="mt-1">
         After a rising week, buy stocks that open more than {Math.abs(p.plan.gap_pct)}% below Friday's close. Sell at +{p.plan.target_pct}%, stop at −{p.plan.stop_pct}%, otherwise sell Friday.
-      </p>
+      </Hint>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <span className={cn("rounded-full px-3 py-1 text-sm font-semibold", CALL_TONE[w.status])}>
@@ -416,7 +398,7 @@ function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (s
         <PlanStat label="Replay of recent weeks" stats={p.replay} />
       </div>
       <div className="mt-3">
-        <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+        <div className="mb-1 flex justify-between text-caption text-muted-foreground">
           <span>{p.live.graded} of {p.needed} live trades graded</span>
           <span>{p.verdict}</span>
         </div>
@@ -428,7 +410,7 @@ function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (s
       {p.open.length > 0 && (
         <div className="mt-4">
           <div className="mb-2 text-xs text-muted-foreground">Open this week</div>
-          <div className="divide-y divide-border rounded-xl border border-border">
+          <div className="divide-y divide-border rounded-lg border border-border">
             {p.open.map((t) => (
               <div key={`${t.entry_date}-${t.symbol}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                 <button type="button" onClick={() => onOpenChart?.(t.symbol)} className="font-semibold hover:underline">{t.symbol}</button>
@@ -444,19 +426,19 @@ function GapPlanCard({ plan: p, onOpenChart }: { plan: GapPlan; onOpenChart?: (s
       {p.recent.length > 0 && (
         <div className="mt-4">
           <div className="mb-2 text-xs text-muted-foreground">Latest results</div>
-          <div className="divide-y divide-border rounded-xl border border-border">
+          <div className="divide-y divide-border rounded-lg border border-border">
             {p.recent.slice(0, 6).map((t) => (
               <div key={`${t.entry_date}-${t.symbol}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                 <span>
                   <span className="font-semibold">{t.symbol}</span>
                   <span className="ml-2 text-xs text-muted-foreground">{dateLabel(t.entry_date)} · {t.exit_reason ? EXIT_LABEL[t.exit_reason] : ""}{t.source === "replay" ? " · replay" : ""}</span>
                 </span>
-                <span className={cn("tabular-nums", (t.net_pct ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>{signed(t.net_pct ?? 0, 2)}</span>
+                <span className={cn("tabular-nums", (t.net_pct ?? 0) >= 0 ? "text-gain" : "text-loss")}>{signed(t.net_pct ?? 0, 2)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

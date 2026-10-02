@@ -58,7 +58,7 @@ export default function AlphaHuntPanel() {
         <div className="px-4 pb-4">
           <Callout tone="warn">
             Run the harness first:
-            <code className="mt-2 block rounded bg-muted/60 px-2 py-1 text-[12px]">
+            <code className="mt-2 block rounded-md bg-muted/60 px-2 py-1 text-xs">
               {report.hint ?? ".venv/Scripts/python.exe scripts/research_alpha_hunt.py"}
             </code>
           </Callout>
@@ -106,14 +106,14 @@ export default function AlphaHuntPanel() {
           {universes.map(([name, u]) => (
             <div key={name} className="space-y-2">
               <div className="flex items-baseline justify-between">
-                <span className="text-[13px] font-medium">{prettyUniverse(name)}</span>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-body font-medium">{prettyUniverse(name)}</span>
+                <span className="text-caption text-muted-foreground">
                   {u.symbols} symbols · {u.sessions} sessions
                 </span>
               </div>
               <div className="overflow-x-auto rounded-lg border border-border/60">
-                <table className="w-full text-[13px]">
-                  <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <table className="w-full text-body">
+                  <thead className="bg-muted/40 text-caption uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">Candidate</th>
                       <th className="px-3 py-2 text-right font-medium">Sharpe</th>
@@ -144,13 +144,13 @@ export default function AlphaHuntPanel() {
           <div className="space-y-3 px-4 pb-4">
             {Object.entries(priors).map(([name, spec]) => (
               <div key={name} className="rounded-lg border border-border/60 p-3">
-                <div className="text-[13px] font-medium">{prettyName(name)}</div>
+                <div className="text-body font-medium">{prettyName(name)}</div>
                 <div className="mt-0.5 text-[12.5px] text-muted-foreground">{spec.prior}</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {Object.entries(spec.grid).map(([param, values]) => (
                     <span
                       key={param}
-                      className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                      className="rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-caption text-muted-foreground"
                     >
                       {param}: {values.join(", ")}
                     </span>
@@ -169,13 +169,13 @@ export default function AlphaHuntPanel() {
             Object.entries(u.hypotheses ?? {}).map(([h, r]) => (
               <div key={`${uname}-${h}`} className="rounded-lg border border-border/60 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-[13px] font-medium">
+                  <span className="text-body font-medium">
                     {prettyName(h)}
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                    <span className="ml-2 text-caption font-normal text-muted-foreground">
                       {prettyUniverse(uname)}
                     </span>
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     {r.metrics?.n_trials} trials
                     {r.folds && ` · folds ${r.folds.map((f) => fmtNum(f.test_sharpe, 1)).join(" / ")}`}
                   </span>
@@ -188,7 +188,7 @@ export default function AlphaHuntPanel() {
                       <li key={c.name} className="flex items-start gap-2 text-[12.5px]">
                         <span className="mt-0.5 shrink-0">
                           {c.ok ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <Check className="h-3.5 w-3.5 text-gain" />
                           ) : (
                             <X className="h-3.5 w-3.5 text-destructive" />
                           )}
@@ -249,7 +249,7 @@ function Row({ name, r }: { name: string; r: AlphaHuntHypothesis }) {
       <td
         className={cn(
           "px-3 py-2 text-right tabular-nums",
-          m.oos_sharpe >= m.bench_sharpe ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+          m.oos_sharpe >= m.bench_sharpe ? "text-gain" : "text-muted-foreground",
         )}
       >
         {fmtNum(m.oos_sharpe)}
@@ -265,7 +265,7 @@ function Row({ name, r }: { name: string; r: AlphaHuntHypothesis }) {
       <td
         className={cn(
           "px-3 py-2 text-right tabular-nums",
-          clears ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+          clears ? "font-medium text-gain" : "text-muted-foreground",
         )}
       >
         {z === null || z === undefined ? "—" : `${z >= 0 ? "+" : ""}${fmtNum(z)}σ`}

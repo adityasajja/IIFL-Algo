@@ -1,4 +1,4 @@
-import { AlertOctagon, FlaskConical } from "lucide-react";
+import { AlertOctagon } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /**
@@ -31,64 +31,48 @@ export function EnvironmentBanner({
 
   // Kill switch outranks everything: if orders are blocked, that is the fact
   // that matters, regardless of which environment we are nominally in.
-  // "unknown" stays loud: it means the backend cannot be reached. "safe" is the everyday
-  // paper state and is deliberately quiet, because a bar that always shouts is ignored.
+  // "unknown" stays loud: it means the backend cannot be reached. "safe" is the
+  // everyday paper state — nothing is wrong, so nothing is shown.
   const state = killSwitch ? "halted" : live ? "live" : !envKnown ? "unknown" : "safe";
 
+  if (state === "safe") return null;
+
+  // Every remaining state is one that must not be missed — the quiet everyday
+  // "paper mode" case already returned above — so every branch below is loud.
   const label = !envKnown
     ? "ENVIRONMENT UNKNOWN"
     : killSwitch
       ? `HALTED — KILL SWITCH ENGAGED (${env})`
-      : live
-        ? "LIVE — REAL CAPITAL"
-        : "Paper mode";
+      : "LIVE — REAL CAPITAL";
 
   const detail = !envKnown
     ? "Backend unreachable — do not assume orders are safe."
     : killSwitch
       ? "No new orders will be placed until it is released."
-      : live
-        ? `Env ${env} · execution live · approved signals reach the broker and fill for real.`
-        : "Orders are simulated. Nothing is sent to your broker.";
+      : `Env ${env} · execution live · approved signals reach the broker and fill for real.`;
 
   return (
     <div
       role="status"
       aria-live="polite"
       className={cn(
-        "flex w-full items-center justify-center gap-2.5 border-b text-center",
-        state === "safe" ? "gap-2 border-border/50 px-4 py-1 text-muted-foreground" : "px-4 py-1.5",
-        state === "live" && "border-red-700 bg-red-600 text-white",
-        state === "halted" && "border-amber-600 bg-amber-500 text-black",
-        state === "unknown" && "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        "flex w-full items-center justify-center gap-2.5 border-b px-4 py-1.5 text-center",
+        state === "live" && "border-loss bg-loss text-white",
+        state === "halted" && "border-warning bg-warning text-black",
+        state === "unknown" && "border border-warning/20 bg-warning/[0.08] text-warning",
         className,
       )}
     >
-      {state === "live" ? (
         <AlertOctagon className="h-3.5 w-3.5 shrink-0" />
-      ) : state === "halted" ? (
-        <AlertOctagon className="h-3.5 w-3.5 shrink-0" />
-      ) : state === "unknown" ? (
-        <AlertOctagon className="h-3.5 w-3.5 shrink-0" />
-      ) : (
-        <FlaskConical className="h-3 w-3 shrink-0 opacity-60" />
-      )}
+
+      <span className="text-micro font-normal uppercase tracking-[0.1px]">{label}</span>
 
       <span
         className={cn(
-          state === "safe" ? "text-[11px] font-medium" : "text-[11.5px] font-bold uppercase tracking-[0.14em]",
+          "hidden text-caption sm:inline",
+          state === "live" ? "text-white/85" : state === "halted" ? "text-black/70" : "opacity-80",
         )}
       >
-        {label}
-      </span>
-
-      <span
-        className={cn(
-          "hidden text-[11px] sm:inline",
-          state === "live" ? "text-white/85" : state === "halted" ? "text-black/70" : state === "safe" ? "opacity-70" : "opacity-80",
-        )}
-      >
-        {state === "safe" && <span className="mr-2 opacity-50">·</span>}
         {detail}
       </span>
 

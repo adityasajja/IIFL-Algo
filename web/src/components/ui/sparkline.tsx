@@ -34,7 +34,7 @@ export function Sparkline({
   if (clean.length < 2) {
     return (
       <span
-        className={cn("inline-flex items-center text-[10px] text-muted-foreground/60", className)}
+        className={cn("inline-flex items-center text-micro text-muted-foreground/60", className)}
         style={{ height }}
         aria-label={ariaLabel ?? "no trend data"}
       >
@@ -62,7 +62,7 @@ export function Sparkline({
   const resolved = tone === "auto" ? (rising ? "up" : "down") : tone;
 
   const stroke =
-    resolved === "up" ? "#10b981" : resolved === "down" ? "#ef4444" : "#94a3b8";
+  resolved === "up" ? "var(--gain)" : resolved === "down" ? "var(--loss)" : "var(--muted-foreground)";
   const fillFrom =
     resolved === "up" ? "rgba(16,185,129,0.28)" : resolved === "down" ? "rgba(239,68,68,0.28)" : "rgba(148,163,184,0.22)";
 
@@ -106,8 +106,8 @@ export function TrendArrow({ rising, className }: { rising: boolean | null; clas
   return (
     <span
       className={cn(
-        "inline-block text-[10px] leading-none",
-        rising ? "text-emerald-500" : "text-destructive",
+        "inline-block text-micro leading-none",
+        rising ? "text-gain" : "text-destructive",
         className,
       )}
       aria-label={rising ? "expanding" : "contracting"}

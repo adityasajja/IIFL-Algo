@@ -4,17 +4,17 @@
  * SIGNAL → CONTEXT → SCORE → OUTCOME
  *
  * Four sub-panels:
- *   1. Signals   — the enriched record, newest first, each row opening the full
- *                  market/sector/stock context and per-criterion score breakdown.
- *   2. Analytics — outcomes bucketed by a context dimension, with honest counts
- *                  and suppression. In-sample buckets are shown but labelled.
- *   3. Effectiveness — does a higher score accompany a different forward
- *                  outcome? Score bands and features measured against their
- *                  complements, with the multiple-comparisons correction shown
- *                  and in-sample results kept apart. A measurement, never a
- *                  scoring change.
- *   4. Model     — the versioned scoring model this whole screen is interpreted
- *                  against: criteria, weights and thresholds.
+ * 1. Signals — the enriched record, newest first, each row opening the full
+ * market/sector/stock context and per-criterion score breakdown.
+ * 2. Analytics — outcomes bucketed by a context dimension, with honest counts
+ * and suppression. In-sample buckets are shown but labelled.
+ * 3. Effectiveness — does a higher score accompany a different forward
+ * outcome? Score bands and features measured against their
+ * complements, with the multiple-comparisons correction shown
+ * and in-sample results kept apart. A measurement, never a
+ * scoring change.
+ * 4. Model — the versioned scoring model this whole screen is interpreted
+ * against: criteria, weights and thresholds.
  *
  * The score is the share of predefined conditions met at signal time. It is not
  * a probability of profit, and nothing on this panel proposes a trade.
@@ -58,20 +58,18 @@ import {
 } from "./lib/signal-context-view";
 import { Select } from "./components/ui/select";
 import { PageLoader } from "./components/ui/loading";
+import { Card, ErrorBox } from "./components/ui/card";
+import { fieldLabel, toolbarButton } from "./components/ui/form-styles";
+import { Badge } from "./components/ui/stat";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
+import { cn } from "./lib/utils";
+import { toneOf, toneText, type Tone as UiTone } from "./lib/tone";
 
 // ─── Colour / theme helpers ───────────────────────────────────────────────────
 
-const TONE_COLOURS: Record<string, string> = {
-  good: "#10b981",
-  bad: "#ef4444",
-  warn: "#eab308",
-  muted: "#94a3b8",
-};
+/** This panel's view-models say "muted" where the shared tone says "flat". */
+const asTone = (t: string | undefined): UiTone => (t === "muted" || t == null ? "flat" : (t as UiTone));
 
-const trend = (v: number | null | undefined): string => {
-  if (v == null) return "#94a3b8";
-  return v > 0 ? "#10b981" : v < 0 ? "#ef4444" : "#94a3b8";
-};
 
 const fmt = (v: number | null | undefined, digits = 2, suffix = "%"): string => {
   if (v == null) return "\u2014";
@@ -89,87 +87,20 @@ const shortTs = (ts: string | null | undefined): string =>
 // ─── Shared sub-components ───────────────────────────────────────────────────
 
 function ErrorBanner({ msg }: { msg: string }) {
-  return (
-    <div
-      style={{
-        background: "rgba(239,68,68,0.1)",
-        border: "1px solid rgba(239,68,68,0.3)",
-        borderRadius: 8,
-        padding: "0.75rem 1rem",
-        color: "#ef4444",
-        fontSize: 13,
-      }}
-    >
-      {msg}
-    </div>
-  );
-}
-
-function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div
-      style={{
-        background: "rgba(30,41,59,0.7)",
-        border: "1px solid rgba(99,102,241,0.15)",
-        borderRadius: 12,
-        padding: "1rem 1.25rem",
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
+  return <ErrorBox>{msg}</ErrorBox>;
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.08em",
-        color: "#94a3b8",
-        marginBottom: "0.75rem",
-        margin: 0,
-      }}
-    >
-      {children}
-    </h3>
-  );
+  return <h3 className="mb-3 text-xs font-medium text-muted-foreground">{children}</h3>;
 }
 
 function TonePill({ label, tone }: { label: string; tone: string }) {
-  const colour = TONE_COLOURS[tone] ?? TONE_COLOURS.muted;
-  return (
-    <span
-      style={{
-        background: `${colour}20`,
-        color: colour,
-        borderRadius: 4,
-        padding: "0.1rem 0.4rem",
-        fontSize: 10,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
-  );
+  return <Badge tone={asTone(tone)}>{label}</Badge>;
 }
 
 const TH = ({ children }: { children: React.ReactNode }) => (
   <th
-    style={{
-      padding: "0.4rem 0.6rem",
-      textAlign: "left",
-      fontWeight: 700,
-      color: "#64748b",
-      fontSize: 10,
-      textTransform: "uppercase",
-      letterSpacing: "0.05em",
-      whiteSpace: "nowrap",
-    }}
+  className="py-1.5 px-2.5 text-left font-semibold text-muted-foreground text-micro uppercase tracking-wider whitespace-nowrap"
   >
     {children}
   </th>
@@ -177,25 +108,25 @@ const TH = ({ children }: { children: React.ReactNode }) => (
 
 const TD = ({
   children,
-  colour,
+  tone,
   bold,
 }: {
   children: React.ReactNode;
-  colour?: string;
+  tone?: UiTone | "strong";
   bold?: boolean;
 }) => (
-  <td style={{ padding: "0.4rem 0.6rem", color: colour ?? "#94a3b8", fontWeight: bold ? 700 : 400 }}>
+  <td className={cn("px-2.5 py-1.5", tone === "strong" ? "text-foreground" : toneText[tone ?? "flat"], bold && "font-semibold")}>
     {children}
   </td>
 );
 
 // ─── Sub-panel 1: Signals ─────────────────────────────────────────────────────
 
-function DetailRow({ label, value, colour }: { label: string; value: string; colour?: string }) {
+function DetailRow({ label, value, tone }: { label: string; value: string; tone?: UiTone }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "0.15rem 0" }}>
-      <span style={{ fontSize: 11, color: "#64748b" }}>{label}</span>
-      <span style={{ fontSize: 11, color: colour ?? "#cbd5e1", fontWeight: 600 }}>{value}</span>
+    <div className="flex justify-between gap-2 py-0.5">
+      <span className="text-caption text-muted-foreground">{label}</span>
+      <span className={cn("text-caption font-semibold", tone ? toneText[tone] : "text-foreground")}>{value}</span>
     </div>
   );
 }
@@ -209,35 +140,35 @@ function SignalDetail({ record }: { record: SignalContextRecord }) {
   const sec = record.sector_context;
 
   return (
-    <Card>
-      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+    <Card padding="md">
+      <div className="flex justify-between flex-wrap gap-4">
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18, fontWeight: 800, color: "#e2e8f0" }}>{record.symbol}</span>
-            <span style={{ fontSize: 12, color: "#818cf8", fontWeight: 700 }}>{record.action}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-semibold text-foreground">{record.symbol}</span>
+            <span className="text-xs text-primary-soft font-semibold">{record.action}</span>
             <TonePill label={contextClassLabel(record.context_class)} tone={contextClassTone(record.context_class)} />
           </div>
-          <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
+          <div className="text-caption text-muted-foreground mt-1">
             {record.signal_id} · {record.signal_source} · {shortTs(record.signal_ts)}
           </div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: TONE_COLOURS[score.tone] }}>
+        <div className="text-right">
+          <div className={cn("text-2xl font-semibold", toneText[asTone(score.tone)])}>
             {score.text}
           </div>
-          <div style={{ fontSize: 10, color: "#64748b", maxWidth: 320 }}>{score.caption}</div>
+          <div className="text-micro text-muted-foreground max-w-xs">{score.caption}</div>
         </div>
       </div>
 
       {!missing.none && (
-        <div style={{ marginTop: "0.6rem", fontSize: 11, color: "#eab308" }}>⚠ {missing.text}</div>
+        <div className="mt-2.5 text-caption text-warning">⚠ {missing.text}</div>
       )}
 
-      <div style={{ marginTop: "0.75rem", borderTop: "1px solid rgba(99,102,241,0.1)", paddingTop: "0.5rem" }}>
+      <div className="mt-3 border-t border-t-primary/10 pt-2">
         <SectionTitle>Score breakdown</SectionTitle>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <table className="w-full border-collapse text-xs">
           <thead>
-            <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+            <tr className="border-b border-b-primary/15">
               <TH>Criterion</TH>
               <TH>Weight</TH>
               <TH>Measurement</TH>
@@ -247,16 +178,16 @@ function SignalDetail({ record }: { record: SignalContextRecord }) {
           </thead>
           <tbody>
             {criteria.map((c) => (
-              <tr key={c.key} style={{ borderBottom: "1px solid rgba(99,102,241,0.07)" }}>
-                <TD colour="#e2e8f0" bold>
+              <tr key={c.key} className="border-b border-b-primary/7">
+                <TD tone="strong" bold>
                   {c.label}
                 </TD>
                 <TD>{c.weight}</TD>
-                <TD colour={trend(c.status === "met" ? 1 : c.status === "not_met" ? -1 : null)}>{c.value}</TD>
+                <TD tone={toneOf(c.status === "met" ? 1 : c.status === "not_met" ? -1 : null)}>{c.value}</TD>
                 <TD>
                   <TonePill label={c.status.replace(/_/g, " ")} tone={c.tone} />
                 </TD>
-                <TD colour="#64748b">{c.reason || "\u2014"}</TD>
+                <TD>{c.reason || "\u2014"}</TD>
               </tr>
             ))}
           </tbody>
@@ -264,17 +195,12 @@ function SignalDetail({ record }: { record: SignalContextRecord }) {
       </div>
 
       <div
-        style={{
-          marginTop: "0.75rem",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: "0.75rem",
-        }}
+      className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3"
       >
         <div>
           <SectionTitle>Market (as of {shortTs(m?.as_of)})</SectionTitle>
           <DetailRow label="Regime" value={m?.regime ?? "\u2014"} />
-          <DetailRow label="NIFTY trend vs SMA50" value={fmt(m?.nifty_trend_pct)} colour={trend(m?.nifty_trend_pct)} />
+          <DetailRow label="NIFTY trend vs SMA50" value={fmt(m?.nifty_trend_pct)} tone={toneOf(m?.nifty_trend_pct)} />
           <DetailRow label="Breadth > EMA50" value={fmtAbs(m?.breadth_above_ema50_pct)} />
           <DetailRow label="Volatility ratio" value={fmtAbs(m?.volatility_ratio, 2, "x")} />
           <DetailRow label="Advance / decline" value={fmtAbs(m?.advance_decline_ratio, 2, "")} />
@@ -286,23 +212,23 @@ function SignalDetail({ record }: { record: SignalContextRecord }) {
         <div>
           <SectionTitle>Sector</SectionTitle>
           <DetailRow label="Sector" value={sec?.sector ?? "\u2014"} />
-          <DetailRow label="RS vs NIFTY 1M" value={fmt(sec?.relative_strength_1m)} colour={trend(sec?.relative_strength_1m)} />
-          <DetailRow label="Return 1M" value={fmt(sec?.return_1m_pct)} colour={trend(sec?.return_1m_pct)} />
+          <DetailRow label="RS vs NIFTY 1M" value={fmt(sec?.relative_strength_1m)} tone={toneOf(sec?.relative_strength_1m)} />
+          <DetailRow label="Return 1M" value={fmt(sec?.return_1m_pct)} tone={toneOf(sec?.return_1m_pct)} />
           <DetailRow label="Trend" value={sec?.trend ?? "\u2014"} />
           <DetailRow label="Volume multiple" value={fmtAbs(sec?.volume_multiple, 2, "x")} />
         </div>
         <div>
           <SectionTitle>Stock (as of {shortTs(s?.as_of)})</SectionTitle>
-          <DetailRow label="RS vs NIFTY 20D" value={fmt(s?.relative_strength_nifty_20d)} colour={trend(s?.relative_strength_nifty_20d)} />
+          <DetailRow label="RS vs NIFTY 20D" value={fmt(s?.relative_strength_nifty_20d)} tone={toneOf(s?.relative_strength_nifty_20d)} />
           <DetailRow label="Relative volume" value={fmtAbs(s?.relative_volume, 2, "x")} />
           <DetailRow label="ATR %" value={fmtAbs(s?.atr_pct)} />
-          <DetailRow label="Trend vs SMA50" value={fmt(s?.trend_pct)} colour={trend(s?.trend_pct)} />
+          <DetailRow label="Trend vs SMA50" value={fmt(s?.trend_pct)} tone={toneOf(s?.trend_pct)} />
           <DetailRow label="From 52W high" value={fmt(s?.from_52w_high_pct)} />
           <DetailRow label="Close" value={s?.close != null ? s.close.toLocaleString("en-IN") : "\u2014"} />
         </div>
       </div>
 
-      <div style={{ marginTop: "0.6rem", fontSize: 10, color: "#475569" }}>
+      <div className="mt-2.5 text-micro text-muted-foreground">
         Model {record.context_model_version} · recorded {shortTs(record.created_at)}
       </div>
     </Card>
@@ -359,9 +285,9 @@ function SignalsPanel() {
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Source:</span>
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-2 flex-wrap items-center">
+        <span className="text-caption text-muted-foreground font-semibold">Source:</span>
         <Select
           size="sm"
           value={source}
@@ -372,7 +298,7 @@ function SignalsPanel() {
           }))}
           className="w-32"
         />
-        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Context:</span>
+        <span className="text-caption text-muted-foreground font-semibold">Context:</span>
         <Select
           size="sm"
           value={klass}
@@ -383,10 +309,10 @@ function SignalsPanel() {
           }))}
           className="w-44"
         />
-        <button id="signal-refresh" onClick={load} style={buttonStyle}>
+        <button id="signal-refresh" onClick={load} className={toolbarButton}>
           ↻ Refresh
         </button>
-        <span style={{ fontSize: 11, color: "#475569", marginLeft: "auto" }}>
+        <span className="text-caption text-muted-foreground ml-auto">
           {items.length} of {total}
         </span>
       </div>
@@ -395,16 +321,16 @@ function SignalsPanel() {
       {loading ? (
         <PageLoader label="Loading signals" />
       ) : items.length === 0 ? (
-        <Card style={{ fontSize: 12, color: "#94a3b8" }}>
+        <Card padding="md" className="text-xs text-muted-foreground">
           No enriched signal matches these filters yet. Contexts are written when a
           paper/live bar fires or when a backtest completes — an empty panel means
           none has happened, not that scoring failed.
         </Card>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
             <thead>
-              <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+              <tr className="border-b border-b-primary/15">
                 <TH>Symbol</TH>
                 <TH>Action</TH>
                 <TH>Source</TH>
@@ -423,26 +349,22 @@ function SignalsPanel() {
                     key={r.signal_id}
                     id={`signal-row-${r.signal_id}`}
                     onClick={() => open(r.signal_id)}
-                    style={{
-                      borderBottom: "1px solid rgba(99,102,241,0.07)",
-                      background: i % 2 === 0 ? "transparent" : "rgba(30,41,59,0.2)",
-                      cursor: "pointer",
-                    }}
+                    className={cn("cursor-pointer border-b border-border/50", i % 2 === 1 && "bg-muted/20")}
                   >
-                    <TD colour="#e2e8f0" bold>
+                    <TD tone="strong" bold>
                       {row.symbol}
                     </TD>
-                    <TD colour={row.action === "BUY" ? "#10b981" : "#ef4444"}>{row.action}</TD>
+                    <TD tone={row.action === "BUY" ? "good" : "bad"}>{row.action}</TD>
                     <TD>{row.source}</TD>
                     <TD>{shortTs(row.signalTs)}</TD>
-                    <TD colour={TONE_COLOURS[row.score.tone]} bold>
+                    <TD tone={asTone(row.score.tone)} bold>
                       {row.score.text}
                     </TD>
                     <TD>
                       <TonePill label={row.contextClassLabel} tone={row.contextClassTone} />
                     </TD>
                     <TD>{row.regime}</TD>
-                    <TD colour="#475569">{row.modelVersion}</TD>
+                    <TD>{row.modelVersion}</TD>
                   </tr>
                 );
               })}
@@ -452,10 +374,10 @@ function SignalsPanel() {
       )}
 
       {detail && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between items-center">
             <SectionTitle>Signal detail</SectionTitle>
-            <button id="signal-detail-close" onClick={() => setDetail(null)} style={buttonStyle}>
+            <button id="signal-detail-close" onClick={() => setDetail(null)} className={toolbarButton}>
               Close
             </button>
           </div>
@@ -495,11 +417,11 @@ function AnalyticsPanel() {
   const desc = DIMENSION_OPTIONS.find((o) => o.key === dimension)?.description ?? "";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <Card>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={labelStyle}>BUCKET BY</label>
+    <div className="flex flex-col gap-3">
+      <Card padding="md">
+        <div className="flex gap-4 flex-wrap items-end">
+          <div className="flex flex-col gap-1">
+            <label className={fieldLabel}>BUCKET BY</label>
             <Select
               size="sm"
               value={dimension}
@@ -508,8 +430,8 @@ function AnalyticsPanel() {
               className="w-[200px]"
             />
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={labelStyle}>SOURCE</label>
+          <div className="flex flex-col gap-1">
+            <label className={fieldLabel}>SOURCE</label>
             <Select
               size="sm"
               value={source}
@@ -521,30 +443,30 @@ function AnalyticsPanel() {
               className="w-[160px]"
             />
           </div>
-          <button id="analytics-run" onClick={run} disabled={loading} style={buttonStyle}>
+          <button id="analytics-run" onClick={run} disabled={loading} className={toolbarButton}>
             {loading ? "Analyzing…" : "Analyze"}
           </button>
         </div>
-        <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>{desc}</div>
+        <div className="mt-1.5 text-caption text-muted-foreground">{desc}</div>
       </Card>
 
       {error && <ErrorBanner msg={error} />}
 
       {result && (
         <>
-          <Card>
-            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontSize: 12, color: "#cbd5e1" }}>{accounting?.note}</span>
-              <span style={{ fontSize: 11, color: "#475569" }}>
+          <Card padding="md">
+            <div className="flex justify-between flex-wrap gap-2">
+              <span className="text-xs text-foreground">{accounting?.note}</span>
+              <span className="text-caption text-muted-foreground">
                 Model {result.model_version} · stats require ≥{result.min_forward_n} forward outcomes
               </span>
             </div>
           </Card>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+                <tr className="border-b border-b-primary/15">
                   <TH>{DIMENSION_OPTIONS.find((o) => o.key === dimension)?.label ?? "Bucket"}</TH>
                   <TH>Evidence</TH>
                   <TH>N</TH>
@@ -562,20 +484,12 @@ function AnalyticsPanel() {
                 {views.map((b, i) => (
                   <tr
                     key={b.key}
-                    style={{
-                      borderBottom: "1px solid rgba(99,102,241,0.07)",
-                      background: b.suppressed
-                        ? "rgba(15,23,42,0.3)"
-                        : i % 2 === 0
-                          ? "transparent"
-                          : "rgba(30,41,59,0.2)",
-                      opacity: b.suppressed ? 0.65 : 1,
-                    }}
+                    className={cn("border-b border-border/50", b.suppressed ? "bg-muted/30 opacity-60" : i % 2 === 1 && "bg-muted/20")}
                   >
-                    <TD colour="#e2e8f0" bold>
+                    <TD tone="strong" bold>
                       {b.label}
                       {b.suppressed && (
-                        <span style={{ marginLeft: 6, fontSize: 10, color: "#475569" }}>(too few)</span>
+                        <span className="ml-1.5 text-micro text-muted-foreground">(too few)</span>
                       )}
                     </TD>
                     <TD>
@@ -585,28 +499,28 @@ function AnalyticsPanel() {
                     <TD>{b.nForward}</TD>
                     <TD>{b.nInSample}</TD>
                     <TD>{b.unresolved}</TD>
-                    <TD colour={trend(b.mean.startsWith("+") ? 1 : b.mean === "\u2014" ? null : -1)} bold>
+                    <TD tone={toneOf(b.mean.startsWith("+") ? 1 : b.mean === "\u2014" ? null : -1)} bold>
                       {b.mean}
                     </TD>
                     <TD>{b.median}</TD>
-                    <TD colour={b.winRate === "\u2014" ? "#94a3b8" : "#cbd5e1"}>{b.winRate}</TD>
+                    <TD tone={b.winRate === "\u2014" ? "flat" : "strong"}>{b.winRate}</TD>
                     <TD>{b.profitFactor}</TD>
-                    <TD colour="#64748b">{b.ci || "\u2014"}</TD>
+                    <TD>{b.ci || "\u2014"}</TD>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", fontSize: 10, color: "#475569" }}>
+          <div className="flex gap-4 flex-wrap text-micro text-muted-foreground">
             <span>
-              <span style={{ color: "#10b981" }}>● Forward</span> — out-of-sample evidence
+              <span className="text-gain">● Forward</span> — out-of-sample evidence
             </span>
             <span>
-              <span style={{ color: "#eab308" }}>● Thin forward</span> — recorded, below the floor
+              <span className="text-warning">● Thin forward</span> — recorded, below the floor
             </span>
             <span>
-              <span style={{ color: "#64748b" }}>● In-sample</span> — backtest; shown but not proof
+            <span className="text-muted-foreground">● In-sample</span> — backtest; shown but not proof
             </span>
           </div>
         </>
@@ -663,11 +577,11 @@ function EffectivenessPanel() {
     axis && result ? forwardVsInSample(axis.axis, result) : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <Card>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={labelStyle}>SOURCE</label>
+    <div className="flex flex-col gap-3">
+      <Card padding="md">
+        <div className="flex gap-4 flex-wrap items-end">
+          <div className="flex flex-col gap-1">
+            <label className={fieldLabel}>SOURCE</label>
             <Select
               size="sm"
               value={source}
@@ -679,8 +593,8 @@ function EffectivenessPanel() {
               className="w-[160px]"
             />
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={labelStyle}>METRIC</label>
+          <div className="flex flex-col gap-1">
+            <label className={fieldLabel}>METRIC</label>
             <Select
               size="sm"
               value={metric}
@@ -689,11 +603,11 @@ function EffectivenessPanel() {
               className="w-[160px]"
             />
           </div>
-          <button id="effectiveness-run" onClick={run} disabled={loading} style={buttonStyle}>
+          <button id="effectiveness-run" onClick={run} disabled={loading} className={toolbarButton}>
             {loading ? "Measuring…" : "Measure"}
           </button>
         </div>
-        <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
+        <div className="mt-1.5 text-caption text-muted-foreground">
           Bands are compared to their complement within the same evidence class — never to
           zero. The score is the share of conditions met, not a probability of profit, and
           nothing here changes it.
@@ -704,60 +618,54 @@ function EffectivenessPanel() {
 
       {result && (
         <>
-          <Card>
-            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontSize: 12, color: "#cbd5e1" }}>{accounting?.note}</span>
-              <span style={{ fontSize: 11, color: "#475569" }}>
+          <Card padding="md">
+            <div className="flex justify-between flex-wrap gap-2">
+              <span className="text-xs text-foreground">{accounting?.note}</span>
+              <span className="text-caption text-muted-foreground">
                 Model {result.model_version} · floor {result.min_sample} trades ·{" "}
                 {result.bonferroni_comparisons} comparisons
               </span>
             </div>
           </Card>
 
-          <Card>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.5rem" }}>
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-2">
               <SectionTitle>High vs low score</SectionTitle>
               {verdict && <TonePill label={verdict.claimLabel} tone={verdict.claimTone} />}
             </div>
-            <div style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.6 }}>{verdict?.statement}</div>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.6rem" }}>
+            <div className="text-body text-foreground leading-relaxed">{verdict?.statement}</div>
+            <div className="flex gap-2 flex-wrap mt-2.5">
               {(verdict?.bands || []).map((b) => (
                 <span
                   key={b.label}
-                  style={{
-                    fontSize: 11,
-                    color: "#cbd5e1",
-                    background: "rgba(99,102,241,0.1)",
-                    borderRadius: 6,
-                    padding: "0.25rem 0.6rem",
-                  }}
+                  className="text-caption text-foreground bg-primary/10 rounded-md py-1 px-2.5"
                 >
                   {b.label}: <strong>{b.meanText}</strong>
                 </span>
               ))}
             </div>
             {verdict && !verdict.monotonic && verdict.bands.length > 1 && (
-              <div style={{ marginTop: "0.4rem", fontSize: 11, color: "#eab308" }}>
+              <div className="mt-1.5 text-caption text-warning">
                 Band means do not fall monotonically from high to low score.
               </div>
             )}
           </Card>
 
-          <Card>
+          <Card padding="md">
             <SectionTitle>
               Supported findings ({supported.length}) — forward only, corrected
             </SectionTitle>
             {supported.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#94a3b8" }}>
+              <div className="text-xs text-muted-foreground">
                 Nothing clears the bar yet: no forward bucket is both above the{" "}
                 {result.min_sample}-trade floor and significant after the correction. The
                 scoring model is unchanged.
               </div>
             ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
                   <thead>
-                    <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+                    <tr className="border-b border-b-primary/15">
                       <TH>Dimension</TH>
                       <TH>Bucket</TH>
                       <TH>N</TH>
@@ -771,21 +679,18 @@ function EffectivenessPanel() {
                     {supported.map((f, i) => (
                       <tr
                         key={`${f.axisLabel}-${f.bucketLabel}`}
-                        style={{
-                          borderBottom: "1px solid rgba(99,102,241,0.07)",
-                          background: i % 2 === 0 ? "transparent" : "rgba(30,41,59,0.2)",
-                        }}
+                        className={cn("border-b border-border/50", i % 2 === 1 && "bg-muted/20")}
                       >
-                        <TD colour="#e2e8f0">{f.axisLabel}</TD>
-                        <TD colour="#e2e8f0" bold>
+                        <TD tone="strong">{f.axisLabel}</TD>
+                        <TD tone="strong" bold>
                           {f.bucketLabel}
                         </TD>
                         <TD>{f.n}</TD>
                         <TD>{f.mean}</TD>
-                        <TD colour={trend(f.liftValue)} bold>
+                        <TD tone={toneOf(f.liftValue)} bold>
                           {f.lift}
                         </TD>
-                        <TD colour="#64748b">{f.pAdjusted}</TD>
+                        <TD>{f.pAdjusted}</TD>
                         <TD>
                           <TonePill label={f.significanceLabel} tone="good" />
                         </TD>
@@ -798,13 +703,13 @@ function EffectivenessPanel() {
           </Card>
 
           {suggestive.length > 0 && (
-            <Card>
+            <Card padding="md">
               <SectionTitle>Suggestive, not supported ({suggestive.length})</SectionTitle>
-              <div style={{ fontSize: 11, color: "#64748b", marginBottom: "0.5rem" }}>
+              <div className="text-caption text-muted-foreground mb-2">
                 Weak after correction: worth watching as the sample grows, not worth acting on.
               </div>
               {suggestive.map((f) => (
-                <div key={`${f.axisLabel}-${f.bucketLabel}`} style={{ fontSize: 12, color: "#cbd5e1", padding: "0.15rem 0" }}>
+                <div key={`${f.axisLabel}-${f.bucketLabel}`} className="text-xs text-foreground py-0.5 px-0">
                   {f.axisLabel} · <strong>{f.bucketLabel}</strong> — n={f.n}, lift {f.lift},{" "}
                   adj. p {f.pAdjusted}{" "}
                   <TonePill label={f.significanceLabel} tone="warn" />
@@ -813,19 +718,19 @@ function EffectivenessPanel() {
             </Card>
           )}
 
-          <Card>
+          <Card padding="md">
             <SectionTitle>Still unproven ({unsupported.length})</SectionTitle>
             {unsupported.map((u) => (
-              <div key={u.axis} style={{ fontSize: 12, color: "#94a3b8", padding: "0.15rem 0" }}>
-                <strong style={{ color: "#cbd5e1" }}>{u.label}</strong> — {u.reason}
+              <div key={u.axis} className="text-xs text-muted-foreground py-0.5 px-0">
+                <strong className="text-foreground">{u.label}</strong> — {u.reason}
               </div>
             ))}
           </Card>
 
-          <Card>
-            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <label style={labelStyle}>FEATURE AXIS</label>
+          <Card padding="md">
+            <div className="flex gap-4 flex-wrap items-end">
+              <div className="flex flex-col gap-1">
+                <label className={fieldLabel}>FEATURE AXIS</label>
                 <Select
                   size="sm"
                   value={axis?.axis ?? "context_score"}
@@ -834,7 +739,7 @@ function EffectivenessPanel() {
                   className="w-[260px]"
                 />
               </div>
-              <span style={{ fontSize: 11, color: "#475569" }}>
+              <span className="text-caption text-muted-foreground">
                 {axis
                   ? `${axis.coverage.with_value} of ${axis.coverage.scanned} forward rows carry a value · ` +
                     `${axis.excluded?.axis_missing ?? 0} excluded (no value), ` +
@@ -844,10 +749,10 @@ function EffectivenessPanel() {
             </div>
           </Card>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+                <tr className="border-b border-b-primary/15">
                   <TH>{axis?.label ?? "Bucket"}</TH>
                   <TH>N</TH>
                   <TH>Mean</TH>
@@ -865,32 +770,24 @@ function EffectivenessPanel() {
                 {bucketRows.map((b, i) => (
                   <tr
                     key={b.label}
-                    style={{
-                      borderBottom: "1px solid rgba(99,102,241,0.07)",
-                      background: b.suppressed
-                        ? "rgba(15,23,42,0.3)"
-                        : i % 2 === 0
-                          ? "transparent"
-                          : "rgba(30,41,59,0.2)",
-                      opacity: b.suppressed ? 0.65 : 1,
-                    }}
+                    className={cn("border-b border-border/50", b.suppressed ? "bg-muted/30 opacity-60" : i % 2 === 1 && "bg-muted/20")}
                   >
-                    <TD colour="#e2e8f0" bold>
+                    <TD tone="strong" bold>
                       {b.label}
                       {b.suppressed && (
-                        <span style={{ marginLeft: 6, fontSize: 10, color: "#475569" }}>(too few)</span>
+                        <span className="ml-1.5 text-micro text-muted-foreground">(too few)</span>
                       )}
                     </TD>
                     <TD>{b.n}</TD>
                     <TD>{b.mean}</TD>
-                    <TD colour="#64748b">{b.meanCI || "\u2014"}</TD>
+                    <TD>{b.meanCI || "\u2014"}</TD>
                     <TD>{b.median}</TD>
                     <TD>{b.winRate}{b.winRateCI ? ` ${b.winRateCI}` : ""}</TD>
                     <TD>{b.profitFactor}</TD>
-                    <TD colour={b.lift.startsWith("+") ? "#10b981" : b.lift === "\u2014" ? "#94a3b8" : "#ef4444"} bold>
+                    <TD tone={b.lift.startsWith("+") ? "good" : b.lift === "\u2014" ? "flat" : "bad"} bold>
                       {b.lift}
                     </TD>
-                    <TD colour="#64748b">{b.pAdjusted}</TD>
+                    <TD>{b.pAdjusted}</TD>
                     <TD>
                       <TonePill label={b.significanceLabel} tone={b.significanceTone} />
                     </TD>
@@ -901,17 +798,17 @@ function EffectivenessPanel() {
             </table>
           </div>
 
-          <Card>
+          <Card padding="md">
             <SectionTitle>Forward vs in-sample — {axis?.label}</SectionTitle>
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: "0.5rem" }}>
+            <div className="text-caption text-muted-foreground mb-2">
               The same buckets measured on backtests sit beside the forward ones. They are
               shown, never merged: an in-sample mean is a measurement of the past the rule
               was chosen on, not evidence about the future.
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-xs">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+                  <tr className="border-b border-b-primary/15">
                     <TH>Bucket</TH>
                     <TH>Forward n</TH>
                     <TH>Forward mean</TH>
@@ -921,14 +818,14 @@ function EffectivenessPanel() {
                 </thead>
                 <tbody>
                   {comparison.map((r) => (
-                    <tr key={r.label} style={{ borderBottom: "1px solid rgba(99,102,241,0.07)" }}>
-                      <TD colour="#e2e8f0" bold>
+                    <tr key={r.label} className="border-b border-b-primary/7">
+                      <TD tone="strong" bold>
                         {r.label}
                       </TD>
                       <TD>{r.forwardN}</TD>
                       <TD>{r.forwardMean}</TD>
                       <TD>{r.inSampleN}</TD>
-                      <TD colour="#64748b">{r.inSampleMean}</TD>
+                      <TD>{r.inSampleMean}</TD>
                     </tr>
                   ))}
                 </tbody>
@@ -936,15 +833,15 @@ function EffectivenessPanel() {
             </div>
           </Card>
 
-          <Card>
+          <Card padding="md">
             <SectionTitle>Caveats</SectionTitle>
-            <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>
+            <ul className="m-0 list-disc pl-4 text-xs leading-relaxed text-muted-foreground">
               <li>{result.model_note}</li>
               {result.caveats.map((c, i) => (
                 <li key={i}>{c}</li>
               ))}
             </ul>
-            <div style={{ marginTop: "0.4rem", fontSize: 10, color: "#475569" }}>
+            <div className="mt-1.5 text-micro text-muted-foreground">
               Generated {shortTs(result.generated_at)}
             </div>
           </Card>
@@ -975,19 +872,19 @@ function ModelPanel() {
   const total = model.criteria.reduce((sum, c) => sum + c.weight, 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <Card>
-        <div style={{ fontSize: 11, color: "#64748b" }}>ACTIVE CONTEXT MODEL</div>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "#818cf8" }}>{model.version}</div>
-        <p style={{ margin: "0.5rem 0 0", fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>
+    <div className="flex flex-col gap-4">
+      <Card padding="md">
+        <div className="text-caption text-muted-foreground">ACTIVE CONTEXT MODEL</div>
+        <div className="text-lg font-semibold text-primary-soft">{model.version}</div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           {model.description}
         </p>
       </Card>
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
           <thead>
-            <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+            <tr className="border-b border-b-primary/15">
               <TH>Criterion</TH>
               <TH>Weight</TH>
               <TH>Description</TH>
@@ -995,37 +892,33 @@ function ModelPanel() {
           </thead>
           <tbody>
             {model.criteria.map((c) => (
-              <tr key={c.key} style={{ borderBottom: "1px solid rgba(99,102,241,0.07)" }}>
-                <TD colour="#e2e8f0" bold>
+              <tr key={c.key} className="border-b border-b-primary/7">
+                <TD tone="strong" bold>
                   {c.label}
                 </TD>
-                <TD colour="#818cf8" bold>
+                <TD tone="info" bold>
                   +{c.weight}
                 </TD>
-                <TD colour="#64748b">{c.description}</TD>
+                <TD>{c.description}</TD>
               </tr>
             ))}
-            <tr style={{ borderTop: "1px solid rgba(99,102,241,0.2)" }}>
-              <TD colour="#94a3b8" bold>
+            <tr className="border-t border-t-primary/20">
+            <TD bold>
                 Total
               </TD>
-              <TD colour="#94a3b8" bold>
+              <TD bold>
                 {total}
               </TD>
-              <TD colour="#475569">A score is the share of these conditions met — not a probability.</TD>
+              <TD>A score is the share of these conditions met — not a probability.</TD>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <Card>
+      <Card padding="md">
         <SectionTitle>Thresholds</SectionTitle>
         <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "0.5rem",
-          }}
+        className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2"
         >
           <DetailRow label="Strong context ≥" value={String(model.strong_min_score)} />
           <DetailRow label="Neutral context ≥" value={String(model.neutral_min_score)} />
@@ -1042,25 +935,6 @@ function ModelPanel() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const buttonStyle: React.CSSProperties = {
-  background: "rgba(99,102,241,0.15)",
-  border: "1px solid rgba(99,102,241,0.4)",
-  borderRadius: 8,
-  color: "#818cf8",
-  padding: "0.4rem 0.85rem",
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 10,
-  color: "#64748b",
-  fontWeight: 600,
-};
-
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 type ExplorerSub = "signals" | "analytics" | "effectiveness" | "model";
@@ -1076,36 +950,17 @@ export default function SignalExplorerPanel() {
   const [sub, setSub] = useState<ExplorerSub>("signals");
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <div
-        style={{
-          display: "flex",
-          gap: "0.25rem",
-          borderBottom: "1px solid rgba(99,102,241,0.15)",
-          paddingBottom: "0.5rem",
-        }}
-      >
+    <div className="flex flex-col gap-4">
+      <div>
+        <Tabs value={sub} onValueChange={(v) => setSub(v as ExplorerSub)} variant="segment">
+          <TabsList>
         {SUB_TABS.map((t) => (
-          <button
-            key={t.id}
-            id={`explorer-sub-${t.id}`}
-            onClick={() => setSub(t.id)}
-            style={{
-              padding: "0.4rem 0.9rem",
-              fontSize: 12,
-              fontWeight: 600,
-              borderRadius: "6px 6px 0 0",
-              cursor: "pointer",
-              background: sub === t.id ? "rgba(99,102,241,0.15)" : "transparent",
-              border: "none",
-              borderBottom: sub === t.id ? "2px solid #6366f1" : "2px solid transparent",
-              color: sub === t.id ? "#818cf8" : "#64748b",
-              transition: "all 0.15s",
-            }}
-          >
+              <TabsTrigger key={t.id} value={t.id}>
             {t.label}
-          </button>
+              </TabsTrigger>
         ))}
+          </TabsList>
+        </Tabs>
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

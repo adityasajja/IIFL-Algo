@@ -61,7 +61,7 @@ export function EquityChart({
       <div
         style={{ height }}
         className={cn(
-          "grid place-items-center rounded-xl border border-dashed border-border text-xs text-muted-foreground",
+          "grid place-items-center rounded-lg border border-dashed border-border text-xs text-muted-foreground",
           className,
         )}
       >
@@ -86,7 +86,7 @@ export function EquityChart({
 
   return (
     <div className={className}>
-      <div className="flex items-baseline justify-between px-1 pb-1.5 text-[11px] tabular-nums text-muted-foreground">
+      <div className="flex items-baseline justify-between px-1 pb-1.5 text-caption tabular-nums text-muted-foreground">
         <span>{fmt(max)}</span>
         <span>{fmt(min)}</span>
       </div>
@@ -133,7 +133,7 @@ export function EquityChart({
           />
         ))}
       </svg>
-      <div className="flex flex-wrap items-center gap-3.5 px-1 pt-2 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3.5 px-1 pt-2 text-caption text-muted-foreground">
         {aligned.map((s) => (
           <span key={s.name} className="inline-flex items-center gap-1.5">
             <span

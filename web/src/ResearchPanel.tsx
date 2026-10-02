@@ -11,7 +11,7 @@ import {
 import { Button } from "./components/ui/button";
 import { Card, CardHeader, Hint } from "./components/ui/card";
 import { EquityChart } from "./components/ui/equity-chart";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import {
@@ -22,12 +22,14 @@ import {
   fmtNum,
   fmtPct,
 } from "./components/ui/stat";
-import { Switch } from "./components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Switch } from "./components/motion/switch";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
+import { Tooltip } from "./components/motion/tooltip";
 import { cn } from "./lib/utils";
 import ValidationPanel from "./ValidationPanel";
 import EpisodicPivotPanel from "./EpisodicPivotPanel";
 import AlphaHuntPanel from "./AlphaHuntPanel";
+import EvidencePanel from "./EvidencePanel";
 import { humanizeSentence, strategyLabel } from "./lib/format";
 
 type Source = "cache" | "fetch" | "synthetic";
@@ -123,7 +125,7 @@ function PlainExplainer({ onDismiss }: { onDismiss: () => void }) {
           <HelpCircle size={15} />
         </span>
         <div className="min-w-0 flex-1 space-y-2 text-[12.5px] leading-relaxed text-muted-foreground">
-          <div className="text-[13px] font-semibold text-foreground">Why this page exists</div>
+          <div className="text-body font-semibold text-foreground">Why this page exists</div>
           <p>
             A normal backtest is easy to fool. It scores a strategy on the same
             prices that were used to pick its settings, so a great-looking number
@@ -206,8 +208,8 @@ export default function ResearchPanel({
 
   function applyPreset(p: Preset) {
     setPreset(p);
-    if (p === "quick")   { setSource("cache");     setSearch(false); }
-    if (p === "full")    { setSource("fetch");     setSearch(true);  }
+    if (p === "quick") { setSource("cache"); setSearch(false); }
+    if (p === "full") { setSource("fetch"); setSearch(true); }
     if (p === "control") { setSource("synthetic"); setSearch(false); }
   }
   const [result, setResult] = useState<ResearchResponse | null>(null);
@@ -282,6 +284,7 @@ export default function ResearchPanel({
 
       {view === "measured" ? (
         <>
+          <EvidencePanel />
           <ValidationPanel />
           <EpisodicPivotPanel />
           <AlphaHuntPanel />
@@ -330,7 +333,7 @@ export default function ResearchPanel({
                     whileHover={reduce ? undefined : { y: -2 }}
                     transition={{ type: "spring", stiffness: 380, damping: 28 }}
                     className={cn(
-                      "relative rounded-2xl border bg-card p-4 text-left transition-colors",
+                          "relative rounded-xl border bg-card p-4 text-left transition-colors",
                       active
                         ? "border-primary bg-primary/[0.06]"
                         : "border-border hover:border-foreground/30",
@@ -352,13 +355,13 @@ export default function ResearchPanel({
                           <Check size={11} />
                         </span>
                       ) : p.badge ? (
-                        <span className="rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            <span className="rounded-full bg-foreground/[0.07] px-2 py-0.5 text-micro font-semibold uppercase tracking-wider text-muted-foreground">
                           {p.badge}
                         </span>
                       ) : null}
                     </div>
                     <div className="mt-3 text-sm font-semibold text-foreground">{p.title}</div>
-                    <div className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                        <div className="mt-1 text-xs leading-snug text-muted-foreground">
                       {p.blurb}
                     </div>
                   </motion.button>
@@ -376,7 +379,7 @@ export default function ResearchPanel({
             <Tabs
               value={source}
               onValueChange={(v) => setSource(v as Source)}
-              variant="segment"
+              variant="pill"
             >
               <TabsList>
                 {(Object.keys(SOURCE_BLURB) as Source[]).map((s) => (
@@ -386,14 +389,15 @@ export default function ResearchPanel({
                 ))}
               </TabsList>
             </Tabs>
+            <Tooltip content="Window sizing, fold and confidence requirements" side="bottom" delay={400}>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => setAdvanced((a) => !a)}
-              title="Window sizing, fold and confidence requirements"
             >
               {advanced ? "Hide advanced" : "Advanced"}
             </Button>
+                  </Tooltip>
           </div>
 
           <Hint>{SOURCE_HELP[source]}</Hint>
@@ -410,6 +414,7 @@ export default function ResearchPanel({
                 ).map((s) => ({ value: s, label: strategyLabel(s) }))}
               />
             </div>
+                  <div className="flex flex-col gap-1.5">
             <Input
               label="Which stocks? (blank = your default list)"
               value={symbols}
@@ -417,13 +422,12 @@ export default function ResearchPanel({
               placeholder="RELIANCE-EQ,INFY-EQ"
             />
             {info?.warmup_bars ? (
-              <div className="flex items-end pb-2.5">
                 <Hint>
                   Needs about <strong>{info.warmup_bars}</strong> bars of history before
                   its rules fire.
                 </Hint>
+                    ) : null}
               </div>
-            ) : null}
           </div>
 
           {strategy === "signals_entry" && (
@@ -445,8 +449,6 @@ export default function ResearchPanel({
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-          </div>
         </div>
       </div>
       </Card>
@@ -457,7 +459,7 @@ export default function ResearchPanel({
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
               Step 3 · Run it
             </div>
-            <p className="text-[14px] leading-relaxed text-foreground">
+                <p className="text-sm leading-relaxed text-foreground">
               {previewLine(
                 strategy,
                 source,
@@ -493,7 +495,7 @@ export default function ResearchPanel({
                 <VerdictPill passed={result.verdict.passed}>
                   {result.verdict.passed ? "Passed" : "Failed"}
                 </VerdictPill>
-                <span className="text-[13px] text-muted-foreground">
+                    <span className="text-body text-muted-foreground">
                   {result.strategy} · {result.symbols.length} symbols ·{" "}
                   {result.bars.toLocaleString("en-IN")} bars ·{" "}
                   {result.folds.length} folds · {result.n_trials} trials
@@ -501,9 +503,9 @@ export default function ResearchPanel({
 
                 <p
                   className={cn(
-                    "mt-3 w-full rounded-xl border px-3.5 py-2.5 text-[13px] leading-relaxed",
+                        "mt-3 w-full rounded-md border px-3.5 py-2.5 text-body leading-relaxed",
                     result.verdict.passed
-                      ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-300"
+                          ? "border-gain/30 bg-gain/[0.06] text-gain"
                       : "border-destructive/30 bg-destructive/[0.06] text-destructive",
                   )}
                 >
@@ -581,7 +583,7 @@ export default function ResearchPanel({
             />
             <div className="p-5 pt-3">
               <div className="overflow-hidden rounded-xl border border-border">
-                <table className="w-full border-collapse text-[13px]">
+                    <table className="w-full border-collapse text-body">
                   <tbody>
                     {result.verdict.checks.map((c) => (
                       <tr
@@ -591,8 +593,8 @@ export default function ResearchPanel({
                         <td className="w-8 px-3 py-2">
                           <span
                             className={cn(
-                              "grid h-4.5 w-4.5 place-items-center rounded-full text-[10px] font-bold text-white",
-                              c.ok ? "bg-emerald-500" : "bg-destructive",
+                                  "grid h-4.5 w-4.5 place-items-center rounded-full text-micro font-semibold text-white",
+                                  c.ok ? "bg-gain" : "bg-destructive",
                             )}
                           >
                             {c.ok ? "✓" : "✕"}
@@ -616,8 +618,8 @@ export default function ResearchPanel({
               sub={`train ${result.train_bars} · test ${result.test_bars} · step ${result.step_bars} · warmup ${result.warmup_bars} bars`}
             />
             <div className="p-5 pt-3">
-              <div className="overflow-x-auto rounded-xl border border-border">
-                <table className="w-full border-collapse text-[13px]">
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full border-collapse text-body">
                   <thead>
                     <tr className="border-b border-border bg-muted/40 text-left">
                       <th className="px-3 py-2 font-semibold">Fold</th>
@@ -657,7 +659,7 @@ export default function ResearchPanel({
                           className={cn(
                             "px-3 py-1.5 text-right font-medium tabular-nums",
                             f.test_sharpe >= 0
-                              ? "text-emerald-600 dark:text-emerald-400"
+                            ? "text-gain"
                               : "text-destructive",
                           )}
                         >
@@ -667,7 +669,7 @@ export default function ResearchPanel({
                           className={cn(
                             "px-3 py-1.5 text-right tabular-nums",
                             f.test_return_pct >= 0
-                              ? "text-emerald-600 dark:text-emerald-400"
+                            ? "text-gain"
                               : "text-destructive",
                           )}
                         >
