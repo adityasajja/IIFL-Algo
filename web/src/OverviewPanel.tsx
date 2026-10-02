@@ -242,7 +242,8 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
 
       <DataTrust status={dataStatus ?? null} brokerConnected={!!health?.session_active} error={dataError} />
 
-      {/* Today, full width: the one answer the dashboard leads with. */}
+      {/* Today: only once there is something to say (a day P&L or an open trade). */}
+      {(dayPnl !== null || openPosCount > 0) && (
       <TiltCard
           onClick={() => onNavigate("trading")}
         className="cursor-pointer rounded-xl border border-border bg-white p-6 text-left shadow-[rgba(0,55,112,0.08)_0_1px_3px] transition-colors hover:border-primary/40 sm:p-7 dark:bg-card"
@@ -269,6 +270,7 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
             </div>
           </div>
       </TiltCard>
+      )}
 
       {/* Only when something needs a person. */}
       {todo.length > 0 ? (

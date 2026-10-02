@@ -1,4 +1,4 @@
-import { Database, FlaskConical, LineChart, TriangleAlert } from "lucide-react";
+import { FlaskConical, LineChart, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getTrackRecord, type TrackRecord } from "./api";
 import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
@@ -112,9 +112,6 @@ export function TrackRecordCard({
     </Card>
   );
 }
-
-/** "NIFTY 50" -> "Nifty 50": the backend keys it in capitals. */
-const niceName = (n: string) => n.replace(/\b([A-Z])([A-Z]+)\b/g, (_, a, b) => a + b.toLowerCase());
 
 function TrackTab({ value, label }: { value: string; label: string }) {
   return <TabsTrigger value={value}>{label}</TabsTrigger>;
@@ -318,21 +315,8 @@ function Filled({ data, view, refreshing }: { data: TrackRecord; view: "chart" |
         </Tile>
       </div>
 
-      {/* where it came from: three small chips, details on hover */}
+      {/* Provenance is the app-bar pill and the data line on Home; only a gap in this record is shown here. */}
       <div className="flex flex-wrap items-center gap-2">
-        <Chipish tone="warn" icon={<FlaskConical className="size-3" />} tip={prov.fills}>
-          Simulated fills
-        </Chipish>
-        <Chipish tone={prov.prices_as_of ? "flat" : "bad"} icon={<Database className="size-3" />} tip={prov.prices}>
-          Prices to {shortDay(prov.prices_as_of)}
-        </Chipish>
-        <Chipish
-          tone={prov.benchmark.as_of ? "flat" : "bad"}
-          icon={<LineChart className="size-3" />}
-          tip={prov.benchmark.source ?? "Daily index closes"}
-        >
-          {niceName(prov.benchmark.name)} to {shortDay(prov.benchmark.as_of)}
-        </Chipish>
         {!prov.complete ? (
           <Chipish tone="warn" icon={<TriangleAlert className="size-3" />} tip="On these days a held stock had no price, so it was valued at what it cost.">
             {prov.unpriced_days} {prov.unpriced_days === 1 ? "day" : "days"} valued at cost
