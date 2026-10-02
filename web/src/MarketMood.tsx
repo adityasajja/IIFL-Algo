@@ -71,7 +71,7 @@ export const SCREEN_PRESET_KEY = "atr.screener.preset";
 export const SCREEN_PRESETS: ScreenPreset[] = [
   {
     label: "Near 52-week highs",
-    hint: "Within 2% of the yearly high, on above-normal volume",
+    hint: "Within 2% of yearly high, high volume",
     tree: {
       match: "all",
       conditions: [
@@ -82,7 +82,7 @@ export const SCREEN_PRESETS: ScreenPreset[] = [
   },
   {
     label: "Volume breakouts",
-    hint: "Closed above yesterday's high on 2x normal volume",
+    hint: "Above yesterday's high, 2x volume",
     tree: {
       match: "all",
       conditions: [
@@ -93,7 +93,7 @@ export const SCREEN_PRESETS: ScreenPreset[] = [
   },
   {
     label: "Dips in an uptrend",
-    hint: "Above the 50-day average but RSI under 40",
+    hint: "Above 50-day average, RSI under 40",
     tree: {
       match: "all",
       conditions: [
@@ -123,11 +123,11 @@ export function moodScore(d: MarketSummary): number {
 }
 
 const MOODS: { max: number; word: string; line: string; color: string }[] = [
-  { max: 20, word: "Extreme fear", line: "Sellers are in a hurry. Bargains show up here, but so do falling knives.", color: "var(--loss)" },
-  { max: 40, word: "Fear", line: "The mood is cautious. Most stocks are under pressure.", color: "color-mix(in oklab, var(--loss) 55%, var(--warning))" },
-  { max: 60, word: "Neutral", line: "No strong lean either way. Stock picking matters more than the index.", color: "var(--warning)" },
-  { max: 80, word: "Greed", line: "Buyers are in control and most stocks are along for the ride.", color: "color-mix(in oklab, var(--warning) 45%, var(--gain))" },
-  { max: 101, word: "Extreme greed", line: "Everyone is buying. Strong markets can run, but chasing gets riskier.", color: "var(--gain)" },
+  { max: 20, word: "Extreme fear", line: "Sellers rushing", color: "var(--loss)" },
+  { max: 40, word: "Fear", line: "Cautious", color: "color-mix(in oklab, var(--loss) 55%, var(--warning))" },
+  { max: 60, word: "Neutral", line: "No clear lean", color: "var(--warning)" },
+  { max: 80, word: "Greed", line: "Buyers in control", color: "color-mix(in oklab, var(--warning) 45%, var(--gain))" },
+  { max: 101, word: "Extreme greed", line: "Everyone buying", color: "var(--gain)" },
 ];
 
 export function MoodGauge({ data }: { data: MarketSummary }) {
@@ -163,7 +163,7 @@ export function MoodGauge({ data }: { data: MarketSummary }) {
       <div className="min-w-[14rem] flex-1">
         <div className="text-xs text-muted-foreground">Market mood</div>
         <div className="mt-1 text-2xl font-semibold tracking-tight" style={{ color: mood.color }}>{mood.word}</div>
-        <p className="mt-1 max-w-md text-sm text-muted-foreground">{mood.line}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{mood.line}</p>
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
           {parts.map((p) => (
             <span key={p.label}>{p.label}: <span className="tabular-nums text-foreground">{p.v}</span></span>
@@ -274,7 +274,7 @@ export function WhatChanged({ data }: { data: MarketSummary }) {
   const dot = { good: "bg-gain", bad: "bg-loss", info: "bg-muted-foreground" };
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <div className="text-xs text-muted-foreground">What changed since the last session</div>
+      <div className="text-xs text-muted-foreground">What changed</div>
       {changes.length ? (
         <ul className="mt-3 space-y-2">
           {changes.map((c) => (
@@ -285,7 +285,7 @@ export function WhatChanged({ data }: { data: MarketSummary }) {
           ))}
         </ul>
       ) : (
-        <div className="mt-3 text-sm text-muted-foreground">Nothing major. The market is where it was yesterday.</div>
+        <div className="mt-3 text-sm text-muted-foreground">No major changes</div>
       )}
     </div>
   );
@@ -339,7 +339,7 @@ export function SectorHeatmap({
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-baseline justify-between">
         <span className="text-xs text-muted-foreground">Sector heatmap, {periodLabel.toLowerCase()}</span>
-        <span className="text-caption text-muted-foreground/70">Tile size = number of stocks. Click a tile for detail.</span>
+        <span className="text-caption text-muted-foreground/70">Size = stock count</span>
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {ordered.map((s) => {

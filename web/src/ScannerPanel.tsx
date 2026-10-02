@@ -158,7 +158,7 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
           <Input
             value={universe}
             onChange={setUniverse}
-            placeholder="Universe override: RELIANCE-EQ,INFY-EQ (blank = 19-name default)"
+            placeholder="Universe: RELIANCE-EQ,INFY-EQ"
           />
         </div>
       )}
@@ -174,12 +174,10 @@ export default function ScannerPanel({ onOpenChart }: { onOpenChart?: (tab: stri
         {scanState === "loading"
           ? mode === "all"
             ? "Scoring cached histories…"
-            : "Fetching live prices. This takes about a minute."
+            : "Fetching live prices…"
           : rows
             ? `${asOf} · ${breadth} · showing ${visible?.length}`
-            : mode === "all"
-              ? "The whole market, scored from saved prices."
-              : "Momentum scan over liquid NSE names."}
+            : ""}
       </Hint>
 
       {error && (

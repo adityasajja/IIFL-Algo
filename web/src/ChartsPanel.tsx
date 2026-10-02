@@ -999,7 +999,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-md border border-border bg-muted p-2 ">
                 <input
                   type="text"
-                  placeholder="Search symbol (e.g. TATA, INFY)..."
+                  placeholder="Search symbol"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   autoFocus
@@ -1438,13 +1438,12 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-card text-xs">
                 <div className="flex items-center gap-2">
                   <Code size={14} className="text-primary" />
-                  <span className="font-semibold text-foreground tracking-wide">Pine Script Indicator Studio</span>
+                  <span className="font-semibold text-foreground tracking-wide">Pine Script</span>
                   <span className="text-micro text-primary font-mono bg-primary/10 px-1.5 py-0.5 rounded-md border border-primary/30 font-semibold">v6 Reference</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {/* Preset Selector */}
-                  <span className="text-caption text-muted-foreground">Templates:</span>
-                  <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1">
                     {PINE_PRESETS.map((p) => (
                       <Tooltip content={p.desc} side="top" delay={400}>
                       <Chip
@@ -1556,14 +1555,12 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   ) : (
                     <span className="text-gain flex items-center gap-1.5 font-medium">
                       <Check size={13} />
-                      Compilation successful · Added to chart
+                      Applied
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-3 text-muted-foreground text-[10.5px]">
                 <span>Shortcut: <kbd className="bg-border px-1 py-0.5 rounded-md text-foreground text-micro">Ctrl</kbd> + <kbd className="bg-border px-1 py-0.5 rounded-md text-foreground text-micro">Enter</kbd></span>
-                  <span>|</span>
-                  <span>Built-ins: <span className="text-primary">ta.sma</span>, <span className="text-primary">ta.ema</span>, <span className="text-primary">ta.rsi</span>, <span className="text-primary">ta.macd</span>, <span className="text-primary">ta.atr</span>, <span className="text-primary">plot</span></span>
                 </div>
               </div>
             </div>
@@ -1630,7 +1627,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 <div className="relative mt-2">
                   <input
                     type="text"
-                    placeholder="Search e.g. TATAMOTORS, INFY..."
+                    placeholder="Search symbol"
                     value={addSymbolQuery}
                     onChange={(e) => setAddSymbolQuery(e.target.value)}
                     autoFocus
@@ -1688,7 +1685,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
           <div data-lenis-prevent className="flex-1 overflow-y-auto divide-y divide-border/40">
             {watch.loaded && watchlist.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-muted-foreground">
-                {watch.error ? watch.error : "Nothing here yet. Use + to add a stock."}
+                {watch.error ? watch.error : "Empty"}
               </div>
             ) : null}
             {watchlist.map((item) => {
@@ -1862,7 +1859,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   <>
                     {dynamicInputs.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground font-mono text-xs">
-                        No configurable inputs defined in this indicator script.
+                        No inputs
                       </div>
                     ) : (
                       <div className="space-y-3.5">
@@ -1935,7 +1932,7 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                   <div className="space-y-3.5">
                     {plots.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground font-mono text-xs">
-                        No plot outputs to customize.
+                        No plots
                       </div>
                     ) : (
                       plots.map((p) => {

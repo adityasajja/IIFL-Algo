@@ -86,7 +86,7 @@ export default function RiskPanel() {
   if (error && !risk) {
     return (
       <Card>
-        <CardHeader title="Risk" sub="Live limits and the kill switch" />
+        <CardHeader title="Risk" />
         <div className="p-4">
           <ErrorBox>{error}</ErrorBox>
         </div>
@@ -127,10 +127,10 @@ export default function RiskPanel() {
               </div>
               <div className="text-xs text-muted-foreground">
                 {on
-                  ? "New orders are blocked."
+                  ? "Orders blocked"
                   : risk?.live_orders_allowed
-                    ? `Environment is ${risk?.env} — orders will reach the broker.`
-                    : `Environment is ${risk?.env} — orders are refused regardless.`}
+                    ? `${risk?.env} — orders reach broker`
+                    : `${risk?.env} — orders refused`}
               </div>
             </div>
           </div>
@@ -138,7 +138,7 @@ export default function RiskPanel() {
           {on ? (
             armed === "clear" ? (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Resume live order flow?</span>
+                <span className="text-xs text-muted-foreground">Resume orders?</span>
                 <Button size="sm" variant="outline" onClick={() => setArmed(null)}>
                   Cancel
                 </Button>
@@ -157,7 +157,7 @@ export default function RiskPanel() {
             )
           ) : armed === "kill" ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Block all new orders?</span>
+              <span className="text-xs text-muted-foreground">Block all orders?</span>
               <Button size="sm" variant="outline" onClick={() => setArmed(null)}>
                 Cancel
               </Button>
@@ -181,9 +181,7 @@ export default function RiskPanel() {
 
       {!risk?.live_orders_allowed && !on && (
         <Callout tone="warn">
-          This environment (<span className="font-mono">{risk?.env}</span>) does not place live
-          orders. Nothing here can move real money until the environment is switched to paper or
-          live — the kill switch is a second, independent block on top of that.
+          <span className="font-mono">{risk?.env}</span> does not place live orders.
         </Callout>
       )}
 
@@ -247,12 +245,10 @@ export default function RiskPanel() {
               <Row
                 label="Worst case per trade"
                 value={fmtMoney(riskPerTrade)}
-                hint="capital × risk per trade"
               />
               <Row
                 label="Worst case if all fill"
                 value={fmtMoney(riskPerTrade * lim.max_active)}
-                hint={`${lim.max_active} concurrent × per-trade risk`}
               />
               <Row label="Product" value={lim.product === "CNC" ? "CNC (delivery)" : `${lim.product} (intraday)`} />
             </>
@@ -262,7 +258,7 @@ export default function RiskPanel() {
 
       {Object.keys(m).length > 0 && (
         <Card>
-          <CardHeader title="Broker margin" sub="As reported by IIFL at the last refresh" />
+          <CardHeader title="Broker margin" />
           <div className="grid gap-x-6 gap-y-3 p-5 pt-4 sm:grid-cols-2 lg:grid-cols-3">
             {Object.entries(m).map(([k, v]) => (
               <Row key={k} label={humanize(k)} value={fmtMoney(v)} />

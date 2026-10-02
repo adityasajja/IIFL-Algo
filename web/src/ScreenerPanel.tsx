@@ -431,10 +431,7 @@ function GroupEditor({
 
       <div className="space-y-2">
         {group.children.length === 0 ? (
-          <Hint>
-            This group is empty, so it matches nothing. (Not everything — an empty group is a
-            no-op, deliberately.)
-          </Hint>
+          <Hint>Empty group</Hint>
         ) : null}
         {group.children.map((child, index) =>
           child.kind === "group" ? (
@@ -606,7 +603,6 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
       <Card>
         <CardHeader
           title="Screen builder"
-          sub="Find stocks that match all of your rules."
           action={
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setSaveOpen((v) => !v)}>
@@ -718,7 +714,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
 
       {saved.length ? (
         <Card>
-          <CardHeader title="Saved scans" sub="Re-run a stored screen with one click." />
+          <CardHeader title="Saved scans" />
           <div className="flex flex-wrap gap-2 p-5 pt-3">
             {saved.map((scan) => (
               <div
@@ -792,10 +788,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
 
           {result.rows.length === 0 ? (
             <div className="p-5">
-              <Hint>
-                Nothing matched. That is a result, not a failure — loosen a condition or widen the
-                universe and run again.
-              </Hint>
+              <Hint>No matches</Hint>
             </div>
           ) : (
             <div className="overflow-x-auto p-5 pt-3">

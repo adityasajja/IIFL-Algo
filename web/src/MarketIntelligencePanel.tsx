@@ -226,13 +226,9 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
     new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
   // One line that says what the numbers add up to.
-  const takeaway = `${breadth.toFixed(0)}% of stocks are above their 50-day average${
-    breadthMove === null || Math.abs(breadthMove) < 5
-      ? ""
-      : breadthMove > 0
-        ? `, up from ${monthAgo!.toFixed(0)}% a month ago`
-        : `, down from ${monthAgo!.toFixed(0)}% a month ago`
-  }. ${up === down ? "Buyers and sellers are even" : `${up > down ? "Buyers" : "Sellers"} outnumber ${up > down ? "sellers" : "buyers"} ${ratio.toFixed(1)} to 1`}.`;
+  const takeaway = `${breadth.toFixed(0)}% above 50-day avg${
+    breadthMove === null || Math.abs(breadthMove) < 5 ? "" : ` (was ${monthAgo!.toFixed(0)}%)`
+  } · ${up === down ? "Even" : `${up > down ? "Buyers" : "Sellers"} ${ratio.toFixed(1)} : 1`}`;
 
   const leaders = (data.top_relative_strength_stocks ?? []).slice(0, 5) as Record<string, unknown>[];
   const breakouts = (data.top_breakouts ?? []).slice(0, 5) as Record<string, unknown>[];
@@ -241,7 +237,7 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
 
   return (
     <div className="space-y-4">
-      {/* Verdict + the index, in plain words. */}
+      {/* Verdict + the index. */}
       <div className="flex flex-wrap items-center justify-between gap-6 rounded-xl border border-border bg-card p-5">
         <div>
           <div className="text-xs text-muted-foreground">Market direction</div>
@@ -250,7 +246,7 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
               {regime.word}
             </span>
           </div>
-          <p className="mt-3 max-w-md text-sm text-muted-foreground">{takeaway}</p>
+          <p className="mt-3 text-sm text-muted-foreground">{takeaway}</p>
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
@@ -380,7 +376,7 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
             <span className="text-loss">{down} falling</span>
           </div>
 
-          <div className="mt-5 text-xs text-muted-foreground">Above their average price</div>
+          <div className="mt-5 text-xs text-muted-foreground">Above average</div>
           <div className="mt-3 space-y-3">
             {[
               { label: "20-day", value: data.breadth_above_ema20_pct },
@@ -399,7 +395,7 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
           {history.length > 2 ? (
             <div className="mt-5 flex items-center justify-between gap-4">
               <div>
-                <div className="text-xs text-muted-foreground">Above 50-day average, over 30 days</div>
+                <div className="text-xs text-muted-foreground">50-day, 30 days</div>
                 {breadthMove !== null ? (
                   <div className={cn("mt-1 text-sm tabular-nums", breadthMove >= 0 ? "text-gain" : "text-loss")}>
                     {breadthMove >= 0 ? "Up" : "Down"} {Math.abs(breadthMove).toFixed(0)} points
@@ -512,7 +508,7 @@ function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset
             },
             {
               title: "Breakouts",
-              hint: "trading volume vs normal",
+              hint: "vs normal",
               rows: breakouts.map((r) => ({
                 symbol: String(r.symbol ?? "").replace("-EQ", ""),
                 value: `${Number(r.relative_volume).toFixed(1)}x`,
@@ -961,7 +957,7 @@ function StrategyContextPanel() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className={fieldLabel}>CONDITION AXIS</label>
+            <label className={fieldLabel} title={axisDesc}>CONDITION AXIS</label>
             <Select
               size="sm"
               className="w-[220px]"
@@ -975,8 +971,7 @@ function StrategyContextPanel() {
             {loading ? "Analyzing…" : "Analyze"}
           </Button>
         </div>
-        <div className="mt-1.5 text-caption text-muted-foreground">{axisDesc}</div>
-      </Card>
+              </Card>
 
       {error && <div className="py-2 px-0"><CompactErrorNotice msg={error} onRetry={() => run()} /></div>}
 
@@ -1084,13 +1079,13 @@ function StrategyContextPanel() {
           {/* Evidence legend */}
           <div className="flex gap-4 text-micro text-muted-foreground">
             <span>
-              <span className="text-gain">● Forward</span> — enough out-of-sample observations
+              <span className="text-gain" title="Enough out-of-sample observations">● Forward</span>
             </span>
             <span>
-              <span className="text-warning">● Thin</span> — forward evidence exists but below floor
+              <span className="text-warning" title="Forward evidence below the floor">● Thin</span>
             </span>
             <span>
-              <span className="text-muted-foreground">● In-sample</span> — selection-history only
+              <span className="text-muted-foreground" title="Selection history only">● In-sample</span>
             </span>
           </div>
         </div>

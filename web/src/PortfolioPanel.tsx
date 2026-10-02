@@ -271,7 +271,7 @@ function LimitsGroup({ title, icon: Icon, badge, children, className }: {
 }
 
 function LimitsView({ row }: { row: Row | null }) {
-  if (!row) return <Empty icon={Wallet} title="No limits returned" hint="The broker returned an empty limits payload. Try Refresh." />;
+  if (!row) return <Empty icon={Wallet} title="No limits returned" />;
   const tradingLimit = num(row.tradingLimit);
   const openingCash = num(row.openingCashLimit);
   const collateral = num(row.collateralMargin);
@@ -424,7 +424,7 @@ function PositionsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) 
     },
   ], [getTick]);
 
-  if (rows.length === 0) return <Empty icon={Activity} title="No open positions" hint="Your intraday book is flat. Active positions will appear here with live P&L." />;
+  if (rows.length === 0) return <Empty icon={Activity} title="No open positions" />;
 
   return (
     <div className="overflow-hidden rounded-xl border border-border/80 bg-card/20 -xs">
@@ -627,7 +627,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
     },
   ], [getTick, totalPortfolioValue]);
 
-  if (rows.length === 0) return <Empty icon={Briefcase} title="No holdings" hint="Your demat account is empty." />;
+  if (rows.length === 0) return <Empty icon={Briefcase} title="No holdings" />;
 
   const totalInvested = rows.reduce((s, h) => s + num(h.totalQuantity) * num(h.averageTradedPrice), 0);
   const totalDelta = totalPortfolioValue - totalInvested;
@@ -686,7 +686,7 @@ function HoldingsView({ rows, getTick }: { rows: Row[]; getTick: (sym: string) =
           })}
         </div>
       )}
-      {filtered.length === 0 && <Empty icon={Briefcase} title="No matching holdings" hint={`No holding matches "${query}".`} />}
+      {filtered.length === 0 && <Empty icon={Briefcase} title="No matching holdings" />}
     </div>
   );
 }
@@ -701,7 +701,7 @@ function pickString(row: Row, ...keys: string[]): string {
 }
 
 function OrdersView({ rows }: { rows: Row[] }) {
-  if (rows.length === 0) return <Empty icon={ListOrdered} title="No orders today" hint="Every order the broker has seen today appears here." />;
+  if (rows.length === 0) return <Empty icon={ListOrdered} title="No orders today" />;
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-body">
@@ -734,7 +734,7 @@ function OrdersView({ rows }: { rows: Row[] }) {
 }
 
 function TradesView({ rows }: { rows: Row[] }) {
-  if (rows.length === 0) return <Empty icon={BarChart3} title="No trades today" hint="Executed trades appear here as they happen." />;
+  if (rows.length === 0) return <Empty icon={BarChart3} title="No trades today" />;
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-body">
@@ -964,7 +964,7 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
           {orderType === "MARKET" && (
             <div className="flex items-start gap-1.5 border-t border-border/40 pt-2 text-caption text-muted-foreground/80">
               <Zap size={10} className="mt-0.5 shrink-0 text-warning" />
-              <span>MARKET orders include 0.5% protection per SEBI mandate — actual fill may differ slightly from LTP.</span>
+              <span>MARKET: 0.5% protection, fill may differ from LTP</span>
             </div>
           )}
           {!canAfford && availableMargin > 0 && (
@@ -990,7 +990,7 @@ function ExecuteTab({ availableMargin }: { availableMargin: number }) {
         </div>
         <MarketDepthLadder symbol={formattedSymbol} depth={tick?.depth} ltp={tick?.ltp}
           onSelectPrice={(p) => { setPrice(p.toFixed(2)); setOrderType("LIMIT"); }} />
-        <p className="mt-2 text-[10.5px] text-muted-foreground/60">Click any price to populate as limit price.</p>
+        <p className="mt-2 text-[10.5px] text-muted-foreground/60">Click a price to use as limit</p>
       </div>
     </div>
   );

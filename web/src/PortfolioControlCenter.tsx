@@ -173,7 +173,7 @@ export function PortfolioControlCenter() {
             <AlertOctagon className="size-5 shrink-0 text-destructive animate-pulse" />
             <div>
               <p className="text-sm font-semibold">Emergency Kill Switch is ENGAGED</p>
-              <p className="text-xs text-muted-foreground">Order placement is blocked across the entire system.</p>
+              <p className="text-xs text-muted-foreground">All orders blocked</p>
             </div>
           </div>
           <Button
@@ -203,9 +203,6 @@ export function PortfolioControlCenter() {
             <span className="font-semibold text-foreground">Paper Portfolio (Simulated Book)</span>
             <AnimatedBadge status="success" size="sm">LOCAL PAPER ONLY</AnimatedBadge>
             </div>
-            <p className="text-caption text-muted-foreground mt-0.5">
-            Simulated capital allocated across automated paper trading strategies. Zero broker fills or money movements.
-            </p>
           </div>
         </TiltCard>
 
@@ -254,9 +251,6 @@ export function PortfolioControlCenter() {
               {data.policy_configured ? "Risk Engine Active" : "Uncapped / Pass-Through"}
             </AnimatedBadge>
           </div>
-          <p className={TYPOGRAPHY.sub}>
-          Paper-level limits, cross-strategy capital allocation, concentration tracking, and conflict governance.
-          </p>
         </div>
 
         <div className="flex items-center gap-2.5">
@@ -322,7 +316,7 @@ export function PortfolioControlCenter() {
         <Card className="border-primary/40 bg-card/90 ">
           <CardHeader
             title="Configure Portfolio-Level Limits & Conflict Rules"
-            sub="These limits sit ABOVE all individual strategy limits and are strictly enforced before OMS submission."
+            sub="Enforced before every order"
           />
           <div className="p-5 pt-3 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -340,7 +334,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Absolute rupee gross cap</span>
               </div>
 
               <div>
@@ -357,7 +350,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Portfolio stop-out threshold</span>
               </div>
 
               <div>
@@ -374,7 +366,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Deployment creation budget cap</span>
               </div>
 
               <div>
@@ -391,7 +382,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Max concurrent open symbols</span>
               </div>
 
               <div>
@@ -408,7 +398,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Max concentration per ticker</span>
               </div>
 
               <div>
@@ -426,7 +415,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Fraction of total capital</span>
               </div>
 
               <div>
@@ -446,7 +434,6 @@ export function PortfolioControlCenter() {
                     { value: "net", label: "Allow Netting / Opposite positions" },
                   ]}
                 />
-                <span className="text-[10.5px] text-muted-foreground">Rules when Strategies disagree</span>
               </div>
 
               <div>
@@ -464,7 +451,6 @@ export function PortfolioControlCenter() {
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Alert when usage reaches % of limit</span>
               </div>
 
               <div>
@@ -476,7 +462,6 @@ export function PortfolioControlCenter() {
                   onChange={(e) => setPolicyReason(e.target.value)}
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-xs"
                 />
-                <span className="text-[10.5px] text-muted-foreground">Mandatory audit trail log</span>
               </div>
             </div>
 
@@ -507,18 +492,15 @@ export function PortfolioControlCenter() {
       <Stat
       label="Paper Capital"
       value={INR(capital.total)}
-      sub="Total simulated book"
       />
       <Stat
       label="Deployed Capital"
       value={INR(capital.deployed)}
-      sub="Active running arms"
       />
         <Stat
           label="Available Capital"
           value={INR(capital.available)}
-          sub="Unallocated capacity"
-          tone="good"
+              tone="good"
         />
         <Stat
           label="Gross Exposure"
@@ -546,9 +528,6 @@ export function PortfolioControlCenter() {
             <h3 className="text-sm font-semibold text-foreground">
               Paper Strategy Allocations & Performance
             </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Simulated deployments running on paper capital, ordered by allocated capital.
-            </p>
           </div>
           <div>
             <Tabs
@@ -596,7 +575,7 @@ export function PortfolioControlCenter() {
               }).length === 0 ? (
                 <tr>
                   <td colSpan={11} className="p-6 text-center text-muted-foreground">
-                    No {statusFilter.toLowerCase()} paper deployments found.
+                    None
                   </td>
                 </tr>
               ) : (
@@ -667,7 +646,6 @@ export function PortfolioControlCenter() {
         <Card>
           <CardHeader
             title="Portfolio Risk Limits Status"
-            sub="Independent portfolio-level constraints evaluated at every order validation."
           />
           <div className="p-4 space-y-3">
             <div className="divide-y divide-border/40">
@@ -709,13 +687,13 @@ export function PortfolioControlCenter() {
         <Card>
           <CardHeader
             title="Cross-Strategy Signal Conflicts"
-            sub={`Current rule: ${data.policy.conflict_mode.toUpperCase()}. Transparent governance without hidden auto-picking.`}
+            sub={data.policy.conflict_mode.toUpperCase()}
           />
           <div className="p-4 space-y-3">
             {conflicts.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground">
                 <CheckCircle2 size={24} className="mx-auto text-gain mb-2 opacity-80" />
-                No cross-strategy position or signal conflicts detected across running deployments.
+                No conflicts
               </div>
             ) : (
               <div className="space-y-2.5">
@@ -759,7 +737,6 @@ export function PortfolioControlCenter() {
         <Card>
           <CardHeader
             title="Sector Concentration"
-            sub="Exposure distributed across market sectors relative to portfolio capital."
           />
           <div className="p-4 space-y-3">
             {Object.keys(data.sectors).length === 0 ? (
@@ -789,7 +766,6 @@ export function PortfolioControlCenter() {
         <Card>
           <CardHeader
             title="Stock Concentration (Top 5)"
-            sub="Largest individual stock exposures across all combined strategies."
           />
           <div className="p-4 space-y-3">
             {concentrations.stocks.length === 0 ? (
@@ -820,7 +796,6 @@ export function PortfolioControlCenter() {
       <Card>
         <CardHeader
           title="Aggregated Open Positions"
-          sub="Combined net holdings across all simultaneous deployment books."
         />
         <div className="overflow-x-auto p-1">
           <table className="w-full text-left text-xs">
@@ -838,7 +813,7 @@ export function PortfolioControlCenter() {
               {open_positions.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-6 text-center text-muted-foreground">
-                    No open positions held across any strategy deployments.
+                    No open positions
                   </td>
                 </tr>
               ) : (
