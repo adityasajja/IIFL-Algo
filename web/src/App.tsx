@@ -77,6 +77,7 @@ import {
   syncJournal,
   getHealth,
   getLoginStatus,
+  listDeployments,
   logoutSession,
   type DataStatus,
   type Health,
@@ -507,6 +508,20 @@ export default function App() {
     return () => clearInterval(t);
   }, [refreshHealth, refreshAuth]);
 
+  // Strategies that are RUNNING need the broker's live prices. If the login lapses they quietly stop
+  // getting ticks, so say so loudly instead of leaving a calm-looking page.
+  const [runningCount, setRunningCount] = useState(0);
+  useEffect(() => {
+    const load = () =>
+      listDeployments()
+        .then((r) => setRunningCount(r.deployments.filter((d) => d.status === "RUNNING").length))
+        .catch(() => undefined);
+    void load();
+    const t = setVisibleInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const feedDown = runningCount > 0 && health != null && !health.session_active;
+
   const meta = PAGES[tab];
   const accountInitials = (principal?.display_name || principal?.username || "?").slice(0, 2);
   const [showLogin, setShowLogin] = useState(false);
@@ -719,6 +734,18 @@ export default function App() {
           executionMode={health?.execution_mode}
           killSwitch={health?.kill_switch}
         />
+        {feedDown && (
+          <div role="alert" className="mx-auto w-full max-w-[1200px] px-6 pt-4 max-md:px-4">
+            <Callout tone="bad" title="Not trading: the broker login has lapsed">
+              {runningCount} running {runningCount === 1 ? "strategy is" : "strategies are"} not receiving live
+              prices, so no new trades are placed until you{" "}
+              <Button size="inline" variant="link" onClick={() => setShowLogin(true)}>
+                log in again
+              </Button>
+              .
+            </Callout>
+          </div>
+        )}
         <main
           className={cn(
             "mx-auto min-w-0 w-full max-w-[1200px] px-6 pb-16",

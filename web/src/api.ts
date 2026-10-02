@@ -5038,3 +5038,27 @@ export interface DataStatus {
 }
 
 export const getDataStatus = () => v1<DataStatus>("/data/status");
+
+
+// --- Broker reconciliation (platform records vs the broker's own) ---
+export interface ReconcileDifference {
+  scope: string;
+  key: string;
+  kind: string;
+  severity: "ok" | "warning" | "critical" | string;
+  detail: string;
+}
+export interface ReconcileRun {
+  run_id: string | null;
+  severity: "ok" | "warning" | "critical" | string;
+  mismatches: number;
+  critical: number;
+  incomparable: number;
+  error: string | null;
+  results: { scope: string; compared: boolean; skipped_reason: string | null; severity: string }[];
+  detail: ReconcileDifference[];
+  created_at?: string | null;
+}
+export const getLatestReconcile = () => v1<ReconcileRun>("/reconciliation/runs/latest");
+export const runReconcile = () =>
+  v1<ReconcileRun>("/reconciliation/run", { method: "POST", body: JSON.stringify({}) });

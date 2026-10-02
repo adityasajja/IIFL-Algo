@@ -33,6 +33,7 @@ import { ErrorBox, Hint } from "./components/ui/card";
 import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { Button } from "./components/ui/button";
+import ReconcileCard from "./ReconcileCard";
 import { useOrderConfirm } from "./components/ui/order-confirm";
 import { StatefulButton, type ButtonState } from "./components/ui/stateful-button";
 import { Badge, Stat, fmtNum } from "./components/ui/stat";
@@ -1167,6 +1168,8 @@ export default function PortfolioPanel() {
   return (
     <div className="space-y-6">
       <KpiStrip data={data} error={error} lastUpdated={lastUpdated} getTick={getTick} />
+
+      <ReconcileCard />
 
       <div className="rounded-lg border border-border/80 bg-card/40 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-4">
