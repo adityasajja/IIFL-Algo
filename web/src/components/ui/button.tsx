@@ -31,18 +31,17 @@ export interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children">
 type Ripple = { id: number; x: number; y: number; size: number };
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
-  primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-  secondary: "border border-border bg-card text-foreground hover:border-border",
-  ghost: "text-muted-foreground hover:text-foreground hover:bg-primary/5",
-  outline:
-    "border border-border bg-transparent text-foreground hover:bg-primary/5",
+  primary: "bg-primary text-primary-foreground hover:bg-primary-deep active:bg-primary-press shadow-none",
+  secondary: "border border-primary bg-card text-primary hover:bg-primary/[0.06] active:bg-primary/10",
+  ghost: "bg-transparent text-primary hover:bg-primary/[0.06]",
+  outline: "border border-primary-subdued bg-transparent text-primary hover:border-primary hover:bg-primary/[0.06]",
 };
 
 const SIZE_CLASS: Record<ButtonSize, string> = {
-  sm: "h-8 px-3 text-xs gap-1.5 rounded-full",
-  md: "h-10 px-5 text-sm gap-2 rounded-full",
-  lg: "h-12 px-6 text-base gap-2 rounded-full",
-  icon: "h-8 w-8 rounded-lg",
+  sm: "h-10 min-h-[40px] px-4 text-sm gap-1.5 rounded-full",
+  md: "h-10 min-h-[40px] px-4 text-base gap-2 rounded-full",
+  lg: "h-11 min-h-[44px] px-4 text-base gap-2 rounded-full",
+  icon: "h-10 w-10 min-h-[40px] rounded-full",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(

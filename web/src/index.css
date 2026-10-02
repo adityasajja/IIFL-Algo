@@ -2,37 +2,101 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-:root,
-[data-theme="dark"] {
-  --background: #0e1015;
-  --foreground: #eef1f6;
-  --card: #161a23;
-  --primary: #635bff;
-  --primary-foreground: #ffffff;
-  --muted: #1b202b;
-  --muted-foreground: #8b93a2;
-  --border: #262b36;
-  --ring: #635bff;
-  --destructive: #f5686b;
-  --destructive-foreground: #ffffff;
-  --success: #2ec27e;
-  color-scheme: dark;
-}
+/* ──────────────────────────────────────────────────────────
+   Stripi DESIGN.md tokens — web/DESIGN.md is authoritative.
+   Light marketing canvas first; dark track is the dashboard shell.
+   ────────────────────────────────────────────────────────── */
 
+:root,
 [data-theme="light"] {
-  --background: #f6f7f9;
-  --foreground: #0a2540;
+  --background: #ffffff;
+  --foreground: #0d253d;
   --card: #ffffff;
-  --primary: #635bff;
+  --primary: #533afd;
   --primary-foreground: #ffffff;
-  --muted: #eef0f4;
-  --muted-foreground: #697386;
-  --border: #e3e6ec;
-  --ring: #635bff;
-  --destructive: #dc2626;
+  --muted: #f6f9fc;
+  --muted-foreground: #64748d;
+  --border: #e3e8ee;
+  --ring: #533afd;
+  --destructive: #ea2261;
   --destructive-foreground: #ffffff;
   --success: #16a34a;
+
+  --ink-secondary: #273951;
+  --ink-mute-2: #61718a;
+  --canvas-soft: #f6f9fc;
+  --canvas-cream: #f5e9d4;
+  --hairline-input: #a8c3de;
+  --primary-deep: #4434d4;
+  --primary-press: #2e2b8c;
+  --primary-soft: #665efd;
+  --primary-subdued: #b9b9f9;
+  --brand-dark: #1c1e54;
+  --shadow-blue: #003770;
+
+  --shadow-level-1: rgba(0, 55, 112, 0.08) 0 1px 3px;
+  --shadow-level-2: rgba(0, 55, 112, 0.08) 0 8px 24px, rgba(0, 55, 112, 0.04) 0 2px 6px;
+
+  /* Tone: what a colour MEANS, never what it looks like. Gain/loss/warning/info are the
+     only colours that carry market meaning; use these, not the raw palette. Light-mode
+     values are the darker steps so text keeps contrast on white. */
+  --gain: #059669;
+  --loss: var(--destructive);
+  --warning: #b45309;
+  --info: var(--primary);
+
+  /* Chart palette: the one place chart colours are defined (see lib/chart-theme.ts for
+     canvas code, `bg-chart-*` for legends). Follows TradingView's convention so traders
+     read it without a key. Candle up/down are the gain/loss pair. */
+  --chart-up: #089981;
+  --chart-down: #f23645;
+  --chart-blue: #2962ff;
+  --chart-orange: #ff6d00;
+  --chart-purple: #9c27b0;
+  --chart-yellow: #ffeb3b;
+  --chart-cyan: #00e5ff;
+  --chart-violet: #7e57c2;
+  --chart-sky: #2196f3;
+  --chart-pink: #ff007f;
+
   color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --background: #0a0a0b;
+  --foreground: #fafafa;
+  --card: #131316;
+  --primary: #533afd;
+  --primary-foreground: #ffffff;
+  --muted: #1d1d22;
+  --muted-foreground: #a1a1aa;
+  --border: #26262c;
+  --ring: #665efd;
+  --destructive: #f43f5e;
+  --destructive-foreground: #ffffff;
+  --success: #34d399;
+
+  --ink-secondary: #d4d4d8;
+  --ink-mute-2: #71717a;
+  --canvas-soft: #131316;
+  --canvas-cream: #f5e9d4;
+  --hairline-input: #a8c3de;
+  --primary-deep: #4434d4;
+  --primary-press: #2e2b8c;
+  --primary-soft: #665efd;
+  --primary-subdued: #b9b9f9;
+  --brand-dark: #1c1e54;
+  --shadow-blue: #003770;
+
+  --shadow-level-1: rgba(0, 0, 0, 0.28) 0 1px 3px;
+  --shadow-level-2: rgba(0, 0, 0, 0.36) 0 8px 24px, rgba(0, 0, 0, 0.22) 0 2px 6px;
+
+  --gain: #34d399;
+  --loss: var(--destructive);
+  --warning: #fbbf24;
+  --info: var(--primary-soft);
+
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -48,7 +112,39 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-ink-secondary: var(--ink-secondary);
+  --color-canvas-soft: var(--canvas-soft);
+  --color-canvas-cream: var(--canvas-cream);
+  --color-hairline-input: var(--hairline-input);
+  --color-primary-deep: var(--primary-deep);
+  --color-primary-press: var(--primary-press);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-subdued: var(--primary-subdued);
+  --color-brand-dark: var(--brand-dark);
+  --color-gain: var(--gain);
+  --color-loss: var(--loss);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-chart-up: var(--chart-up);
+  --color-chart-down: var(--chart-down);
+  --color-chart-blue: var(--chart-blue);
+  --color-chart-orange: var(--chart-orange);
+  --color-chart-purple: var(--chart-purple);
+  --color-chart-yellow: var(--chart-yellow);
+  --color-chart-cyan: var(--chart-cyan);
+  --color-chart-violet: var(--chart-violet);
+  --color-chart-sky: var(--chart-sky);
+  --color-chart-pink: var(--chart-pink);
+
+  /* Type scale. Tailwind's xs (12) / sm (14) / base (16) / lg / xl stay; these three fill
+     the gaps the app was filling with 245 one-off pixel sizes. See STYLE_GUIDE.md. */
+  --text-micro: 0.625rem;        /* 10px  axis ticks, dense badges */
+  --text-micro--line-height: 1.2;
+  --text-caption: 0.6875rem;     /* 11px  captions, table meta, chips */
+  --text-caption--line-height: 1.35;
+  --text-body: 0.8125rem;        /* 13px  default body in dense panels */
+  --text-body--line-height: 1.5;
+  --font-sans: "Inter", "SF Pro Display", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -62,13 +158,23 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.4;
+  letter-spacing: 0;
+  font-feature-settings: "ss01" on;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Tabular money cells: apply `tabular-nums` + this where currency renders. */
+.tnum,
+.tabular-money {
+  font-feature-settings: "ss01" on, "tnum" on;
+  font-variant-numeric: tabular-nums;
+}
+
 ::selection {
-  background: rgba(99, 91, 255, 0.35);
+  background: rgba(83, 58, 253, 0.2);
 }
 
 ::-webkit-scrollbar {
@@ -82,6 +188,136 @@ body {
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ── Stripi surfaces ─────────────────────────────── */
+.container-stripe {
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
+.card-feature {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: var(--shadow-level-1);
+}
+
+.card-dashboard {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--shadow-level-2);
+}
+
+.card-cream {
+  background: var(--canvas-cream);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+}
+
+.pill-tag-soft {
+  display: inline-flex;
+  align-items: center;
+  background: var(--primary-subdued);
+  color: var(--primary-deep);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0.1px;
+  border-radius: 9999px;
+  padding: 4px 8px;
+  font-feature-settings: "ss01" on;
+}
+
+.eyebrow {
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0.1px;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  font-feature-settings: "ss01" on;
+}
+
+.shadow-level-1 {
+  box-shadow: var(--shadow-level-1);
+}
+.shadow-level-2 {
+  box-shadow: var(--shadow-level-2);
+}
+
+/* Gradient mesh IS the depth system on marketing heroes. Organic blobs
+   approximated with layered radial washes: cream → sherbet → lavender →
+   indigo → ruby. Edge-to-edge, upper third of the hero. */
+.gradient-mesh {
+  background:
+    radial-gradient(42% 68% at 8% 18%, rgba(245, 233, 212, 0.95) 0%, rgba(245, 233, 212, 0) 62%),
+    radial-gradient(36% 62% at 30% 8%, rgba(249, 107, 238, 0.22) 0%, rgba(249, 107, 238, 0) 64%),
+    radial-gradient(44% 74% at 55% 22%, rgba(185, 185, 249, 0.85) 0%, rgba(185, 185, 249, 0) 66%),
+    radial-gradient(40% 70% at 76% 30%, rgba(83, 58, 253, 0.32) 0%, rgba(83, 58, 253, 0) 68%),
+    radial-gradient(30% 58% at 92% 12%, rgba(234, 34, 97, 0.22) 0%, rgba(234, 34, 97, 0) 62%),
+    linear-gradient(180deg, #ffffff 0%, #f6f9fc 100%);
+}
+[data-theme="dark"] .gradient-mesh {
+  background:
+    radial-gradient(42% 68% at 8% 18%, rgba(245, 233, 212, 0.10) 0%, rgba(245, 233, 212, 0) 62%),
+    radial-gradient(36% 62% at 30% 8%, rgba(249, 107, 238, 0.14) 0%, rgba(249, 107, 238, 0) 64%),
+    radial-gradient(44% 74% at 55% 22%, rgba(83, 58, 253, 0.38) 0%, rgba(83, 58, 253, 0) 66%),
+    radial-gradient(40% 70% at 76% 30%, rgba(102, 94, 253, 0.26) 0%, rgba(102, 94, 253, 0) 68%),
+    linear-gradient(180deg, #17171c 0%, #0a0a0b 100%);
+}
+
+/* Links on light surfaces: primary, no underline by default. */
+.link-on-light {
+  color: var(--primary);
+  font-weight: 400;
+  text-decoration: none;
+}
+.link-on-light:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Display tiers: thin weight is the brand. Never bump above 300. */
+.display-xxl {
+  font-size: 56px;
+  font-weight: 300;
+  line-height: 1.03;
+  letter-spacing: -1.4px;
+  font-feature-settings: "ss01" on;
+}
+.display-xl {
+  font-size: 48px;
+  font-weight: 300;
+  line-height: 1.15;
+  letter-spacing: -0.96px;
+  font-feature-settings: "ss01" on;
+}
+.display-lg {
+  font-size: 32px;
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.64px;
+  font-feature-settings: "ss01" on;
+}
+@media (max-width: 768px) {
+  .display-xxl {
+    font-size: 36px;
+    letter-spacing: -0.64px;
+  }
+  .display-xl {
+    font-size: 32px;
+  }
+  .display-lg {
+    font-size: 26px;
+    letter-spacing: -0.26px;
+  }
 }
 
 /* The sidebar's nav list only grows tall enough to scroll when expanded
@@ -111,4 +347,139 @@ html.lenis body {
 }
 .lenis.lenis-stopped {
   overflow: hidden;
+}
+
+/* ──────────────────────────────────────────────────────────
+   Living UI & Continuous Pulse Animations
+   ────────────────────────────────────────────────────────── */
+
+@keyframes live-radar-sweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes live-heartbeat-glow {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.02);
+    box-shadow: 0 0 16px 2px rgba(16, 185, 129, 0.3);
+  }
+}
+
+@keyframes live-ping-slow {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+  75%, 100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes live-shimmer-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes live-scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(1000%);
+  }
+}
+
+@keyframes live-pipe-flow {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.7;
+  }
+  70% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateX(350%);
+    opacity: 0;
+  }
+}
+
+@keyframes live-dot-travel {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  85% {
+    opacity: 0.9;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes stage-subtle-glow {
+  0%, 100% {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+}
+
+@keyframes beam-dash-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.animate-pipe-particle {
+  animation: live-pipe-flow 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-dot-travel {
+  animation: live-dot-travel 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-dash-flow {
+  animation: beam-dash-flow 1.2s linear infinite;
+}
+
+.animate-stage-pulse {
+  animation: stage-subtle-glow 2.5s ease-in-out infinite;
+}
+
+/* Type roles that need more than a size: Stripe-style light headings with negative tracking.
+   (Everything else is a plain size from the scale; see STYLE_GUIDE.md.) */
+@utility text-heading {
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.22px;
+}
+@utility text-display {
+  font-size: 32px;
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.64px;
 }

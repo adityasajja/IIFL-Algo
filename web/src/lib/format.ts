@@ -103,3 +103,48 @@ export function formatIst(iso: string): string {
     timeZone: "Asia/Kolkata",
   });
 }
+
+// ─── Numbers ─────────────────────────────────────────────────────────────────
+//
+// Every figure the UI shows goes through these, so a price, a signed change and a missing
+// value look the same on every page (STYLE_GUIDE.md 4.2):
+//
+//   price           ₹ + Indian digit grouping          ₹22,421.95
+//   signed change   sign always shown, then %          +0.88%  /  -0.88%
+//   missing         an em dash, never 0                —
+//
+// Missing or non-finite input is always "—": a figure that could not be measured must not be
+// shown as zero, which is a plausible value.
+
+const MISSING = "—";
+
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Indian-grouped number, up to `digits` decimals. Booleans read yes/no; other values pass through. */
+export function fmtNum(v: unknown, digits = 2): string {
+  if (v === null || v === undefined) return MISSING;
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  if (typeof v === "number") return Number.isFinite(v) ? v.toLocaleString("en-IN", { maximumFractionDigits: digits }) : MISSING;
+  return String(v);
+}
+
+/** A signed percentage: `+1.20%`, `-0.40%`. */
+export function fmtPct(v: unknown, digits = 2): string {
+  if (!finite(v)) return MISSING;
+  return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}%`;
+}
+
+/** Rupees with Indian grouping and a fixed number of decimals: `₹22,421.95`. */
+export function fmtMoney(v: unknown, digits = 0): string {
+  if (!finite(v)) return MISSING;
+  return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+/** Rupees with a leading minus for losses: `-₹1,200`. */
+export function formatInr(v: number | null | undefined, frac = 0): string {
+  if (!finite(v)) return MISSING;
+  const sign = v < 0 ? "-" : "";
+  return `${sign}₹${Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: frac, maximumFractionDigits: frac })}`;
+}
+
+export const formatPct = (v: number | null | undefined, frac = 2): string => fmtPct(v, frac);

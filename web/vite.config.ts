@@ -70,6 +70,11 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      // Two pages: the app, and the live style guide (no login, no backend).
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        styleguide: fileURLToPath(new URL("./styleguide.html", import.meta.url)),
+      },
       output: {
         // A function, not an object: Vite 8's bundler (Rolldown) only takes the function form.
         manualChunks(id: string) {

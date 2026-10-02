@@ -1,0 +1,17 @@
+{
+  "components/chart/DrawingCanvas.tsx": {
+    "hex-colour": 5
+  },
+  "components/motion/tooltip/positioner.tsx": {
+    "static-inline-style": 1
+  },
+  "components/ui/action-swap.tsx": {
+    "static-inline-style": 1
+  },
+  "MarketMood.tsx": {
+    "static-inline-style": 1
+  },
+  "PaperDeploymentPanel.tsx": {
+    "raw-palette": 3
+  }
+}

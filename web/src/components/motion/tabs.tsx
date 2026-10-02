@@ -90,10 +90,12 @@ export function Tabs({
   );
 }
 
+// The track belongs to the variant, so every pill row and every segment row in the app looks the
+// same without each page re-styling it (STYLE_GUIDE.md 3.8).
 const listClasses: Record<Variant, string> = {
-  pill: "inline-flex items-center gap-1 rounded-full bg-card p-1",
+  pill: "inline-flex items-center gap-1 rounded-full border border-border bg-muted p-1",
   underline: "inline-flex items-center gap-1 border-b border-border",
-  segment: "inline-flex items-center gap-0 rounded-lg bg-card p-0.5",
+  segment: "inline-flex items-center gap-0 rounded-lg border border-border bg-muted/60 p-0.5",
 };
 
 export function TabsList({
@@ -325,7 +327,8 @@ export function TabsTrigger({
         data-tabs-value={value}
         onClick={() => setValue(value)}
         className={cn(
-          "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent px-3.5 py-1.5 text-sm font-medium outline-none",
+          "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent font-medium outline-none",
+          variant === "pill" ? "px-3.5 py-1.5 text-sm" : "px-3 py-1 text-xs",
           "text-muted-foreground hover:text-foreground",
           radius,
           className,
