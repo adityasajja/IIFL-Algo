@@ -5,8 +5,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,6 +16,8 @@ from fastapi import APIRouter, HTTPException
 from atr.api.legacy.common import _authed_client, _broker_error, _broker_rows, _clean, _empty_state, _utcnow_iso, _with_ip_hint
 
 logger = logging.getLogger("atr.api")
+
+IST = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter()
 
@@ -51,118 +55,125 @@ def dashboard_summary(exchange: str = "NSEEQ") -> dict[str, Any]:
         return _SUMMARY_CACHE["data"]
 
     out: dict[str, Any] = {"as_of": _utcnow_iso(), "exchange": exchange.upper()}
+    client = _authed_client()
 
-    # ── positions → day P&L ───────────────────────────────────────────────
-    positions: list[dict[str, Any]] = []
-    try:
-        client = _authed_client()
+    # `positions` and `trades` are two independent broker round trips that
+    # used to run one after another; firing them together means this endpoint
+    # waits for the slower of the two instead of the sum of both.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        positions_future = pool.submit(client.positions)
+        trades_future = pool.submit(client.trades)
+
+        # ── positions → day P&L ───────────────────────────────────────────
+        positions: list[dict[str, Any]] = []
         try:
-            payload = client.positions()
+            payload = positions_future.result()
             err = _broker_error(payload)
             if not err:
                 positions = [_clean(r) for r in _broker_rows(payload) if not _empty_state(r)]
-        finally:
-            with contextlib.suppress(Exception):
-                client.close()
 
-        # Resolve prior closes once, up front: the broker omits them, so fall
-        # back to the local daily cache. Doing it before the loop keeps the
-        # per-position work trivial and avoids a cache read per row.
-        held = [
-            str(_pick(p, "tradingSymbol", "symbol", "Symbol",
-                      "trading_symbol", default=""))
-            for p in positions
-            if float(_pick(p, "netQuantity", "NetQuantity", "quantity",
-                           "qty", "Quantity", default=0) or 0) != 0
-        ]
-        held_symbols = [s for s in held if s]
-        cache_closes = _prior_closes(held_symbols, exchange) if held_symbols else {}
+            # Resolve prior closes once, up front: the broker omits them, so fall
+            # back to the local daily cache. Doing it before the loop keeps the
+            # per-position work trivial and avoids a cache read per row.
+            held = [
+                str(_pick(p, "tradingSymbol", "symbol", "Symbol",
+                          "trading_symbol", default=""))
+                for p in positions
+                if float(_pick(p, "netQuantity", "NetQuantity", "quantity",
+                               "qty", "Quantity", default=0) or 0) != 0
+            ]
+            held_symbols = [s for s in held if s]
+            cache_closes = _prior_closes(held_symbols, exchange) if held_symbols else {}
 
-        total = day = invested = 0.0
-        counted = no_prev = from_cache = 0
-        for p in positions:
-            qty = float(_pick(p, "netQuantity", "NetQuantity", "quantity",
-                              "qty", "Quantity", default=0) or 0)
-            if qty == 0:
-                continue          # mirror IiflBroker.positions(): flat is not a position
-            last = float(_pick(p, "ltp", "LTP", "lastTradedPrice", "lastPrice",
-                               "last_price", default=0) or 0)
-            avg = float(_pick(p, "averagePrice", "AveragePrice", "avgPrice",
-                              "avg_price", default=0) or 0)
-            # Prefer whatever the broker sent; otherwise use the cached prior
-            # close. Never fall back to the entry price — that reports "no
-            # change today" for a book that may be moving hard.
-            sym = str(_pick(p, "tradingSymbol", "symbol", "Symbol",
-                            "trading_symbol", default=""))
-            prev = _pick(p, "close", "prev_close", "previous_close",
-                         "previousClose", "prevClose", default=None)
-            if prev is None:
-                prev = cache_closes.get(sym.upper())
-                if prev is not None:
-                    from_cache += 1
-            invested += qty * avg
-            total += qty * last
-            counted += 1
-            try:
-                prev_f = float(prev)
-            except (TypeError, ValueError):
-                prev_f = None
-            # Sanity-bound the prior close. A price feed and a daily cache can
-            # disagree wildly (different symbol in the master, unadjusted vs
-            # adjusted series, a stale file), and a mismatch turns Day P&L into
-            # fiction — a fixture test produced "+52.99% in one day" this way.
-            # A real session rarely moves a large cap past ±35%; beyond that,
-            # treat the baseline as unusable rather than reporting it.
-            if prev_f is not None and last > 0 and prev_f > 0:
-                move = abs(last - prev_f) / prev_f
-                if move > 0.35:
-                    logger.warning(
-                        "discarding prior close for %s: cached %.2f vs live %.2f "
-                        "is a %.1f%% gap, which is more likely a bad baseline "
-                        "than a real move",
-                        sym or "(unnamed)", prev_f, last, move * 100.0,
-                    )
+            total = day = invested = 0.0
+            counted = no_prev = from_cache = 0
+            for p in positions:
+                qty = float(_pick(p, "netQuantity", "NetQuantity", "quantity",
+                                  "qty", "Quantity", default=0) or 0)
+                if qty == 0:
+                    continue          # mirror IiflBroker.positions(): flat is not a position
+                last = float(_pick(p, "ltp", "LTP", "lastTradedPrice", "lastPrice",
+                                   "last_price", default=0) or 0)
+                avg = float(_pick(p, "averagePrice", "AveragePrice", "avgPrice",
+                                  "avg_price", default=0) or 0)
+                # Prefer whatever the broker sent; otherwise use the cached prior
+                # close. Never fall back to the entry price — that reports "no
+                # change today" for a book that may be moving hard.
+                sym = str(_pick(p, "tradingSymbol", "symbol", "Symbol",
+                                "trading_symbol", default=""))
+                prev = _pick(p, "close", "prev_close", "previous_close",
+                             "previousClose", "prevClose", default=None)
+                if prev is None:
+                    prev = cache_closes.get(sym.upper())
+                    if prev is not None:
+                        from_cache += 1
+                invested += qty * avg
+                total += qty * last
+                counted += 1
+                try:
+                    prev_f = float(prev)
+                except (TypeError, ValueError):
                     prev_f = None
-            if prev_f is not None:
-                day += qty * (last - prev_f)
-            else:
-                no_prev += 1
+                # Sanity-bound the prior close. A price feed and a daily cache can
+                # disagree wildly (different symbol in the master, unadjusted vs
+                # adjusted series, a stale file), and a mismatch turns Day P&L into
+                # fiction — a fixture test produced "+52.99% in one day" this way.
+                # A real session rarely moves a large cap past ±35%; beyond that,
+                # treat the baseline as unusable rather than reporting it.
+                if prev_f is not None and last > 0 and prev_f > 0:
+                    move = abs(last - prev_f) / prev_f
+                    if move > 0.35:
+                        logger.warning(
+                            "discarding prior close for %s: cached %.2f vs live %.2f "
+                            "is a %.1f%% gap, which is more likely a bad baseline "
+                            "than a real move",
+                            sym or "(unnamed)", prev_f, last, move * 100.0,
+                        )
+                        prev_f = None
+                if prev_f is not None:
+                    day += qty * (last - prev_f)
+                else:
+                    no_prev += 1
 
-        out["positions"] = {
-            "count": counted,
-            "value": round(total, 2),
-            "invested": round(invested, 2),
-            "day_pnl": round(day, 2),
-            # True only when there is a book AND every counted position had a
-            # usable prior close (broker-sent or cache-resolved). An empty book
-            # reports True, not False: with nothing held, "0 change today" is a
-            # complete and correct answer, whereas False would imply data is
-            # missing. Callers branch on `count` first.
-            "day_pnl_complete": counted == 0 or no_prev == 0,
-            # How many prior closes had to come from the local cache rather
-            # than the broker. Non-zero explains why Day P&L is present at all;
-            # equal to `count` means every baseline is ours, not IIFL's.
-            "day_pnl_from_cache": from_cache,
-            "day_pnl_pct": round((day / invested * 100.0) if invested else 0.0, 3),
-            "unrealized_pnl": round(total - invested, 2),
-            "last_flat_at": _last_flat_at(positions),
-        }
-    except Exception as exc:  # noqa: BLE001
-        out["positions"] = {"count": 0, "error": str(exc)[:200]}
+            out["positions"] = {
+                "count": counted,
+                "value": round(total, 2),
+                "invested": round(invested, 2),
+                "day_pnl": round(day, 2),
+                # True only when there is a book AND every counted position had a
+                # usable prior close (broker-sent or cache-resolved). An empty book
+                # reports True, not False: with nothing held, "0 change today" is a
+                # complete and correct answer, whereas False would imply data is
+                # missing. Callers branch on `count` first.
+                "day_pnl_complete": counted == 0 or no_prev == 0,
+                # How many prior closes had to come from the local cache rather
+                # than the broker. Non-zero explains why Day P&L is present at all;
+                # equal to `count` means every baseline is ours, not IIFL's.
+                "day_pnl_from_cache": from_cache,
+                "day_pnl_pct": round((day / invested * 100.0) if invested else 0.0, 3),
+                "unrealized_pnl": round(total - invested, 2),
+                "last_flat_at": _last_flat_at(positions),
+            }
+        except Exception as exc:  # noqa: BLE001
+            out["positions"] = {"count": 0, "error": str(exc)[:200]}
 
-    # ── trade book → win rate + drawdown ──────────────────────────────────
-    try:
-        client = _authed_client()
+        # ── trade book → win rate + drawdown ──────────────────────────────
         try:
-            payload = client.trades()
+            payload = trades_future.result()
             err = _broker_error(payload)
             trades = [] if err else [_clean(r) for r in _broker_rows(payload)]
-        finally:
-            with contextlib.suppress(Exception):
-                client.close()
-        out["performance"] = _performance_from_trades(trades)
-    except Exception as exc:  # noqa: BLE001
-        out["performance"] = {"error": str(exc)[:200], "trades": 0}
+            out["performance"] = _performance_from_trades(trades)
+        except Exception as exc:  # noqa: BLE001
+            out["performance"] = {"error": str(exc)[:200], "trades": 0}
+
+    # "Today" on the dashboard = unrealized change on what's still open, plus
+    # whatever was already realized by closing a position earlier today. Either
+    # half can be missing (a broker error on one call must not blank the other),
+    # so this is additive over whichever of the two actually came back.
+    day_pnl = out["positions"].get("day_pnl")
+    realized_today = out["performance"].get("realized_pnl_today")
+    if day_pnl is not None or realized_today is not None:
+        out["positions"]["total_day_pnl"] = round((day_pnl or 0.0) + (realized_today or 0.0), 2)
 
     # ── breadth trend over the last 5 sessions ────────────────────────────
     # `load_cached` reads 2,672 parquets (~6s). It must only be paid on a
@@ -288,6 +299,15 @@ def _performance_from_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
             run += by_day[day]
             recent.append(round(run, 2))
 
+    # Today's *realized* result, separate from `realized_pnl` (all trades this
+    # call happened to return): "Today" on the dashboard is a trader's whole
+    # day, not just the mark-to-market on whatever is still open. A position
+    # opened and closed for a profit today used to vanish from that number
+    # entirely the moment it was flattened, because `day_pnl` only ever priced
+    # what is *currently* held.
+    today = datetime.now(UTC).astimezone(IST).strftime("%Y-%m-%d")
+    realized_pnl_today = round(by_day.get(today, 0.0), 2)
+
     return {
         "trades": len(realised),
         "win_rate": round(wins / len(window) * 100.0, 1) if window else None,
@@ -295,6 +315,7 @@ def _performance_from_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "losses": losses,
         "sample": len(window),
         "realized_pnl": round(sum(realised), 2),
+        "realized_pnl_today": realized_pnl_today,
         "current_drawdown_pct": round(current_dd, 2),
         "max_drawdown_pct": round(max_dd, 2),
         "sparkline": recent,
@@ -468,30 +489,44 @@ _BREADTH_SAMPLE = 600     # ~2pp standard error on a 50% proportion
 
 
 def _attach_last_price(client: Any, rows: list[dict[str, Any]]) -> None:
-    """Put each holding's last traded price on its row, from one batch quote.
+    """Put each holding's last traded price on its row, from batch quotes.
 
-    The holdings call carries the average price and the previous close but no current
-    price. Without it the page valued a stock from the live tick stream, priced a stock
-    with no tick at nothing, and disagreed with the broker's own app. A failed quote
-    leaves the rows as they were: no price is better than a wrong one.
+    Quotes both NSE and BSE instruments so dual-listed or BSE-exclusive stocks
+    (e.g., INDOAMIN) receive accurate live LTPs instead of being unpriced.
     """
-    by_id: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:  # a stock held in two lots is two rows with one instrument
-        if r.get("nseInstrumentId"):
-            by_id.setdefault(str(r["nseInstrumentId"]), []).append(r)
-    if not by_id:
+    by_nse: dict[str, list[dict[str, Any]]] = {}
+    by_bse: dict[str, list[dict[str, Any]]] = {}
+
+    for r in rows:
+        nse_id = r.get("nseInstrumentId")
+        bse_id = r.get("bseInstrumentId")
+        if nse_id:
+            by_nse.setdefault(str(nse_id), []).append(r)
+        elif bse_id:
+            by_bse.setdefault(str(bse_id), []).append(r)
+
+    legs: list[tuple[str, str]] = []
+    legs.extend([("NSEEQ", i) for i in by_nse])
+    legs.extend([("BSEEQ", i) for i in by_bse])
+
+    if not legs:
         return
+
     try:
-        quotes = _broker_rows(client.market_quotes([("NSEEQ", i) for i in by_id]))
+        quotes = _broker_rows(client.market_quotes(legs))
     except Exception:  # noqa: BLE001 - a quote failure must not blank the holdings
         return
+
     for quote in quotes:
         try:
             price = float(quote.get("ltp") or 0)
         except (TypeError, ValueError):
             continue
         if price > 0:
-            for row in by_id.get(str(quote.get("instrumentId")), []):
+            inst_id = str(quote.get("instrumentId") or "")
+            for row in by_nse.get(inst_id, []):
+                row["ltp"] = price
+            for row in by_bse.get(inst_id, []):
                 row["ltp"] = price
 
 
@@ -520,19 +555,31 @@ def portfolio(sections: str | None = None) -> dict[str, Any]:
         "trades": client.trades,
     }
 
-    out: dict[str, Any] = {}
-    with client:
-        for name in wanted:
-            try:
-                payload = fetchers[name]()
-                broker_error = _broker_error(payload)
-                if broker_error:
-                    out[name] = {"rows": [], "count": 0, "error": _with_ip_hint(broker_error)}
-                    continue
-                rows = [r for r in _broker_rows(payload) if not _empty_state(r)]
-                if name == "holdings":
-                    _attach_last_price(client, rows)
-                out[name] = {"rows": _clean(rows), "count": len(rows)}
-            except Exception as exc:  # noqa: BLE001
-                out[name] = {"rows": [], "count": 0, "error": str(exc)[:300]}
+    def _fetch_section(name: str) -> tuple[str, dict[str, Any]]:
+        try:
+            payload = fetchers[name]()
+            broker_error = _broker_error(payload)
+            if broker_error:
+                return name, {"rows": [], "count": 0, "error": _with_ip_hint(broker_error)}
+            rows = [r for r in _broker_rows(payload) if not _empty_state(r)]
+            if name == "holdings":
+                # A zero-quantity row is an exited position, not a holding —
+                # the broker web hides it too, and counting it is exactly how
+                # the dashboard once showed 38 holdings against their 37.
+                rows = [r for r in rows if float(r.get("quantity") or r.get("Quantity") or r.get("holdingQuantity") or r.get("totalQty") or r.get("totalQuantity") or 0) != 0]
+                _attach_last_price(client, rows)
+            return name, {"rows": _clean(rows), "count": len(rows)}
+        except Exception as exc:  # noqa: BLE001
+            return name, {"rows": [], "count": 0, "error": str(exc)[:300]}
+
+    # Five independent broker round trips used to run one after another — the
+    # page waited for the slowest of five sequential network calls instead of
+    # the slowest of one. They share nothing but the (thread-safe) client, so
+    # fire them concurrently and let the page wait for the slowest *one*.
+    # `with client:` used to close this same client's connection pool at the
+    # end of every single call — undoing keep-alive reuse on every load and,
+    # under concurrent requests, occasionally closing it out from under a
+    # request still in flight on another thread.
+    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
+        out = dict(pool.map(_fetch_section, wanted))
     return {"sections": out, "as_of": datetime.now().isoformat()}

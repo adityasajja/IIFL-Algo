@@ -198,7 +198,7 @@ def learning_overview(
     different books.
     """
     service: LearningService = get_learning_service()
-    dataset = service.dataset(refresh=True)
+    dataset = service.dataset(refresh=False)
     report = service.daily_report(window_days=window_days, refresh=False)
     analysis = service.performance(refresh=False)
     drift = service.drift(refresh=False)

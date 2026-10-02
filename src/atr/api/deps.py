@@ -10,14 +10,20 @@ from __future__ import annotations
 import ipaddress
 import logging
 from collections.abc import Callable
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 
 from atr.auth.models import Principal, anonymous_principal
 from atr.auth.rbac import Permission
-from atr.auth.service import AuthError, get_auth_service
 from atr.config.settings import get_settings
+
+if TYPE_CHECKING:
+    # `atr.auth.service` pulls in sqlalchemy + cryptography (~450ms of import
+    # time) — real cost for a route that just needs the type name. Deferred to
+    # a lazy import at each call site below; this import is type-checking only
+    # and never runs (postponed annotations mean the string is never evaluated).
+    from atr.auth.service import AuthError
 
 logger = logging.getLogger("atr.api.deps")
 
@@ -68,6 +74,8 @@ def credential_from(request: Request) -> tuple[str | None, str]:
 
 def optional_principal(request: Request) -> Principal | None:
     """Resolve the caller, or None. Never raises — for routes that work either way."""
+    from atr.auth.service import get_auth_service
+
     credential, _source = credential_from(request)
     service = get_auth_service()
     try:
@@ -89,6 +97,8 @@ def get_principal(request: Request) -> Principal:
     principal — the enrolment gate lives in :func:`require_permission`, so such a
     session can reach ``/me`` and the MFA routes but nothing else.
     """
+    from atr.auth.service import get_auth_service
+
     credential, source = credential_from(request)
     service = get_auth_service()
     try:

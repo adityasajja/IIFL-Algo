@@ -16,7 +16,6 @@ from atr.auth.rbac import (
     has_permission,
     permissions_for,
 )
-from atr.auth.service import AuthError, AuthService, get_auth_service
 
 __all__ = [
     "MFA_REQUIRED_ROLES",
@@ -32,3 +31,17 @@ __all__ = [
     "has_permission",
     "permissions_for",
 ]
+
+#: `atr.auth.service` pulls in sqlalchemy + cryptography (~450ms of import
+#: time). Every submodule import here (`atr.auth.models`, `atr.auth.rbac`, ...)
+#: runs this package's `__init__` first, so an eager import above paid that
+#: cost on the path to routes that only wanted `Principal` or `Permission` and
+#: never touch the auth service itself. PEP 562 module `__getattr__` keeps
+#: `from atr.auth import AuthService` working unchanged, deferred to whoever
+#: actually asks for it.
+def __getattr__(name: str):
+    if name in ("AuthError", "AuthService", "get_auth_service"):
+        from atr.auth import service
+
+        return getattr(service, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

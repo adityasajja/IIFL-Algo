@@ -27,12 +27,14 @@ def candles(
     to_date: str | None = None,
 ) -> dict[str, Any]:
     """Raw OHLCV candles for charting. Interval accepts 1m/5m/15m/30m/60m/1d."""
-    from atr.brokers.iifl.contracts import InstrumentMaster
     from atr.scanner import resolve_conid
 
     client = _authed_client()
-    master = InstrumentMaster(client)
-    master.load_cached([exchange.upper()])
+    # `_symbol_master` keeps a 5-minute-TTL master per exchange; this endpoint used
+    # to build a fresh `InstrumentMaster` and re-parse the ~10k-row cache from disk
+    # on every single request (every candle load, every chart pan) instead of
+    # reusing it like the symbol-search endpoints below already do.
+    master = _symbol_master(exchange.upper())
     conid = resolve_conid(master, symbol.upper(), exchange.upper())
     raw = client.historical_data(exchange.upper(), conid, interval, from_date,
                                  to_date or date.today().strftime("%d-%b-%Y"))
@@ -64,7 +66,9 @@ def _symbol_master(exchange: str) -> Any:
     try:
         master.load_cached([exchange])
     except Exception as exc:  # noqa: BLE001 — cold cache, no client to refresh with
-        raise HTTPException(503, f"instrument cache is cold — run `atr instruments sync` ({exc})")
+        raise HTTPException(
+            503, f"instrument cache is cold — run `atr instruments sync` ({exc})"
+        ) from exc
     _SYMBOL_MASTERS[exchange] = (now, master)
     return master
 
@@ -86,7 +90,6 @@ def symbols(query: str = "", exchange: str = "NSEEQ", limit: int = Query(25, ge=
 @router.get("/quote")
 def quote(symbols: str, exchange: str = "NSEEQ") -> dict[str, Any]:
     """Live quotes for a comma-separated symbol list, e.g. ``?symbols=RELIANCE-EQ,INFY-EQ``."""
-    from atr.brokers.iifl.contracts import InstrumentMaster
     from atr.scanner import resolve_conid
 
     wanted = [s.strip().upper() for s in symbols.split(",") if s.strip()]
@@ -96,14 +99,13 @@ def quote(symbols: str, exchange: str = "NSEEQ") -> dict[str, Any]:
         raise HTTPException(400, "at most 50 symbols per request")
 
     client = _authed_client()
-    master = InstrumentMaster(client)
     try:
-        master.load_cached([exchange.upper()])
-    except Exception as exc:  # noqa: BLE001
+        master = _symbol_master(exchange.upper())
+    except HTTPException as exc:
         raise HTTPException(
             503,
             f"no cached instrument master for {exchange} — run "
-            f"`atr instruments sync --exchanges {exchange}` ({exc})",
+            f"`atr instruments sync --exchanges {exchange}` ({exc.detail})",
         ) from exc
 
     legs, resolved, failed = [], [], []
@@ -147,12 +149,10 @@ def watchlist_live_quotes(
     it unusable, and every affected row is marked ``stale`` so the reader knows.
     """
     try:
-        from atr.brokers.iifl.contracts import InstrumentMaster
         from atr.scanner import resolve_conid
 
         client = _authed_client()
-        master = InstrumentMaster(client)
-        master.load_cached([exchange.upper()])
+        master = _symbol_master(exchange.upper())
 
         legs: list[tuple[str, Any]] = []
         resolved: list[str] = []

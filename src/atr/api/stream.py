@@ -265,16 +265,20 @@ class TickBroadcaster:
 
     async def _broadcast_tick(self, tick: LiveTickPayload) -> None:
         msg = _fast_dumps({"type": "tick", "data": asdict(tick)})
-        dead_conns = []
-        for ws, symbols in list(self._client_subscriptions.items()):
-            if tick.symbol in symbols:
-                try:
-                    await ws.send_text(msg)
-                except Exception:
-                    dead_conns.append(ws)
+        targets = [ws for ws, symbols in self._client_subscriptions.items() if tick.symbol in symbols]
+        if not targets:
+            return
 
-        for ws in dead_conns:
-            self.disconnect(ws)
+        # Sending one socket at a time serialised every fan-out behind the
+        # slowest client; a tick is only useful while it's still fresh, so the
+        # sends go out concurrently and a single slow/dead socket no longer
+        # holds up delivery to everyone else.
+        results = await asyncio.gather(
+            *(ws.send_text(msg) for ws in targets), return_exceptions=True
+        )
+        for ws, result in zip(targets, results, strict=True):
+            if isinstance(result, Exception):
+                self.disconnect(ws)
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()

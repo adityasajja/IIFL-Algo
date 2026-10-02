@@ -36,5 +36,11 @@ def mount_frontend(app: FastAPI) -> None:
             candidate = (root / path).resolve()
             if path and candidate.is_relative_to(root) and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(_WEB_DIST / "index.html")
+            # The shell references hashed assets (safe to cache); the shell
+            # itself must never be cached, or the browser keeps booting the
+            # previous bundle after a rebuild.
+            return FileResponse(
+                _WEB_DIST / "index.html",
+                headers={"Cache-Control": "no-store"},
+            )
 
