@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 title ATR Trading Dashboard
 
 rem ------------------------------------------------------------------
