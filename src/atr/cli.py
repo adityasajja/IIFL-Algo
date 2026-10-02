@@ -39,7 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-daily-loss",
         type=float,
         default=None,
-        help="halt trading after this much loss in a day (default: 10% of starting cash)",
+        help="halt trading after this much loss in a day (default: 10%% of starting cash)",
     )
     bt.add_argument("--save", help="write equity curve to this CSV path")
 

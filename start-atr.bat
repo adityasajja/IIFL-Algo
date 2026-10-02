@@ -30,7 +30,13 @@ echo   Keep this window open while you use the app.
 echo   Close this window (or press Ctrl+C) to stop the dashboard.
 echo.
 
-"%UV%" run atr serve %*
+rem Run straight from the project environment: "uv run" re-syncs packages on every
+rem launch (several seconds). After changing dependencies, run "uv sync --inexact".
+if exist ".venv\Scripts\atr.exe" (
+  ".venv\Scripts\atr.exe" serve %*
+) else (
+  "%UV%" run atr serve %*
+)
 if errorlevel 1 (
   echo.
   echo  The app stopped unexpectedly. Read the message above.

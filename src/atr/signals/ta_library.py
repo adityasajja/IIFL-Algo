@@ -67,7 +67,7 @@ def build_ta_functions(frame: pd.DataFrame) -> dict[str, Callable[[float], float
     bound to `frame` for this evaluation. Merged into the formula context
     alongside the hand-written ones in `atr.signals.formula.build_context`.
     """
-    import pandas_ta as pta
+    import pandas_ta_classic as pta
 
     h, l, c = frame["high"], frame["low"], frame["close"]
     v = frame["volume"] if "volume" in frame.columns else pd.Series(0.0, index=frame.index)
