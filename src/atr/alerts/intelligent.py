@@ -8,6 +8,7 @@ take-profit, and volume breakouts) and dispatches instant actionable Telegram al
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -295,6 +296,7 @@ class IntelligentMonitorManager:
 
     def __init__(self) -> None:
         self._running = False
+        self._cycle_lock = threading.Lock()
         self._task: asyncio.Task | None = None
         self._last_run: datetime | None = None
         self._recent_signals: list[dict[str, Any]] = []
@@ -327,7 +329,20 @@ class IntelligentMonitorManager:
         logger.info("Stopped Intelligent Alerts Periodic Monitor background task.")
 
     async def run_evaluation_cycle(self, force: bool = False) -> list[IntelligentSignal]:
-        """Runs an evaluation cycle across target stocks and fires Telegram alerts."""
+        """Runs an evaluation cycle across target stocks and fires Telegram alerts.
+
+        The cycle is blocking work: it reads every cached frame, evaluates rules, and
+        posts each alert to Telegram over HTTP. Run on the event loop, one unreachable
+        Telegram host (a 10s connect timeout per alert) froze the whole server — no page
+        loaded and startup never completed. It runs on a worker thread instead.
+        """
+        return await asyncio.to_thread(self._run_evaluation_cycle_blocking, force)
+
+    def _run_evaluation_cycle_blocking(self, force: bool = False) -> list[IntelligentSignal]:
+        with self._cycle_lock:  # an API-triggered cycle and the timer must not overlap
+            return self._evaluate_cycle(force)
+
+    def _evaluate_cycle(self, force: bool = False) -> list[IntelligentSignal]:
         cfg = load_intelligent_config()
         if not cfg.enabled and not force:
             return []
