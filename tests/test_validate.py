@@ -308,6 +308,7 @@ def _metrics(sharpe, total_return=20.0, max_dd=12.0, trades=200):
         total_return_pct=total_return, cagr_pct=10.0,
         annualized_vol_pct=10.0, sharpe=sharpe, sortino=sharpe,
         max_drawdown_pct=max_dd, max_drawdown_days=5.0, calmar=2.0,
+        ulcer_index=3.0, omega_ratio=1.2,
         num_trades=trades, win_rate_pct=50.0, profit_factor=1.1,
         avg_trade=100.0, best_trade=900.0, worst_trade=-400.0,
         avg_holding_days=6.0, total_commission=500.0, total_slippage=400.0,

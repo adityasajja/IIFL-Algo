@@ -100,6 +100,38 @@ def _numeric_bucket(column: str, boundaries: list[tuple[float, str]]) -> Callabl
     return read
 
 
+def _cost_drag_bucket(row: dict[str, Any]) -> str | None:
+    """Share of the move eaten by costs: commission over |gross|.
+
+    Post-trade by nature, like exit_reason: it describes what happened and
+    predicts nothing, so it cannot leak the future into an entry decision.
+    Missing commission or gross produces no bucket — never an "unknown"
+    bucket compared against the rest as though not knowing were a condition.
+    """
+    gross = row.get("gross_pnl")
+    commission = row.get("commission")
+    if gross is None or commission is None:
+        return None
+    try:
+        gross_f = float(gross)
+        commission_f = float(commission)
+    except (TypeError, ValueError):
+        return None
+    if commission_f <= 0:
+        return "cost_trivial"
+    denom = abs(gross_f)
+    if denom <= 0:
+        return "cost_drowned"
+    drag = commission_f / denom
+    if drag >= 1.0:
+        return "cost_drowned"
+    if drag >= 0.5:
+        return "cost_heavy"
+    if drag >= 0.1:
+        return "cost_light"
+    return "cost_trivial"
+
+
 # ---------------------------------------------------------------------------
 # Axis declarations
 # ---------------------------------------------------------------------------
@@ -168,6 +200,7 @@ AXIS_ATTRIBUTION_HOLDING = Axis(name="attribution_holding_bucket", label="Holdin
     "attribution_holding_sec", [(3600.0, "intraday_lt_1h"), (6 * 3600.0, "intraday_1_6h"), (86400.0, "up_to_1d"), (5 * 86400.0, "days_1_5"), (float("inf"), "beyond_5d")]),
     max_values=5)
 AXIS_ATTRIBUTION_SOURCE = Axis(name="attribution_source", label="Evidence source of the attributed trade", value=_column("source"), max_values=3)
+AXIS_COST_DRAG = Axis(name="cost_drag", label="Share of the move eaten by costs", value=_cost_drag_bucket, max_values=4)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +212,7 @@ ATTRIBUTION_AXES: tuple[Axis, ...] = (
     AXIS_MAE_BUCKET, AXIS_MFE_BUCKET, AXIS_SLIPPAGE_BUCKET, AXIS_ENTRY_QUALITY,
     AXIS_EXECUTION_QUALITY, AXIS_EXIT_QUALITY, AXIS_CAPTURE_EFFICIENCY,
     AXIS_SIZING_METHOD, AXIS_RISK_BUCKET, AXIS_ATTRIBUTION_HOLDING,
+    AXIS_COST_DRAG,
 )
 
 #: Named axes a caller can ask for by string, for a CLI or a query parameter.
@@ -193,8 +227,6 @@ AXES_BY_NAME: dict[str, Axis] = {
         AXIS_SYMBOL, AXIS_SOURCE, AXIS_ATTRIBUTION_SOURCE,
     )
 }
-
-#: The axes the performance analysis scans by default.
 DEFAULT_AXES: tuple[Axis, ...] = (
     AXIS_STRATEGY, AXIS_SETUP, AXIS_REGIME, AXIS_RVOL, AXIS_ATR, AXIS_RSI,
     AXIS_GAP, AXIS_TREND, AXIS_SECTOR, AXIS_SECTOR_STRENGTH, AXIS_STOCK_RS,

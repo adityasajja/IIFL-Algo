@@ -116,12 +116,14 @@ def deflated_sharpe_ratio(
     n_obs: int,
     skew: float = 0.0,
     kurtosis: float = 3.0,
+    *,
+    tested_sharpe: float | None = None,
 ) -> tuple[float, float]:
     """Sharpe adjusted for how many parameter combinations were tried.
 
     Returns ``(deflated_sharpe, required_sharpe)`` where ``deflated_sharpe``
-    is P(true Sharpe > the multiple-testing hurdle) for the *best* trial, and
-    ``required_sharpe`` is that hurdle.
+    is P(true Sharpe > the multiple-testing hurdle) for the evaluated trial,
+    and ``required_sharpe`` is that hurdle.
 
     Pass every Sharpe you computed while searching — including the ones you
     rejected. Reporting only the winner is exactly the bias this corrects.
@@ -130,9 +132,9 @@ def deflated_sharpe_ratio(
     values = values[np.isfinite(values)]
     if not len(values):
         return 0.0, 0.0
-    best = float(values.max())
     hurdle = expected_max_sharpe(values, len(values))
-    return probabilistic_sharpe_ratio(best, n_obs, skew, kurtosis, benchmark=hurdle), hurdle
+    target = float(values.max()) if tested_sharpe is None else float(tested_sharpe)
+    return probabilistic_sharpe_ratio(target, n_obs, skew, kurtosis, benchmark=hurdle), hurdle
 
 
 # --------------------------------------------------------------------------
@@ -461,7 +463,10 @@ def walk_forward(
     skew = float(returns.skew()) if len(returns) > 2 else 0.0
     kurtosis = float(returns.kurt()) + 3.0 if len(returns) > 3 else 3.0
     all_trials = [s for f in folds for s in f.trial_sharpes]
-    dsr, hurdle = deflated_sharpe_ratio(all_trials, len(returns), skew, kurtosis)
+    oos_per_bar = per_bar_sharpe(oos_equity)
+    dsr, hurdle = deflated_sharpe_ratio(
+        all_trials, len(returns), skew, kurtosis, tested_sharpe=oos_per_bar
+    )
 
     verdict = _verdict(folds, oos_metrics, bench_metrics, dsr, hurdle, val)
     return WalkForwardResult(

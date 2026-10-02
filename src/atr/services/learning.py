@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -85,6 +86,7 @@ from atr.research import learning_stats as stats
 from atr.research.learning_attribution import extract_reason
 from atr.research.learning_axes import (
     Axis,
+    DEFAULT_AXES,
     axes_from_names,
     axis_coverage,
     requested_but_unavailable,
@@ -1761,6 +1763,7 @@ class PerformanceAnalysis:
         """
         have, scanned = axis_coverage(axis, rows)
         by_bucket: dict[str, list[float]] = {}
+        by_bucket_times: dict[str, list[Any]] = {}
         for row in rows:
             label = axis.value(row)
             if label is None:
@@ -1772,6 +1775,7 @@ class PerformanceAnalysis:
                 by_bucket.setdefault(str(label), []).append(float(value))
             except (TypeError, ValueError):
                 continue
+            by_bucket_times.setdefault(str(label), []).append(row.get("entry_ts"))
 
         comparisons = axis.max_values or max(1, len(by_bucket))
         bucket_labels = sorted(by_bucket)
@@ -1783,8 +1787,15 @@ class PerformanceAnalysis:
                 if other != label
                 for value in values
             ]
+            others_times = [
+                stamp
+                for other, stamps in by_bucket_times.items()
+                if other != label
+                for stamp in stamps
+            ]
             verdict = stats.compare_bucket(
-                label, by_bucket[label], others, comparisons=comparisons, min_sample=min_sample
+                label, by_bucket[label], others, comparisons=comparisons, min_sample=min_sample,
+                bucket_times=by_bucket_times[label], baseline_times=others_times,
             )
             verdicts.append(verdict.as_dict())
 
@@ -2742,18 +2753,18 @@ class LearningService:
         return get_app_db()
 
     def dataset(self, *, refresh: bool = False, user_id: str | None = None) -> LearningDataset:
-        """The learning dataset, cached for the process.
-
-        Caching matters because building it reads the whole cache. The TTL is
-        the caller's problem: ``refresh=True`` is explicit, and the CLI defaults
-        to a fresh build, so a user running ``atr learn`` always sees what the
-        database holds right now.
-        """
-        if self._dataset is None or refresh:
+        """The learning dataset, cached for the process with a 60s TTL."""
+        now = time.monotonic()
+        if (
+            self._dataset is None
+            or (refresh and (now - getattr(self, "_dataset_built_at", 0) > 10.0))
+            or (not refresh and (now - getattr(self, "_dataset_built_at", 0) > 60.0))
+        ):
             builder = self._builder or LearningDatasetBuilder(
                 db=self.db, cache_root=self._data_root
             )
             self._dataset = builder.build(user_id=user_id)
+            self._dataset_built_at = now
         return self._dataset
 
     def performance(
@@ -3425,7 +3436,14 @@ class LearningService:
 
         analysis = PerformanceAnalysis(
             LearningDataset(rows=forward_rows, missing_features={}, generated_at=dataset.generated_at)
-        ).analyse(strategy=strategy_id, min_sample=min_sample)
+        ).analyse(
+            strategy=strategy_id,
+            min_sample=min_sample,
+            # Defaults plus cost drag: the findings loop must see friction as a
+            # first-class slice (costs drowning gross is today's lesson), while
+            # the shared defaults stay lean for everyone else's p-values.
+            axes=[axis.name for axis in DEFAULT_AXES] + ["cost_drag"],
+        )
 
         today_str = datetime.now(UTC).strftime("%Y-%m-%d")
         created_records = []
@@ -3435,8 +3453,17 @@ class LearningService:
                 for bucket in breakdown.buckets:
                     if bucket.get("suppressed"):
                         continue
+                    # Gate on independent observations, not raw rows: fourteen
+                    # fills in one minute is one piece of evidence wearing a
+                    # trenchcoat, and recording it at n=14 would let a single
+                    # market moment mint a finding.
                     n = bucket.get("n", 0)
-                    if n < min_sample:
+                    n_eff = bucket.get("n_effective", n)
+                    try:
+                        n_eff = float(n_eff)
+                    except (TypeError, ValueError):
+                        n_eff = float(n or 0)
+                    if n_eff < min_sample:
                         continue
                     condition_bucket = f"{breakdown.axis}:{bucket.get('label')}"
                     p_val = bucket.get("p_adjusted")

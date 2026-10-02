@@ -291,6 +291,10 @@ def apply_parameter_to_definition(
                 updated[target_block] = {}
             updated[target_block][parameter_name] = rounded_val
 
+        # If parameter also exists in top-level params, keep it synchronized
+        if "params" in updated and isinstance(updated["params"], dict) and parameter_name in updated["params"]:
+            updated["params"][parameter_name] = rounded_val
+
     # Update adaptive_parameters entry if present
     if "adaptive_parameters" in updated:
         raw_ad = updated["adaptive_parameters"]

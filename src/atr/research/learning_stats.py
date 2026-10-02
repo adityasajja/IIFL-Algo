@@ -113,6 +113,67 @@ def wilson_interval(
 
 
 # ---------------------------------------------------------------------------
+# effective sample size under clustered dependence
+# ---------------------------------------------------------------------------
+
+
+def effective_n(
+    timestamps: Sequence[Any], *, window_sec: float = 300.0
+) -> tuple[float, int]:
+    """Independent observations hiding inside timestamped ones.
+
+    Fourteen trades in one market minute are not fourteen independent pieces
+    of evidence about a rule — they are fourteen readings of the same minute.
+    This clusters entry stamps closer than ``window_sec`` apart and returns
+    Kish's effective size ``(sum n_i)^2 / sum n_i^2`` with the cluster count,
+    so fourteen trades in one cluster count as one, and fourteen spread-out
+    trades still count as fourteen.
+
+    Stamps arrive as datetimes, ISO strings, or nothing at all (backtest rows
+    predate some columns). An unparseable stamp becomes its own cluster: with
+    no evidence of dependence, no penalty is applied — the penalty needs a
+    reason, not a default.
+    """
+    from datetime import datetime as _datetime
+
+    def epoch(value: Any) -> float | None:
+        if isinstance(value, _datetime):
+            moment = value
+        elif isinstance(value, str):
+            try:
+                moment = _datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        else:
+            return None
+        try:
+            return moment.timestamp()
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    singles = 0
+    clusters: list[list[float]] = []
+    for value in timestamps:
+        moment = epoch(value)
+        if moment is None:
+            singles += 1
+            continue
+        placed = False
+        for cluster in clusters:
+            if abs(moment - cluster[-1]) <= window_sec:
+                cluster.append(moment)
+                placed = True
+                break
+        if not placed:
+            clusters.append([moment])
+    sizes = [len(cluster) for cluster in clusters] + [1] * singles
+    if not sizes:
+        return (0.0, 0)
+    total = sum(sizes)
+    return (total * total / sum(size * size for size in sizes), len(sizes))
+
+
+# ---------------------------------------------------------------------------
 # distribution summaries
 # ---------------------------------------------------------------------------
 
@@ -447,6 +508,11 @@ class BucketVerdict:
     #: True when the bucket was withheld because it was too small to analyse.
     suppressed: bool
     note: str | None = None
+    #: Independent observations hiding inside the n timestamps (Kish
+    #: effective size over 5-minute clusters). Equals n when nothing clusters.
+    n_effective: float | None = None
+    #: How many time clusters the bucket's trades fell into.
+    clusters: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         stats_dict = self.stats if isinstance(self.stats, dict) else {}
@@ -480,6 +546,8 @@ class BucketVerdict:
             "comparisons": self.comparisons,
             "suppressed": self.suppressed,
             "note": self.note,
+            "n_effective": self.n_effective,
+            "clusters": self.clusters,
         }
 
 
@@ -491,6 +559,8 @@ def compare_bucket(
     *,
     comparisons: int = 1,
     min_sample: int = MIN_SAMPLE,
+    bucket_times: Sequence[Any] | None = None,
+    baseline_times: Sequence[Any] | None = None,
 ) -> BucketVerdict:
     """Measure one bucket against the baseline it was carved out of.
 
@@ -498,12 +568,38 @@ def compare_bucket(
     a bucket to zero answers "does this bucket make money", which is a different
     and much easier question than "does this bucket make *more* money than the
     trades it excludes". Only the second justifies a change to a live rule.
+
+    Timestamps are optional and change nothing when absent: each stamp-less
+    trade is its own cluster, so the effective size equals n and every number
+    below is exactly what it was before this parameter existed. When stamps
+    cluster — fourteen fills in one minute — the gate and the test run on the
+    effective size instead, and the t-statistic is deflated by the square root
+    of the size ratio, the standard conservative approximation for clustered
+    dependence.
     """
     bucket_data = _clean(bucket)
     stats = summarise(bucket_data)
     n = len(bucket_data)
 
-    if n < min_sample:
+    n_eff_bucket, clusters_bucket = (
+        effective_n(bucket_times) if bucket_times is not None else (float(n), n)
+    )
+    n_eff_base, _clusters_base = (
+        effective_n(baseline_times) if baseline_times is not None else (float(len(_clean(baseline))), len(_clean(baseline)))
+    )
+
+    if n < min_sample or n_eff_bucket < min_sample:
+        if n_eff_bucket < n:
+            note = (
+                f"{n} trades in {clusters_bucket} time "
+                f"{'cluster' if clusters_bucket == 1 else 'clusters'}: effective sample "
+                f"{n_eff_bucket:.1f} is below the {min_sample}-trade floor"
+            )
+        else:
+            note = (
+                f"{n} trades is below the {min_sample}-trade floor; a single "
+                "trade would dominate any statistic computed here"
+            )
         return BucketVerdict(
             label=label,
             n=n,
@@ -514,10 +610,9 @@ def compare_bucket(
             significance="insufficient_sample",
             comparisons=comparisons,
             suppressed=True,
-            note=(
-                f"{n} trades is below the {min_sample}-trade floor; a single "
-                "trade would dominate any statistic computed here"
-            ),
+            note=note,
+            n_effective=round(n_eff_bucket, 2),
+            clusters=clusters_bucket,
         )
 
     baseline_data = _clean(baseline)
@@ -527,7 +622,13 @@ def compare_bucket(
     test = welch_t(bucket_data, baseline_data)
     p_value = None
     if test is not None:
-        p_value = normal_two_sided_p(test[0])
+        shrink = 1.0
+        if n > 0 and n_eff_bucket < n:
+            shrink *= math.sqrt(n_eff_bucket / n)
+        n_base = len(baseline_data)
+        if n_base > 0 and n_eff_base < n_base:
+            shrink *= math.sqrt(n_eff_base / n_base)
+        p_value = normal_two_sided_p(test[0] * shrink)
 
     note = None
     if stats.without_best is not None and stats.mean is not None:
@@ -553,6 +654,8 @@ def compare_bucket(
         comparisons=comparisons,
         suppressed=False,
         note=note,
+        n_effective=round(n_eff_bucket, 2),
+        clusters=clusters_bucket,
     )
 
 

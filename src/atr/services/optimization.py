@@ -23,7 +23,6 @@ from atr.appdb.repositories import (
     StrategyRepository,
 )
 from atr.data.base import DataFeed
-from atr.data.synthetic import SyntheticConfig, SyntheticFeed
 from atr.optimization.adaptive import (
     extract_adaptive_parameters,
 )
@@ -135,9 +134,14 @@ class OptimizationService:
             min_sample_size=min_sample_size,
         )
 
-    def _default_feed(self) -> DataFeed:
-        """Fallback synthetic feed for evaluation when live historical market cache is missing."""
-        return SyntheticFeed(SyntheticConfig(symbols=("NIFTY50", "RELIANCE"), freq="1D", seed=42))
+    def _default_feed(self, strategy_id: str | None = None, definition: dict[str, Any] | None = None) -> DataFeed:
+        """Dynamic feed resolution leveraging deployment config, strategy definition, or screener universe."""
+        from atr.services.experiment import StrategyExperimentService
+
+        return StrategyExperimentService(db=self._db).resolve_feed_for_strategy(
+            strategy_id=strategy_id,
+            strategy_definition=definition,
+        )
 
     def run_optimization(
         self,
@@ -178,7 +182,7 @@ class OptimizationService:
             logger.info("No eligible candidates generated from forward evidence for strategy {}", strategy_id)
             return []
 
-        eval_feed = feed or self._default_feed()
+        eval_feed = feed or self._default_feed(strategy_id=strategy_id, definition=definition)
         recommendations: list[dict[str, Any]] = []
 
         for cand in candidates:

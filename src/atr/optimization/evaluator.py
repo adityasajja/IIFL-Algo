@@ -136,8 +136,9 @@ def _extract_metrics(result: BacktestResult) -> PerformanceMetrics:
     skew_val = None
     kurt_val = None
 
-    if not trades.empty and "pnl_pct" in trades.columns:
-        pnl = trades["pnl_pct"].dropna()
+    pnl_col = "return_pct" if "return_pct" in trades.columns else ("pnl_pct" if "pnl_pct" in trades.columns else None)
+    if not trades.empty and pnl_col:
+        pnl = trades[pnl_col].dropna()
         if len(pnl) > 0:
             median_ret = float(pnl.median())
             if len(pnl) >= 4:
@@ -324,7 +325,7 @@ def evaluate_robustness(
 
     is_isolated_spike = False
     if target_sharpe > 1.0 and neighbors:
-        collapsed = all(ns < 0.3 * target_sharpe or npf < 1.0 for ns, npf in zip(neighbor_sharpes, neighbor_pfs))
+        collapsed = all(ns < 0.3 * target_sharpe or npf < 1.0 for ns, npf in zip(neighbor_sharpes, neighbor_pfs, strict=True))
         if collapsed:
             is_isolated_spike = True
 
