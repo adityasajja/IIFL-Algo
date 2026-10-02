@@ -30,3 +30,27 @@ jobs:
         run: bun run test
       - name: Type-check, design check and build
         run: bun run build
+
+  e2e:
+    # Untested on GitHub's runners (written and verified locally only), so it reports but does not
+    # block merges until it has gone green there once. Remove `continue-on-error` after that.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: uv sync
+      - name: Build the web app
+        working-directory: web
+        run: bun install --frozen-lockfile && bun run build
+      - name: Seed demo data and start the server
+        run: |
+          uv run python scripts/seed_demo.py
+          nohup uv run atr serve --no-browser --no-build > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8000/ >/dev/null && break; sleep 2; done
+      - name: Browser smoke test
+        working-directory: web
+        run: |
+          bunx playwright-core install --with-deps chromium
+          bun run e2e
