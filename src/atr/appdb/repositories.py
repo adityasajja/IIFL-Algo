@@ -1145,17 +1145,22 @@ class OrderEventRepository:
         *,
         since: datetime | None = None,
         limit: int = 500,
+        deployment_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Every event on every one of a user's orders, newest last.
 
         Used by reconciliation and by the trade journal, both of which need the
-        whole chain rather than one order at a time.
+        whole chain rather than one order at a time. ``deployment_id`` scopes
+        to one deployment: without it a user with many deployments silently
+        loses this deployment's older events outside the newest-first window.
         """
         stmt = (
             select(order_events)
             .join(orders, orders.c.order_id == order_events.c.order_id)
             .where(orders.c.user_id == user_id)
         )
+        if deployment_id:
+            stmt = stmt.where(orders.c.deployment_id == deployment_id)
         if since:
             stmt = stmt.where(order_events.c.ts >= since)
         stmt = stmt.order_by(order_events.c.ts.desc()).limit(max(1, min(limit, 5000)))

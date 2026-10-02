@@ -96,6 +96,12 @@ def _filters(
     }
 
 
+#: Aggregates fold the whole matching book in Python. Past this many rows
+#: the response stops being a summary and starts being a memory event: the
+#: caller must narrow the filters instead.
+_MAX_AGGREGATE_ROWS = 200_000
+
+
 def _scoped_rows(principal: Principal, **filters: Any) -> list[dict[str, Any]]:
     """Every attribution matching the filters, decoded.
 
@@ -105,9 +111,16 @@ def _scoped_rows(principal: Principal, **filters: Any) -> list[dict[str, Any]]:
     wanting a page asks for.
     """
     service = _get_service()
-    return service.rows(principal.user_id, limit=1000, **filters) if filters else service.all_rows(
+    rows = service.rows(principal.user_id, limit=1000, **filters) if filters else service.all_rows(
         principal.user_id
     )
+    if len(rows) > _MAX_AGGREGATE_ROWS:
+        raise _abort(
+            413,
+            f"book too large ({len(rows)} rows) to aggregate in one call — "
+            "narrow the filters (strategy, symbol, or date range) and retry",
+        )
+    return rows
 
 
 def _rows_for_aggregate(
@@ -142,6 +155,12 @@ def _rows_for_aggregate(
         end=end,
     )
     rows = _get_service().all_rows(principal.user_id)
+    if len(rows) > _MAX_AGGREGATE_ROWS:
+        raise _abort(
+            413,
+            f"book too large ({len(rows)} rows) to aggregate in one call — "
+            "narrow the filters (strategy, symbol, or date range) and retry",
+        )
     return [row for row in rows if _matches(row, filters)]
 
 

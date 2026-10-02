@@ -42,6 +42,9 @@ def pnl_calendar_month(
         held = load_holdings(DATA_ROOT)
         view["holdings_source"] = held["source"]
         view["unpriced"] = pnl_calendar.unpriced_holdings(DATA_ROOT, held["holdings"])
+        gl = pnl_calendar.gl_summary_data(DATA_ROOT)
+        if gl and gl.get("summary", {}).get("data"):
+            view["tax_gl_summary"] = gl["summary"]["data"]
     return view
 
 

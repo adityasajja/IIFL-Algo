@@ -20,7 +20,7 @@ from atr.core.models import Bar, Instrument, MarketSnapshot
 from atr.live.runner import LiveConfig, LiveRunner
 from atr.strategy.strategies.sma_crossover import SmaCrossover
 
-START = datetime(2024, 1, 1, 9, 15)
+START = datetime.now().replace(second=0, microsecond=0)
 
 
 def _series(n: int, offset: float = 0.0) -> np.ndarray:
@@ -278,3 +278,57 @@ def test_runner_handles_one_and_many_symbols(symbols):
     runner.run()
     for symbol in symbols:
         assert not runner.frames[symbol].empty
+
+
+def test_stale_snapshots_are_skipped_not_traded():
+    """A queued backlog after a disconnect must not become trades."""
+    from atr.core.models import MarketSnapshot as _Snap
+
+    symbols = ["AAA"]
+    old = _snapshots(symbols, 60, 10)
+    # Rebuild with explicitly stale timestamps.
+    stale = []
+    for snap in old:
+        bars = {
+            s: Bar(ts=datetime(2024, 1, 1, 9, 15), open=b.open, high=b.high,
+                   low=b.low, close=b.close, volume=b.volume)
+            for s, b in snap.bars.items()
+        }
+        stale.append(_Snap(ts=datetime(2024, 1, 1, 9, 15), bars=bars))
+    config = LiveConfig(warmup_bars=0, poll_timeout=0.01, max_snapshot_age_seconds=60.0)
+    runner = _runner(symbols, 60, stale, config=config)
+    runner.run()
+    assert runner.broker.orders == []
+
+
+def test_kill_switch_provider_stops_the_loop():
+    """An engaged durable kill switch must flatten and end the run."""
+    symbols = ["AAA"]
+    runner = _runner(symbols, 60, _snapshots(symbols, 60, 10))
+    runner.kill_switch_provider = lambda: True
+    runner.run()
+    assert runner.feed.stopped
+    assert runner.broker.orders == []
+
+
+def test_broker_fills_sync_into_the_local_book():
+    """The local book learns fills, so close_all() can actually close."""
+    from atr.core.enums import Side
+    from atr.core.models import Fill
+
+    class FillsBroker(RecordingBroker):
+        def fills_from_trades(self):
+            return [
+                Fill(order_id="SIM1", instrument=_instruments(["AAA"])["AAA"],
+                     side=Side.BUY, quantity=10, price=100.0,
+                     ts=datetime(2026, 9, 27, 10, 0))
+            ]
+
+    symbols = ["AAA"]
+    runner = _runner(symbols, 60, [])
+    runner.broker = FillsBroker()
+    assert runner._sync_broker_fills() == 1
+    assert runner.portfolio.position("AAA").quantity == pytest.approx(10.0)
+    # A second sync must not double-count the same trade.
+    assert runner._sync_broker_fills() == 0
+    assert runner.portfolio.position("AAA").quantity == pytest.approx(10.0)

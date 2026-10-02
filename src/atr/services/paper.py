@@ -117,7 +117,7 @@ def cached_close_source(cache_root: Path | None = None) -> Callable[[str, str], 
     def source(symbol: str, exchange: str) -> float | None:
         try:
             master = get_instrument_master()
-            record = master.find(symbol, exchange)
+            record = master.get(symbol, exchange)
         except Exception:  # noqa: BLE001 - an unknown symbol is "no price"
             return None
         cache_file = getattr(record, "cache_file", None)
@@ -592,12 +592,16 @@ class PaperLedger:
         deployment_id: str | None = None,
         initial_cash: float | None = None,
         prices: dict[str, float] | None = None,
+        mode: str | None = None,
     ) -> Any:
         """Replay the user's fills into a :class:`Portfolio`.
 
         ``deployment_id`` scopes the replay to one deployment, which is what a
         per-strategy capital allocation means. Without it the account is the whole
-        paper book.
+        paper book. ``mode`` (``"PAPER"``/``"LIVE"``) scopes by execution mode:
+        the reconciler passes ``"LIVE"`` so paper fills never pollute the live
+        comparison — the two books share one table, and an unfiltered fold
+        compares the broker against trades it never saw.
         """
         from atr.backtest.portfolio import Portfolio
 
@@ -606,7 +610,7 @@ class PaperLedger:
         ))
         portfolio = Portfolio(initial_cash=cash)
 
-        for fill in self.fills(user_id, deployment_id=deployment_id):
+        for fill in self.fills(user_id, deployment_id=deployment_id, mode=mode):
             portfolio.apply_fill(fill)
 
         if prices:
@@ -628,21 +632,32 @@ class PaperLedger:
         return float(row["capital"]) if row else 0.0
 
     def fills(
-        self, user_id: str, *, deployment_id: str | None = None
+        self, user_id: str, *, deployment_id: str | None = None, mode: str | None = None
     ) -> list[Fill]:
-        """The user's execution events, oldest first, as :class:`Fill` objects."""
+        """The user's execution events, oldest first, as :class:`Fill` objects.
+
+        Pages through the whole order log: a single capped query silently
+        drops older fills from positions, cash and equity once the book
+        grows past the page.
+        """
         from atr.appdb.repositories import OrderRepository
 
+        orders: dict[str, Any] = {}
+        offset = 0
+        while True:
+            with self.db.session() as session:
+                rows, _ = OrderRepository.list_for_user(
+                    session, user_id, deployment_id=deployment_id, mode=mode,
+                    limit=500, offset=offset,
+                )
+            if not rows:
+                break
+            for o in rows:
+                orders[o["order_id"]] = o
+            offset += len(rows)
+            if len(rows) < 500:
+                break
         with self.db.session() as session:
-            orders = {
-                o["order_id"]: o
-                for o in OrderRepository.list_for_user(session, user_id, limit=500)[0]
-            }
-            if deployment_id:
-                orders = {
-                    k: v for k, v in orders.items()
-                    if v.get("deployment_id") == deployment_id
-                }
             out: list[Fill] = []
             for order_id, order in orders.items():
                 for event in OrderEventRepository.fills(session, order_id):
@@ -1040,6 +1055,16 @@ class DeploymentService:
 
             from atr.services.portfolio import check_strategy_capital
 
+            if str(mode or "").upper() == "LIVE":
+                # The money decision, and the only creation this gate touches.
+                # Paper runs always pass: evidence must come from somewhere,
+                # and refusing first runs would make learning impossible.
+                from atr.services.gating import check_live_deployment
+
+                check_live_deployment(
+                    strategy_id, int(strategy_version), user_id=user_id, db=self.db
+                )
+
             ok, reason = check_strategy_capital(
                 user_id, strategy_id, float(capital), db=self.db
             )
@@ -1181,9 +1206,13 @@ class DeploymentService:
             rows = DeploymentRepository.list_for_user(session, user_id, status=status)
         for row in rows:
             # Each row carries its own P&L so the list is useful without N calls.
-            row["pnl"] = self.ledger.snapshot(
-                user_id, deployment_id=row["deployment_id"], prices={}
-            )
+            # `prices` is left unset (rather than `{}`) so `snapshot()` fills it
+            # from `_marks()` — live ticks, falling back to the cached close.
+            # Passing `{}` looks like "no prices available" but actually *means*
+            # "every symbol is unpriced": every open position is then valued at
+            # zero, which turned a real, small P&L into what looked like the
+            # deployment losing almost all of its capital.
+            row["pnl"] = self.ledger.snapshot(user_id, deployment_id=row["deployment_id"])
         return rows
 
     def get(self, user_id: str, deployment_id: str) -> dict[str, Any]:

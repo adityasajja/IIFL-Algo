@@ -44,6 +44,10 @@ class LiveConfig:
     max_history_bars: int = 2_000
     max_runtime_seconds: float | None = None
     flatten_on_stop: bool = True
+    #: Reject bars older than this (seconds) instead of trading them. The
+    #: snapshot queue can hold a backlog after a disconnect; trading it
+    #: would act on a market that no longer exists. None disables.
+    max_snapshot_age_seconds: float | None = 300.0
 
 
 class LiveRunner:
@@ -59,6 +63,7 @@ class LiveRunner:
         initial_cash: float = 1_000_000.0,
         client=None,
         feed=None,
+        kill_switch_provider=None,
     ) -> None:
         self.session = session
         self.instruments = instruments
@@ -67,6 +72,14 @@ class LiveRunner:
         self.config = config or LiveConfig()
         self.portfolio = Portfolio(initial_cash=initial_cash)
         self.risk = RiskEngine(risk or RiskLimits())
+        #: Zero-argument callable returning True while the durable kill
+        #: switch is engaged. The static ``RiskLimits`` above are a snapshot;
+        #: without a live read of the switch, engaging it stops paper but not
+        #: a running live loop. Wire ``atr.services.risk`` (or any store
+        #: reader) here. A provider failure fails closed — an unknown safety
+        #: state must not keep trading.
+        self.kill_switch_provider = kill_switch_provider
+        self._seen_fill_keys: set[tuple] = set()
         self.frames: dict[str, pd.DataFrame] = warmup_frames or {}
         # Injectable so the loop can be tested without the live bridge.
         self.feed = (
@@ -118,7 +131,7 @@ class LiveRunner:
                 interval=self.config.freq,
                 from_date=from_date,
                 to_date=to_date,
-            ).fetch()
+            ).fetch().to_pandas()
         except Exception as exc:  # noqa: BLE001 - warmup is best-effort
             logger.warning("warmup fetch failed, starting cold: {}", exc)
             return
@@ -194,7 +207,20 @@ class LiveRunner:
         self._indicator_len = length
 
     # ------------------------------------------------------------------
+    def _kill_switch_engaged(self) -> bool:
+        if self.kill_switch_provider is None:
+            return False
+        try:
+            return bool(self.kill_switch_provider())
+        except Exception as exc:  # noqa: BLE001 - unknown safety state: stop
+            logger.error("kill-switch read failed ({}); failing closed", exc)
+            return True
+
     def _submit(self, order):
+        if self._kill_switch_engaged():
+            logger.warning("order blocked: kill switch engaged")
+            order.reject_reason = "kill switch engaged"
+            return order
         verdict = self.risk.check_order(order, self.portfolio)
         if not verdict.allowed:
             logger.warning("order blocked by risk: {}", verdict.reason)
@@ -207,7 +233,44 @@ class LiveRunner:
             order.instrument.symbol,
             order.order_type.value,
         )
-        return self.broker.place_order(order)
+        try:
+            return self.broker.place_order(order)
+        except Exception as exc:  # noqa: BLE001 - one rejection ends no session
+            logger.error("broker rejected {}: {}; continuing", order.order_id, exc)
+            order.reject_reason = str(exc)
+            return order
+
+    def _sync_broker_fills(self) -> int:
+        """Fold unseen broker trades into the local book; return how many.
+
+        The local portfolio only learns fills here. Without this the book
+        stays flat forever and ``close_all()`` — which reads local positions
+        — finds nothing to close, so risk-halt and square-off cancel resting
+        orders and then close nothing while logging success.
+        """
+        fills_from_trades = getattr(self.broker, "fills_from_trades", None)
+        if fills_from_trades is None:
+            return 0
+        try:
+            fills = fills_from_trades()
+        except Exception as exc:  # noqa: BLE001 - sync is best-effort per pass
+            logger.warning("broker fill sync failed: {}", exc)
+            return 0
+        applied = 0
+        for fill in fills or []:
+            key = (fill.order_id, fill.instrument.symbol, fill.quantity,
+                   fill.price, str(fill.ts))
+            if key in self._seen_fill_keys:
+                continue
+            self._seen_fill_keys.add(key)
+            try:
+                self.portfolio.apply_fill(fill)
+                applied += 1
+            except Exception as exc:  # noqa: BLE001 - one bad fill blocks none
+                logger.warning("could not apply broker fill {}: {}", key, exc)
+        if applied:
+            logger.info("synced {} broker fill(s) into the local book", applied)
+        return applied
 
     # ------------------------------------------------------------------
     def run(self) -> None:
@@ -236,6 +299,9 @@ class LiveRunner:
                         break
                     continue
 
+                if self._snapshot_stale(snapshot.ts):
+                    logger.warning("skipping stale snapshot ({}); feed may be down", snapshot.ts)
+                    continue
                 self._append_snapshot(snapshot)
                 self._refresh_indicators()
                 for symbol, bar in snapshot.bars.items():
@@ -246,6 +312,12 @@ class LiveRunner:
                 now = snapshot.ts
                 prices = {s: b.close for s, b in snapshot.bars.items()}
                 self.portfolio.mark(now, prices)
+                self._sync_broker_fills()
+
+                if self._kill_switch_engaged():
+                    logger.error("kill switch engaged — flattening")
+                    self.flatten(ctx)
+                    break
 
                 verdict = self.risk.check(self.portfolio, now)
                 if not verdict.allowed:
@@ -264,7 +336,10 @@ class LiveRunner:
                 ctx.index = max(self._length() - 1, 0)
                 for symbol, bar in snapshot.bars.items():
                     ctx.windows[symbol].push(bar)
-                self.strategy.on_bar(ctx)
+                try:
+                    self.strategy.on_bar(ctx)
+                except Exception as exc:  # noqa: BLE001 - one bad bar ends no session
+                    logger.error("strategy failed on bar {}: {}; continuing", now, exc)
 
                 if (
                     self.config.max_runtime_seconds
@@ -281,6 +356,49 @@ class LiveRunner:
             logger.info("live runner stopped")
 
     # ------------------------------------------------------------------
+    def _snapshot_stale(self, ts) -> bool:
+        """True when a snapshot is too old to trade.
+
+        Unparseable timestamps are treated as fresh: a missing clock is a
+        data gap, not evidence of staleness, and skipping on it would stall
+        the loop forever on feeds that never set bar times.
+        """
+        limit = self.config.max_snapshot_age_seconds
+        if limit is None:
+            return False
+        moment = self._as_aware(ts)
+        if moment is None:
+            return False
+        now = datetime.now(IST)
+        return (now - moment).total_seconds() > limit
+
+    @staticmethod
+    def _as_aware(ts):
+        if isinstance(ts, datetime):
+            moment = ts
+        elif isinstance(ts, str):
+            try:
+                moment = datetime.fromisoformat(ts)
+            except ValueError:
+                return None
+        else:
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=IST)
+        return moment
+
     def flatten(self, ctx: StrategyContext) -> None:
+        # Sync first: the local book only learns fills here, and closing
+        # against a stale-flat book submits nothing while reporting success.
+        self._sync_broker_fills()
+        # Cancel first, close second — same reasoning as the backtest engine's
+        # halt handling: a resting stop/limit order (an entry still working,
+        # a protective stop placed directly rather than through the sizing
+        # wrapper) needs clearing before the flatten's own closing orders go
+        # out, or a broker whose cancel-all has no notion of "just submitted"
+        # could cancel the very orders meant to flatten the book.
+        cancelled = self.broker.cancel_all()
+        if cancelled:
+            logger.info("cancelled {} resting order(s) on flatten", cancelled)
         for order in ctx.close_all():
             logger.info("flatten order submitted: {}", order.order_id)

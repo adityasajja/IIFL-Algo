@@ -739,7 +739,14 @@ class PortfolioService:
             )
         for episode in episodes:
             exit_ts = episode.get("exit_ts")
-            stamp = exit_ts.date() if hasattr(exit_ts, "date") else None
+            stamp = None
+            if hasattr(exit_ts, "date"):
+                # Appdb stamps are naive UTC; "today" is an IST session date.
+                # Comparing the naive UTC calendar day puts 00:00–05:30 IST
+                # closes on the wrong day.
+                stamp = exit_ts.replace(tzinfo=UTC).astimezone(IST).date() \
+                    if exit_ts.tzinfo is None \
+                    else exit_ts.astimezone(IST).date()
             if stamp != today or episode.get("net_pnl") is None:
                 continue
             try:

@@ -551,6 +551,9 @@ class StrategyService:
         latest = StrategyRepository.latest_version(session, row["strategy_id"])
         return {
             **row,
+            "created_at": _iso(row.get("created_at")),
+            "updated_at": _iso(row.get("updated_at")),
+            "archived_at": _iso(row.get("archived_at")),
             "latest_version": None if latest is None else int(latest["version"]),
             "version_count": StrategyRepository.version_count(session, row["strategy_id"]),
             "deployable": bool(latest is not None and self._describe_version(latest)["deployable"]),
@@ -567,7 +570,12 @@ class StrategyService:
 
 
 def _iso(value: Any) -> str | None:
-    return value.isoformat() if hasattr(value, "isoformat") else (value or None)
+    if hasattr(value, "isoformat"):
+        if hasattr(value, "tzinfo") and value.tzinfo is None:
+            from datetime import timezone
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
+    return value or None
 
 
 def get_strategy_service() -> StrategyService:

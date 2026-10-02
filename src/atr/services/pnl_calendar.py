@@ -123,12 +123,55 @@ def realised_path(data_root: Path) -> Path:
     return Path(data_root) / "portfolio" / "realised_pnl.json"
 
 
-def realised_entries(data_root: Path) -> dict[str, dict[str, Any]]:
-    """Trading profit recorded per day: ``{date: {amount, source, note, updated}}``."""
+def gl_summary_path(data_root: Path) -> Path:
+    return Path(data_root) / "portfolio" / "gl_summary.json"
+
+
+def gl_summary_data(data_root: Path) -> dict[str, Any]:
+    """Official tax and realized gain/loss breakdown synced from IIFL back-office."""
     try:
-        return json.loads(realised_path(data_root).read_text(encoding="utf8"))
+        return json.loads(gl_summary_path(data_root).read_text(encoding="utf8"))
     except (OSError, ValueError):
         return {}
+
+
+def realised_entries(data_root: Path) -> dict[str, dict[str, Any]]:
+    """Trading profit recorded per day: ``{date: {amount, source, note, updated}}``.
+
+    Merges broker official daily realized P&L (from ``gl_summary.json``) with manual
+    entries (from ``realised_pnl.json``), with manual entries taking precedence.
+    """
+    entries: dict[str, dict[str, Any]] = {}
+    gl = gl_summary_data(data_root)
+    for row in gl.get("daily_pnl", {}).get("data") or []:
+        raw_date = row.get("date")
+        if not raw_date:
+            continue
+        day_iso = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+        cash_pl = float(row.get("cashPl") or 0.0)
+        fno_pl = float(row.get("fnoPl") or 0.0)
+        dividend = float(row.get("dividend") or 0.0)
+        brokerage = float(row.get("cashBrokerage") or 0.0) + float(row.get("fnoBrokerage") or 0.0)
+        charges = float(row.get("cashChargesTaxes") or 0.0) + float(row.get("fnoChargesTaxes") or 0.0)
+        net_pl = cash_pl + fno_pl + dividend - brokerage - charges
+        entries[day_iso] = {
+            "amount": round(net_pl, 2),
+            "source": "iifl_backoffice",
+            "cash_pl": cash_pl,
+            "fno_pl": fno_pl,
+            "dividend": dividend,
+            "brokerage": round(brokerage, 2),
+            "charges": round(charges, 2),
+            "note": "IIFL Official Realized GL",
+            "updated": "synced",
+        }
+
+    try:
+        manual = json.loads(realised_path(data_root).read_text(encoding="utf8"))
+        entries.update(manual)
+    except (OSError, ValueError):
+        pass
+    return entries
 
 
 def set_realised(data_root: Path, day: str, amount: float, *, note: str = "", source: str = "manual") -> None:
@@ -136,7 +179,10 @@ def set_realised(data_root: Path, day: str, amount: float, *, note: str = "", so
     date.fromisoformat(day)  # a real date, or this raises
     if not math.isfinite(amount):
         raise ValueError("amount must be a finite number")
-    entries = realised_entries(data_root)
+    try:
+        entries = json.loads(realised_path(data_root).read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        entries = {}
     entries[day] = {"amount": round(float(amount), 2), "source": source, "note": note.strip()[:200],
                     "updated": datetime.now().isoformat(timespec="seconds")}
     _write_json(realised_path(data_root), entries)

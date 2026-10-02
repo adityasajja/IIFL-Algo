@@ -325,19 +325,29 @@ def test_an_unknown_scope_is_refused(app_db, trader):
 
 
 def test_the_platform_position_fold_is_used(app_db, trader):
-    """The platform's side is the order-event fold, the same one the risk gate gets."""
+    """The platform's side is the LIVE order-event fold, the same one the risk gate gets."""
     from atr.execution.oms import OrderDraft, RiskDecision
     from atr.services.orders import OrderService
 
     service = OrderService(app_db, risk_gate=lambda d: RiskDecision.ok())
     opened = service.open_order(
-        OrderDraft(user_id=trader, symbol="RELIANCE", side="BUY", quantity=10)
+        OrderDraft(user_id=trader, symbol="RELIANCE", side="BUY", quantity=10, mode="LIVE")
     )
     service.validate(opened.order_id, trader)
     service.submit(opened.order_id, trader)
     service.acknowledge(opened.order_id, trader, broker_order_id="B1")
     service.record_fill(opened.order_id, trader, filled_qty=10.0, filled_price=2500.0)
 
+    assert ReconciliationService(app_db).platform_positions(trader) == {"RELIANCE": 10.0}
+
+    # Paper fills must not pollute the live comparison.
+    paper = service.open_order(
+        OrderDraft(user_id=trader, symbol="RELIANCE", side="BUY", quantity=5, mode="PAPER")
+    )
+    service.validate(paper.order_id, trader)
+    service.submit(paper.order_id, trader)
+    service.acknowledge(paper.order_id, trader, broker_order_id="P1")
+    service.record_fill(paper.order_id, trader, filled_qty=5.0, filled_price=2500.0)
     assert ReconciliationService(app_db).platform_positions(trader) == {"RELIANCE": 10.0}
 
     # And the fold makes a broker disagreement visible.

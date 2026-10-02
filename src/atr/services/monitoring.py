@@ -76,6 +76,10 @@ class TimelineEntry:
     #: Why, when the step was a decision rather than a fact.
     reason: str | None
     order_id: str | None
+    #: BUY or SELL — carried on every stage, not just the signal line, so the
+    #: UI can mark an exit's whole chain (order/fill/position rows included)
+    #: without the reader having to infer it from wording alone.
+    side: str | None
     #: The raw event payload, narrowed to keys the UI actually shows.
     detail: dict[str, Any]
 
@@ -148,16 +152,32 @@ def _read_log(
         orders, _ = OrderRepository.list_for_user(
             session, user_id, deployment_id=deployment_id, limit=limit
         )
-        events = OrderEventRepository.for_user(session, user_id, limit=limit * 10)
+        events = OrderEventRepository.for_user(
+            session, user_id, deployment_id=deployment_id, limit=limit * 10
+        )
 
     by_order: dict[str, list[dict[str, Any]]] = {}
     for event in events:
         by_order.setdefault(str(event.get("order_id")), []).append(event)
     for rows in by_order.values():
-        rows.sort(key=lambda e: (str(e.get("ts") or ""), int(e.get("seq") or 0)))
+        # ``ts`` mixes naive and aware ISO forms across writers; string
+        # sorting misorders them ("+05:30" vs " "). Parse first, fall back
+        # to the raw string only when unparseable.
+        rows.sort(key=lambda e: (_sort_ts(e.get("ts")), int(e.get("seq") or 0)))
 
-    orders.sort(key=lambda o: (str(o.get("created_at") or ""), str(o.get("order_id"))))
+    orders.sort(key=lambda o: (_sort_ts(o.get("created_at")), str(o.get("order_id"))))
     return orders, by_order
+
+
+def _sort_ts(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).isoformat()
+        except ValueError:
+            return value
+    return "" if value is None else str(value)
 
 
 class DeploymentMonitor:
@@ -702,6 +722,7 @@ class DeploymentMonitor:
                         outcome=outcome,
                         reason=reason,
                         order_id=order_id,
+                        side=str(side) if side else None,
                         detail={
                             k: v
                             for k, v in {
@@ -736,6 +757,7 @@ class DeploymentMonitor:
                             outcome="recorded",
                             reason=None,
                             order_id=order_id,
+                            side=str(side) if side else None,
                             detail={
                                 k: v
                                 for k, v in {
@@ -797,7 +819,16 @@ class DeploymentMonitor:
             why = event.get("reject_reason") or raw.get("reason") or "no reason given"
             return f"{name} rejected — {why}", "rejected"
 
-        if to_status in {"SUBMITTED", "ACKNOWLEDGED"}:
+        # SUBMITTED and ACKNOWLEDGED are two different moments — "we sent the
+        # order" and "the venue confirmed it received the order" — collapsed
+        # into identical wording here, so every single order in the system
+        # produced two back-to-back timeline rows reading the exact same
+        # "order placed (qty)", indistinguishable from a genuine duplicate
+        # order. Distinct wording for each, matching what actually happened.
+        if to_status == "SUBMITTED":
+            return f"{name} order sent ({quantity:g})" if quantity else f"{name} order sent", "placed"
+
+        if to_status == "ACKNOWLEDGED":
             return f"{name} order placed ({quantity:g})" if quantity else f"{name} order placed", "placed"
 
         if to_status == "PARTIALLY_FILLED":
@@ -860,6 +891,7 @@ class DeploymentMonitor:
                     "outcome": e.outcome,
                     "reason": e.reason,
                     "order_id": e.order_id,
+                    "side": e.side,
                     "detail": e.detail,
                 }
                 for e in self.timeline(user_id, deployment_id, limit=timeline_limit)

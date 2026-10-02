@@ -507,16 +507,17 @@ class ReconciliationService:
 
     # ------------------------------------------------------------------ platform side
     def platform_positions(self, user_id: str) -> dict[str, float]:
-        """The platform's net quantity per symbol, folded from ``order_events``.
+        """The platform's LIVE net quantity per symbol, folded from ``order_events``.
 
-        The same fold the paper ledger uses, and the same one the risk gate is
-        handed. It is mode-agnostic: it reads the order log, which is written
-        identically for paper and live. (``PaperLedger`` is named for its first
-        caller; it is really an order-event ledger.)
+        Scoped to ``mode="LIVE"``: the order log carries both paper and live
+        rows in one table, and an unfiltered fold compares the live broker
+        against paper trades it never saw — false criticals that train an
+        operator to ignore the alarm, or worse, paper fills masking a real
+        live divergence.
         """
         from atr.services.paper import PaperLedger
 
-        portfolio = PaperLedger(self.db).portfolio(user_id)
+        portfolio = PaperLedger(self.db).portfolio(user_id, mode="LIVE")
         return {
             symbol: float(position.quantity)
             for symbol, position in portfolio.positions.items()
@@ -525,7 +526,10 @@ class ReconciliationService:
 
     def open_orders(self, user_id: str) -> list[dict[str, Any]]:
         with self.db.session() as session:
-            return OrderRepository.open_orders(session, user_id)
+            rows = OrderRepository.open_orders(session, user_id)
+        # LIVE only: paper working orders are not at the broker, and
+        # comparing them would flag every paper entry as a broker miss.
+        return [o for o in rows if str(o.get("mode", "PAPER")).upper() == "LIVE"]
 
     # ------------------------------------------------------------------ persistence
     def _persist(

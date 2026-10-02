@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import Any
 
@@ -153,19 +152,15 @@ def risk_status() -> dict[str, Any]:
     margin_error: str | None = None
     try:
         client = _authed_client()
-        try:
-            row = _broker_rows(client.limits())
-            row = row[0] if row else {}
-            for key in (
-                "availableMargin", "marginUtilized", "collateralValue",
-                "openingCashLimit", "intradayPayinAmount", "creditForSellAmount",
-                "blockedForPayoutAmount", "utilizedAmount", "net",
-            ):
-                if key in row:
-                    margin[key] = row[key]
-        finally:
-            with contextlib.suppress(Exception):
-                client.close()
+        row = _broker_rows(client.limits())
+        row = row[0] if row else {}
+        for key in (
+            "availableMargin", "marginUtilized", "collateralValue",
+            "openingCashLimit", "intradayPayinAmount", "creditForSellAmount",
+            "blockedForPayoutAmount", "utilizedAmount", "net",
+        ):
+            if key in row:
+                margin[key] = row[key]
     except Exception as exc:  # noqa: BLE001 — report, don't fail the panel
         margin_error = str(exc)
 
@@ -291,6 +286,41 @@ def _order_principal(request: Request):
             },
         )
     return principal
+
+
+def _require_order_permission(principal) -> None:
+    """Enforce ORDER_PLACE on legacy money routes, like the v1 route does.
+
+    The legacy routes authenticate (any account) but never authorised (which
+    account may trade): a viewer with a valid session could place live
+    orders through ``POST /orders`` while ``POST /api/orders`` correctly
+    403s. Same codes as :func:`atr.api.deps.require_permission` so clients
+    branch identically.
+    """
+    from fastapi import status as _status
+
+    from atr.auth.rbac import Permission
+
+    if not principal.mfa_satisfied:
+        raise HTTPException(
+            _status.HTTP_403_FORBIDDEN,
+            detail={
+                "detail": "finish two-factor enrolment before using the platform",
+                "code": "mfa_enrolment_required",
+            },
+        )
+    if not principal.can(Permission.ORDER_PLACE):
+        raise HTTPException(
+            _status.HTTP_403_FORBIDDEN,
+            detail={
+                "detail": (
+                    f"role '{principal.role.value}' lacks permission "
+                    f"'{Permission.ORDER_PLACE.value}'"
+                ),
+                "code": "permission_denied",
+                "required": Permission.ORDER_PLACE.value,
+            },
+        )
 
 
 def _require_live_execution(action: str = "order") -> None:

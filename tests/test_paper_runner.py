@@ -813,3 +813,49 @@ def test_last_pass_orders_is_per_deployment_not_a_running_total(wired, deploymen
         )
         assert loop.last_pass["signals"] == 1
 
+
+# ---------------------------------------------------------------------------
+# 13. intraday mode — the N-minute bar bucketing has to actually run
+# ---------------------------------------------------------------------------
+def test_intraday_bar_bucketing_does_not_crash(wired, app_db):
+    """`_refresh_intraday_bar` used `timedelta` without importing it.
+
+    Nothing in this suite ran an intraday-timeframe deployment, so a plain
+    `NameError` on the first tick of any 5m/15m/... deployment went
+    unnoticed — this exercises that path directly rather than trusting that
+    "the tests pass" means intraday mode works.
+    """
+    from atr.appdb.repositories import DeploymentRepository
+    from atr.appdb.schema import users
+    from datetime import datetime as _dt
+
+    with app_db.session() as session:
+        session.execute(
+            users.insert().values(
+                user_id="u2", email="t2@example.com", username="tester2", display_name="T2",
+                password_hash="x", role="owner", is_active=True, mfa_enabled=False,
+                failed_logins=0, created_at=_dt(2026, 1, 1), updated_at=_dt(2026, 1, 1),
+            )
+        )
+    with app_db.session() as session:
+        row = DeploymentRepository.create(
+            session,
+            user_id="u2",
+            strategy_id="sma_pullback",
+            strategy_version=1,
+            mode="PAPER",
+            capital=200_000.0,
+            status="RUNNING",
+            config={"symbols": [SYMBOL], "exchange": "NSEEQ", "timeframe": "5m"},
+        )
+
+    runner, _feed = wired()
+    loop = _loop(runner, row)
+    assert loop.timeframe_minutes == 5
+
+    result = loop._refresh_intraday_bar(SYMBOL, 1234.0)
+    assert result is not None
+    assert result["close"].iloc[-1] == 1234.0
+    bar = loop.intraday_bar[SYMBOL]
+    assert bar["start"].minute % 5 == 0, "bucketed to the 5-minute boundary"
+

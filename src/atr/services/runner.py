@@ -48,7 +48,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -109,6 +109,12 @@ def in_market_hours(now: datetime | None = None) -> bool:
     return get_market_calendar().is_market_open(now)
 
 
+#: Deployment `config.timeframe` values that mean "intraday" and how many
+#: minutes each bar spans. Anything else (including the default, "1d") is the
+#: original daily mode.
+_INTRADAY_MINUTES = {"1m": 1, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "60m": 60}
+
+
 @dataclass
 class RunnerConfig:
     """One deployment's running parameters.
@@ -131,6 +137,9 @@ class RunnerConfig:
     order_value: float | None = None
     #: Bars of history to load for indicator warmup.
     lookback_days: int = 400
+    #: "1d" (default) or an intraday interval ("1m", "5m", "15m", "30m", "60m").
+    #: See `DeploymentLoop.timeframe_minutes` for what this changes.
+    timeframe: str = "1d"
     #: Refuse to open more than this many open positions at once.
     max_open_positions: int = 10
     #: Trailing stop applied to every paper position, as the exit rules would.
@@ -169,6 +178,7 @@ class RunnerConfig:
             interval_seconds=float(raw.get("interval_seconds") or 1.0),
             order_value=raw.get("order_value"),
             lookback_days=int(raw.get("lookback_days") or 400),
+            timeframe=str(raw.get("timeframe") or "1d").strip().lower(),
             max_open_positions=int(raw.get("max_open_positions") or 10),
             stop_loss_pct=raw.get("stop_loss_pct"),
             take_profit_pct=raw.get("take_profit_pct"),
@@ -203,6 +213,10 @@ class DeploymentLoop:
     frames: dict[str, pd.DataFrame] = field(default_factory=dict)
     #: The forming bar's date, so a day boundary is detected without a calendar.
     frame_day: dict[str, Any] = field(default_factory=dict)
+    #: Intraday mode only: the currently-forming bar per symbol, accumulated
+    #: tick by tick — {"start": bar's own open-time, "open"/"high"/"low"/
+    #: "close": float, "volume": float}. See `_refresh_intraday_bar`.
+    intraday_bar: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Signals already acted on, keyed by (symbol, rule, bar) so a rule that
     #: stays true for an hour does not open an hour of orders.
     acted: set[tuple[str, str, str]] = field(default_factory=set)
@@ -233,6 +247,13 @@ class DeploymentLoop:
     skipped_evaluations_count: int = 0
     skipped_fills_count: int = 0
     skipped_reason: str | None = None
+
+    @property
+    def timeframe_minutes(self) -> int | None:
+        """Minutes per bar in intraday mode, or `None` for the original daily
+        mode. Every other intraday method checks this first — it is the one
+        switch between "one bar per calendar day" and "one bar per N minutes"."""
+        return _INTRADAY_MINUTES.get(self.config.timeframe)
 
     @property
     def user_id(self) -> str:
@@ -267,7 +288,20 @@ class DeploymentLoop:
     # history
     # ------------------------------------------------------------------
     def warmup(self) -> None:
-        """Load each symbol's daily history once, so rules have indicator context."""
+        """Load each symbol's history once, so rules have indicator context.
+
+        Daily mode reads the maintained local cache only (no broker call needed
+        or made — see `load_daily`). Intraday mode has no such cache to read
+        (see `load_intraday`), so this makes one broker call per symbol to seed
+        today's bars so far; a deployment started well after the open will
+        simply have missed the earlier bars for *this* session (an opening-range
+        rule, for instance, would have nothing to measure until tomorrow) —
+        there is no session history to recover after the fact.
+        """
+        if self.timeframe_minutes is not None:
+            self._warmup_intraday()
+            return
+
         from atr.signals.engine import load_daily
 
         loaded = 0
@@ -291,6 +325,49 @@ class DeploymentLoop:
             self.deployment_id[:8],
             loaded,
             len(self.config.symbols),
+        )
+
+    def _warmup_intraday(self) -> None:
+        from atr.brokers.iifl.contracts import InstrumentMaster
+        from atr.signals.engine import load_intraday
+
+        client = None
+        try:
+            from atr.services.broker_access import authed_client
+
+            client = authed_client()
+        except Exception as exc:  # noqa: BLE001 - seed from live ticks instead
+            logger.debug("runner %s: no broker session for intraday warmup: %s", self.deployment_id[:8], exc)
+
+        master = None
+        if client is not None:
+            try:
+                master = InstrumentMaster(client)
+                master.load_cached([self.config.exchange])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("runner %s: instrument master unavailable: %s", self.deployment_id[:8], exc)
+                master = None
+
+        loaded = 0
+        for symbol in self.config.symbols:
+            conid = None
+            if master is not None:
+                try:
+                    conid = master.find(symbol, self.config.exchange).conid
+                except Exception:  # noqa: BLE001 - unresolved: this symbol starts with no seed
+                    conid = None
+            frame = load_intraday(
+                symbol, self.config.exchange, client, conid,
+                interval=self.config.timeframe, lookback_days=2,
+            )
+            self.frames[symbol] = frame if frame is not None else pd.DataFrame(
+                columns=["ts", "open", "high", "low", "close", "volume"]
+            )
+            if frame is not None and not frame.empty:
+                loaded += 1
+        logger.info(
+            "runner %s warmed %d/%d symbols intraday (%s)",
+            self.deployment_id[:8], loaded, len(self.config.symbols), self.config.timeframe,
         )
 
     def _refresh_if_new_day(self, symbol: str, price: float) -> pd.DataFrame:
@@ -325,17 +402,66 @@ class DeploymentLoop:
         return frame
 
     def live_frame(self, symbol: str) -> pd.DataFrame | None:
-        """The symbol's history with today's live price appended as a forming bar."""
-        frame = self.frames.get(symbol)
-        if frame is None or frame.empty:
-            return None
+        """The symbol's history with the current price appended as a forming bar."""
         price = self._price(symbol)
         if price is None:
+            return None
+
+        if self.timeframe_minutes is not None:
+            return self._refresh_intraday_bar(symbol, price)
+
+        frame = self.frames.get(symbol)
+        if frame is None or frame.empty:
             return None
         frame = self._refresh_if_new_day(symbol, price)
         from atr.signals.rules import append_live_bar
 
         return append_live_bar(frame, price)
+
+    def _refresh_intraday_bar(self, symbol: str, price: float) -> pd.DataFrame | None:
+        """Accumulate real OHLC for the current N-minute bar from ticks, and
+        finalize it into `self.frames[symbol]` when the bar boundary rolls over.
+
+        Unlike the daily path's `append_live_bar` (which re-approximates "today"
+        as a single flat point on every call, fine when one day barely moves a
+        200-day SMA), an intraday bar's own high/low often *is* the signal — an
+        opening-range or VWAP rule needs the bar's real range, not a snapshot of
+        wherever the price happened to be on the one tick that got sampled.
+        """
+        n = self.timeframe_minutes
+        if n is None:
+            return None
+        now = datetime.now(IST)
+        bar_start = now.replace(second=0, microsecond=0)
+        bar_start = bar_start - timedelta(minutes=bar_start.minute % n)
+
+        bar = self.intraday_bar.get(symbol)
+        if bar is not None and bar["start"] != bar_start:
+            # The bar just rolled over: finalize the one that just closed.
+            history = self.frames.get(symbol)
+            row = pd.DataFrame([{
+                "ts": bar["start"], "open": bar["open"], "high": bar["high"],
+                "low": bar["low"], "close": bar["close"], "volume": bar["volume"],
+            }])
+            self.frames[symbol] = row if history is None or history.empty else pd.concat(
+                [history, row], ignore_index=True
+            )
+            bar = None
+
+        if bar is None:
+            bar = {"start": bar_start, "open": price, "high": price, "low": price, "close": price, "volume": 0.0}
+            self.intraday_bar[symbol] = bar
+        else:
+            bar["high"] = max(bar["high"], price)
+            bar["low"] = min(bar["low"], price)
+            bar["close"] = price
+
+        history = self.frames.get(symbol)
+        forming = pd.DataFrame([{
+            "ts": bar["start"], "open": bar["open"], "high": bar["high"],
+            "low": bar["low"], "close": bar["close"], "volume": bar["volume"],
+        }])
+        return forming if history is None or history.empty else pd.concat([history, forming], ignore_index=True)
 
     def _price_with_meta(
         self, symbol: str, now: datetime | None = None
@@ -600,7 +726,28 @@ class DeploymentLoop:
         # Entries are placed after the whole universe has been looked at, best first, so
         # a full book is filled by the strongest candidates rather than the first ones
         # the loop happened to reach. Exits above have already freed their slots.
-        candidates.sort(key=lambda c: c[3].detail.get("gap_pct", 0.0))
+        #
+        # `rank_formula` (see `EntryRules`) is what turns "these symbols passed
+        # the entry rule" into "buy the strongest N in the universe" — a
+        # cross-symbol strategy, built from the same per-symbol formula engine
+        # rather than a new unsafe grammar: every candidate already qualified
+        # on its own, this only decides the fill order. Without it, the
+        # original ordering (a gap-down strategy's own gap size) is preserved.
+        if entry_rules.rank_formula:
+            from atr.signals.formula import FormulaError, build_context, compile_formula
+
+            try:
+                ranker = compile_formula(entry_rules.rank_formula)
+
+                def _score(c: Any) -> float:
+                    ctx = build_context(c[2])
+                    return -ranker.eval_value(ctx) if ctx else float("inf")  # unrankable sorts last
+
+                candidates.sort(key=_score)
+            except FormulaError:
+                candidates.sort(key=lambda c: c[3].detail.get("gap_pct", 0.0))
+        else:
+            candidates.sort(key=lambda c: c[3].detail.get("gap_pct", 0.0))
         for symbol, price, frame, chosen, key in candidates:
             if self._open_position_count() >= self.config.max_open_positions:
                 break
@@ -653,12 +800,21 @@ class DeploymentLoop:
         return seen[1], seen[2]
 
     def _bar_key(self, symbol: str) -> str:
-        """A key that changes once per session, so a rule fires once a day.
+        """A key that changes once per bar, so a rule fires once per bar.
 
         The daily rules are daily: a breakout that is true at 10:00 is still true
-        at 14:00, and acting on it twice is acting on one signal twice.
+        at 14:00, and acting on it twice is acting on one signal twice. In
+        intraday mode a "bar" is `timeframe_minutes` wide instead of a whole
+        session — a rule true throughout one 5-minute bar must not fire five
+        times on five ticks, but a *fresh* setup on the next bar is a new
+        signal, not the same one re-detected.
         """
-        return f"{symbol}:{datetime.now(IST).date().isoformat()}"
+        n = self.timeframe_minutes
+        if n is None:
+            return f"{symbol}:{datetime.now(IST).date().isoformat()}"
+        bar = self.intraday_bar.get(symbol)
+        start = bar["start"] if bar is not None else datetime.now(IST)
+        return f"{symbol}:{start.isoformat()}"
 
     def _size(
         self,
@@ -718,10 +874,14 @@ class DeploymentLoop:
                 atr_val = None
 
         current_stock_exposure = 0.0
+        multiplier = 1.0
         if symbol:
             pos = portfolio.position(symbol)
+            instrument = getattr(pos, "instrument", None) if pos else None
+            if instrument is not None and getattr(instrument, "multiplier", None):
+                multiplier = float(instrument.multiplier)
             if pos and not pos.is_flat:
-                current_stock_exposure = abs(float(pos.quantity) * price)
+                current_stock_exposure = abs(float(pos.quantity) * price * multiplier)
 
         result = PositionSizingEngine.calculate(
             sizing_cfg,
@@ -730,6 +890,7 @@ class DeploymentLoop:
             available_capital=available_capital,
             stop_loss_pct=stop_loss_pct,
             atr=atr_val,
+            multiplier=multiplier,
             current_stock_exposure=current_stock_exposure,
             current_portfolio_exposure=float(portfolio.gross_exposure),
         )
@@ -1346,9 +1507,10 @@ class PaperRunner:
             for deployment_id, row in wanted.items():
                 if deployment_id in self._loops:
                     # A config change or a restart after a crash must be picked
-                    # up, so the row is refreshed on every sync rather than only
+                    # up, so the row and config are refreshed on every sync rather than only
                     # at first sight.
                     self._loops[deployment_id].row = row
+                    self._loops[deployment_id].config = RunnerConfig.from_deployment(row)
                     continue
                 loop = self._make_loop(row)
                 if loop is None:

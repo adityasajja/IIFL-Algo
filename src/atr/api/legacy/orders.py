@@ -10,7 +10,12 @@ from pydantic import BaseModel
 
 
 from atr.api.legacy.common import _append_audit
-from atr.api.legacy.risk import _live_broker, _order_principal, _require_live_execution
+from atr.api.legacy.risk import (
+    _live_broker,
+    _order_principal,
+    _require_live_execution,
+    _require_order_permission,
+)
 
 logger = logging.getLogger("atr.api")
 
@@ -70,6 +75,7 @@ def place_order(request: OrderRequest, http_request: Request) -> dict[str, Any]:
     from atr.services.orders import get_order_service
 
     principal = _order_principal(http_request)
+    _require_order_permission(principal)
     _require_live_execution("Manual order")
 
     broker = _live_broker()

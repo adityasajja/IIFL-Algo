@@ -316,3 +316,33 @@ def test_three_strategies_pipeline_and_conflict_handling(test_db: AppDatabase) -
     assert "stocks" in cc["concentrations"]
     assert "sectors" in cc["concentrations"]
     assert "strategies" in cc["concentrations"]
+
+
+def test_realized_today_buckets_by_ist_not_utc(test_db: AppDatabase) -> None:
+    """A close at 00:30 IST belongs to the IST day, not the UTC day."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from atr.appdb.repositories import TradeJournalRepository
+
+    IST = ZoneInfo("Asia/Kolkata")
+    user_id = _create_user(test_db, "today_user")
+    # 2026-09-27 00:30 IST == 2026-09-26 19:00 UTC (naive-UTC stamp).
+    exit_ts = datetime(2026, 9, 26, 19, 0)
+    with test_db.session() as session:
+        trade = TradeJournalRepository.open_trade(
+            session, user_id=user_id, symbol="RELIANCE", side="BUY",
+            quantity=10, entry_price=2500.0,
+        )
+        TradeJournalRepository.close_trade(
+            session, trade["trade_id"], user_id,
+            exit_price=2510.0, gross_pnl=100.0, net_pnl=95.0, exit_ts=exit_ts,
+        )
+
+    service = PortfolioService(db=test_db)
+    morning_ist = datetime(2026, 9, 27, 8, 0, tzinfo=IST)
+    assert service.realized_today(user_id, now=morning_ist) == pytest.approx(95.0)
+    # And the evening before (Sep 26 IST) must not claim a trade that
+    # closes after midnight — the naive UTC stamp says Sep 26.
+    night_before = datetime(2026, 9, 26, 22, 0, tzinfo=IST)
+    assert service.realized_today(user_id, now=night_before) == pytest.approx(0.0)

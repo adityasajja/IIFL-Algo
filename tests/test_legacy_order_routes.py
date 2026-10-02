@@ -290,3 +290,42 @@ def test_the_tick_websocket_refuses_a_foreign_origin(client):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/ticks", headers={"origin": "https://evil.example"}):
             pass
+
+
+def test_a_viewer_cannot_place_a_legacy_order(auth_client):
+    """``order:read`` is not ``order:place`` on the legacy surface either.
+
+    The legacy routes authenticated (any account) but never authorised, so a
+    viewer with a valid session could place live orders through ``POST
+    /orders`` while ``POST /api/v1/orders`` correctly 403d.
+    """
+    from fastapi.testclient import TestClient
+
+    from atr.api.main import app
+    from atr.appdb.engine import get_app_db
+    from atr.appdb.repositories import UserRepository
+    from atr.auth.passwords import hash_password
+
+    with get_app_db().session() as session:
+        UserRepository.create(
+            session,
+            email="legacy-viewer@example.com",
+            username="legacy-viewer",
+            password_hash=hash_password("Str0ngPassw0rd"),
+            role="viewer",
+        )
+    viewer = TestClient(app, client=("127.0.0.1", 51234))
+    response = viewer.post(
+        "/api/v1/auth/login",
+        json={"identifier": "legacy-viewer", "password": "Str0ngPassw0rd"},
+    )
+    assert response.status_code == 200, response.text
+    viewer.headers.update({"Authorization": f"Bearer {response.json()['token']}"})
+
+    denied = viewer.post("/orders", json=BODY)
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+    denied = viewer.post("/trade-signals/whatever/execute")
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
