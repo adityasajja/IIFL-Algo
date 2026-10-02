@@ -111,6 +111,19 @@ def _build_parser() -> argparse.ArgumentParser:
     live.add_argument("--topics", default="nseeq/2885", help="comma separated exchange/id")
     live.add_argument("--seconds", type=float, default=10.0)
 
+    gpu = sub.add_parser("gpu", help="GPU status, and a batched SMA-crossover parameter sweep")
+    gpu_sub = gpu.add_subparsers(dest="action", required=True)
+    gpu_sub.add_parser("info", help="show the compute device")
+    sw = gpu_sub.add_parser("sweep", help="screen every fast/slow pair across the whole market")
+    sw.add_argument("--fast", default="5:50:5", help="start:stop:step (inclusive), e.g. 5:50:5")
+    sw.add_argument("--slow", default="20:200:10", help="start:stop:step (inclusive)")
+    sw.add_argument("--days", type=int, default=750, help="bars of history to use")
+    sw.add_argument("--cost-bps", type=float, default=10.0)
+    sw.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    sw.add_argument("--top", type=int, default=10)
+    sw.add_argument("--chunk", type=int, default=16, help="pairs per batch (lower if the GPU runs out of memory)")
+    sw.add_argument("--compare", action="store_true", help="also time the CPU and report the speed-up")
+
     serve = sub.add_parser("serve", help="start the app: FastAPI + built frontend on one port")
     serve.add_argument("--host", help="override API_HOST")
     serve.add_argument("--port", type=int, help="override API_PORT")
@@ -1336,6 +1349,42 @@ def _session_ready() -> None:
         logger.warning("no active IIFL session — log in from the dashboard when it opens")
 
 
+def _span(text: str) -> list[int]:
+    start, stop, step = (int(x) for x in text.split(":"))
+    return list(range(start, stop + 1, step))
+
+
+def _run_gpu(args) -> int:
+    from atr.compute import device_info
+
+    if args.action == "info":
+        for key, value in device_info().items():
+            print(f"{key:>18}: {value}")
+        return 0
+
+    from atr.compute.sweep import close_matrix, sma_cross_sweep
+
+    close, names, _dates = close_matrix(days=args.days)
+    fasts, slows = _span(args.fast), _span(args.slow)
+    print(f"{len(names)} symbols x {close.shape[0]} bars; fast={fasts[0]}..{fasts[-1]} slow={slows[0]}..{slows[-1]}")
+
+    def run(device: str):
+        return sma_cross_sweep(close, fasts, slows, device=device, cost_bps=args.cost_bps, chunk=args.chunk)
+
+    result = run(args.device)
+    print(f"{result.combos} pairs on {result.device} in {result.seconds:.2f}s")
+    if args.compare and result.device != "cpu":
+        run(result.device)  # first run pays CUDA start-up; time the second
+        gpu = run(result.device)
+        cpu = run("cpu")
+        print(f"gpu {gpu.seconds:.2f}s vs cpu {cpu.seconds:.2f}s -> {cpu.seconds / gpu.seconds:.1f}x")
+    print(f"{'fast':>5} {'slow':>5} {'sharpe':>7} {'return':>8} {'maxDD':>7} {'entries':>8}")
+    for r in result.top(args.top):
+        print(f"{r['fast']:>5} {r['slow']:>5} {r['sharpe']:>7.2f} {r['total_return']:>8.1%} {r['max_drawdown']:>7.1%} {r['entries']:>8}")
+    print("Screening pass: next-bar close-to-close, equal weight, flat costs. Confirm candidates with `atr backtest`.")
+    return 0
+
+
 def _run_serve(args) -> int:
     import uvicorn
 
@@ -1615,6 +1664,7 @@ def main(argv: list[str] | None = None) -> int:
         "strategy": _run_strategy,
         "live": _run_live,
         "serve": _run_serve,
+        "gpu": _run_gpu,
         "dev": _run_dev,
     }
     return handlers[args.command](args)
