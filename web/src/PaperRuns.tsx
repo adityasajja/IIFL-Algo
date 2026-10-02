@@ -59,7 +59,7 @@ function RunCard({ d, name, pnl, runner, onManage }: {
             <i
               className={cn(
                 "size-2 rounded-full",
-                d.status === "PAUSED" ? "bg-warning" : runner?.state === "ERROR" ? "bg-loss" : "bg-gain",
+                d.status === "PAUSED" ? "bg-warning" : runner?.state === "ERROR" ? "bg-loss" : !runner ? "bg-muted-foreground/50" : "bg-gain",
               )}
             />
             {statusOf(d, runner)}

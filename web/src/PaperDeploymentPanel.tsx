@@ -1219,7 +1219,9 @@ function MonitorView({
   onStart: (id: string) => void;
   onConfirm: (kind: "pause" | "stop" | "reset", id: string, why: string) => void;
 }) {
-  const [details, setDetails] = useState(true);
+  // Closed by default: the run cards say how each run is doing; the pipeline, timeline and controls are
+  // for when something needs a closer look.
+  const [details, setDetails] = useState(false);
 
   // `overview` (and the "Latest signals" block it unlocks) arrives on a poll
   // well after the page's first paint. Lenis measures scrollable height once
@@ -1253,14 +1255,6 @@ function MonitorView({
 
   return (
     <div className="space-y-4">
-      {/* 1. The prominent Forward Evidence Counter */}
-      <ForwardEvidenceCounterCard
-        counts={evidenceCounts}
-        strategyNames={strategyNames}
-        selectedStrategyId={status?.strategy_id}
-        selectedVersion={status?.strategy_version}
-      />
-
       <PaperRuns
         deployments={deployments}
         onManage={(id) => {
@@ -1268,15 +1262,29 @@ function MonitorView({
           setDetails(true);
         }}
       />
+      {evidenceCounts && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Track record</span>
+          <span>{evidenceCounts.by_class?.PAPER_FORWARD?.total ?? 0} paper trades</span>
+          <span>{evidenceCounts.last_7d_genuine_forward ?? 0} in the last 7 days</span>
+          <span>{evidenceCounts.by_class?.IN_SAMPLE?.total ?? 0} backtest trades</span>
+        </div>
+      )}
       <Button
         size="inline"
         variant="link"
         className="text-muted-foreground hover:text-foreground hover:no-underline text-sm"
         onClick={() => setDetails((v) => !v)}
       >
-        {details ? "Hide details and controls" : "Details and controls"}
+        {details ? "Hide controls and details" : "Pause, stop and see the full timeline"}
       </Button>
       {details && (<>
+      <ForwardEvidenceCounterCard
+        counts={evidenceCounts}
+        strategyNames={strategyNames}
+        selectedStrategyId={status?.strategy_id}
+        selectedVersion={status?.strategy_version}
+      />
       {/* the picker + the four controls */}
       <Card>
         <div className="flex flex-wrap items-end justify-between gap-3 p-5">
@@ -1609,7 +1617,7 @@ function MonitorView({
             ) : (
                   <div
                     data-lenis-prevent
-                    className="min-h-[220px] flex-1 space-y-1.5 overflow-y-auto pr-1"
+                    className="max-h-[420px] min-h-[220px] flex-1 space-y-1.5 overflow-y-auto pr-1"
                   >
                 {[...overview.timeline]
                   .reverse()
