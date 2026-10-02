@@ -71,7 +71,7 @@ export default function LoginBanner({ status, onLoggedIn, onClose }: Props) {
         <div className="text-center">
           <BrandMark className="mx-auto mb-4 size-11" />
           <h2 className="text-lg font-semibold tracking-tight">Log in to IIFL</h2>
-          <p className="mt-1.5 text-body text-muted-foreground">Prices and history only. This app sends no orders.</p>
+          <p className="mt-1.5 text-body text-muted-foreground">Your session has expired.</p>
           <div className="mt-5 grid gap-2.5">
             <Button
               size="lg"

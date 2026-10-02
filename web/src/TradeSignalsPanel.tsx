@@ -1,17 +1,20 @@
 /**
- * TradeSignalsPanel — trade ideas. Informational: each idea carries a plan (entry, stop, target,
- * size, reward for the risk) and the evidence behind it. Nothing here places an order.
+ * TradeSignalsPanel — Semi-automatic trading command centre.
  *
  * Layout:
- * Settings bar (capital, risk %, stop method: they size the plan)
+ * Settings bar (capital, risk %, stop method)
  * ─────────────────────────────────────────────
- * Ideas (cards: the plan, with Dismiss)
+ * Pending signals (big cards — Execute / Skip)
  * ─────────────────────────────────────────────
- * History (earlier ideas, collapsed)
+ * Active positions (signals that are in-flight)
+ * ─────────────────────────────────────────────
+ * History (done / skipped, collapsed)
  */
 import {
+  AlertTriangle,
   BookOpen,
   BrainCircuit,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -20,6 +23,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
+  executeTradeSignal,
   getSelfLearningStatus,
   getTradeSignalSettings,
   getTradeSignals,
@@ -115,17 +119,32 @@ function PlanBar({ sig }: { sig: TradeSignal }) {
 
 function PendingRow({
   sig,
+  onExecute,
   onSkip,
   onOpenChart,
 }: {
   sig: TradeSignal;
+  onExecute: (id: string) => Promise<void>;
   onSkip: (id: string) => Promise<void>;
   onOpenChart?: (symbol: string) => void;
 }) {
+  const [executing, setExecuting] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const isBuy = sig.action === "BUY";
+
+  const handleExecute = async () => {
+    setExecuting(true);
+    setErr(null);
+    try {
+      await onExecute(sig.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExecuting(false);
+    }
+  };
 
   const handleSkip = async () => {
     setSkipping(true);
@@ -174,10 +193,28 @@ function PendingRow({
         </div>
 
         <div className="flex items-center gap-2">
-          <Button size="xs" variant="quiet" onClick={() => void handleSkip()} disabled={skipping}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void handleSkip()}
+            disabled={executing || skipping}
+            className="text-muted-foreground"
+          >
+
             {skipping ? <ButtonLoader /> : null}
-            Dismiss
+            Skip
           </Button>
+          <Tooltip content="Places the entry, stop-loss and target orders together" side="top" delay={400}>
+          <Button
+            size="sm"
+            onClick={() => void handleExecute()}
+            disabled={executing || skipping}
+            className={cn("gap-1.5 text-white", isBuy ? "bg-gain hover:bg-gain/90" : "bg-destructive hover:bg-destructive/90")}
+          >
+            {executing ? <ButtonLoader size={14} /> : <Check className="h-3.5 w-3.5" />}
+            {executing ? "Placing…" : isBuy ? "Buy" : "Sell"}
+          </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -245,6 +282,36 @@ function PendingRow({
       )}
 
       {err && <div className="mt-3"><ErrorBox>{err}</ErrorBox></div>}
+    </div>
+  );
+}
+
+// ─── Active signal row ────────────────────────────────────────────────────────
+
+function ActiveRow({ sig }: { sig: TradeSignal }) {
+  const isBuy = sig.action === "BUY";
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-muted/10 px-4 py-3">
+      <span className={cn(
+        "h-2 w-2 rounded-full",
+        isBuy ? "bg-gain" : "bg-destructive",
+      )} />
+      <span className="font-semibold">{sig.symbol.replace("-EQ", "")}</span>
+      <span className={cn(
+          "rounded-full border px-2 py-0.5 text-micro font-semibold tabular-nums",
+          isBuy
+            ? "border-gain/20 bg-gain/[0.08] text-gain"
+            : "border-destructive/20 bg-destructive/[0.08] text-destructive",
+      )}>
+        {sig.action}
+      </span>
+      <span className="text-xs text-muted-foreground">{sig.setup}</span>
+      <span className="ml-auto flex items-center gap-4 text-xs tabular-nums">
+        <span>Entry <strong>₹{fmt(sig.entry_price)}</strong></span>
+        <span className="text-destructive">SL ₹{fmt(sig.stop_loss)}</span>
+        <span className="text-gain">Target ₹{fmt(sig.target)}</span>
+        <span className="text-muted-foreground">{sig.quantity} shares</span>
+      </span>
     </div>
   );
 }
@@ -437,6 +504,11 @@ export default function TradeSignalsPanel({
     }
   };
 
+  const handleExecute = async (id: string) => {
+    await executeTradeSignal(id);
+    await refresh();
+  };
+
   const handleSkip = async (id: string) => {
     await skipTradeSignal(id);
     await refresh();
@@ -462,6 +534,7 @@ export default function TradeSignalsPanel({
   const sellCount = pending.length - buyCount;
   const filteredPending = sideFilter === "ALL" ? pending : pending.filter((s) => s.action === sideFilter);
   const visiblePending = showAllPending ? filteredPending : filteredPending.slice(0, 8);
+  const active = signals.filter((s) => s.status === "ACTIVE");
   const history = signals.filter((s) => s.status === "DONE" || s.status === "SKIPPED");
 
   const maxRisk = settings ? ((settings.capital * settings.risk_per_trade_pct) / 100) : 0;
@@ -556,7 +629,7 @@ export default function TradeSignalsPanel({
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">Ideas</span>
+            <span className="text-sm font-semibold">Waiting for you</span>
             {pending.length > 0 && (
               <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-caption font-semibold text-primary-foreground">
                 {pending.length}
@@ -586,6 +659,7 @@ export default function TradeSignalsPanel({
                 <PendingRow
                   key={s.id}
                   sig={s}
+                  onExecute={handleExecute}
                   onSkip={handleSkip}
                   onOpenChart={onOpenChart}
                 />
@@ -604,6 +678,25 @@ export default function TradeSignalsPanel({
           </>
         )}
       </div>
+
+      {/* ── Active trades ───────────────────────────────────────────────── */}
+      {active.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">Active trades</span>
+            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gain px-1.5 text-caption font-semibold text-white">
+              {active.length}
+            </span>
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+            <span className="text-xs text-muted-foreground">
+              Stop-loss and target orders are live in IIFL
+            </span>
+          </div>
+          <div className="space-y-2">
+            {active.map((s) => <ActiveRow key={s.id} sig={s} />)}
+          </div>
+        </div>
+      )}
 
       {/* ── History ─────────────────────────────────────────────────────── */}
       {history.length > 0 && (

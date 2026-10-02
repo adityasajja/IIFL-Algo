@@ -2,9 +2,9 @@
  * The app's map: what the pages are, how they group, and how an old link finds its new home.
  * Pure data and functions so the routing can be tested without rendering anything.
  *
- * The product is paper trading and information only. It never places a real order. The story:
+ * The product tells one story, "prove a strategy, then trade it":
  *
- *   Home -> Strategies (build) -> Test (prove it) -> Paper (run it, practice money) -> Performance
+ *   Home -> Strategies (build) -> Test (prove it) -> Paper (run it, no money) -> Live -> Performance
  *
  * Markets, Signals and Watchlist are the world around that path. Labs holds the experimental
  * tools that are not part of the tested workflow.
@@ -15,6 +15,7 @@ export type Tab =
   | "strategies"
   | "evidence"
   | "paper"
+  | "trading"
   | "learning"
   | "markets"
   | "signals"
@@ -24,18 +25,19 @@ export type Tab =
 export type NavGroup = { label: string | null; tabs: Tab[] };
 
 export const NAV_GROUPS: NavGroup[] = [
-  { label: "Prove it on paper", tabs: ["dashboard", "strategies", "evidence", "paper", "learning"] },
+  { label: "Prove, then trade", tabs: ["dashboard", "strategies", "evidence", "paper", "trading", "learning"] },
   { label: "Market", tabs: ["markets", "signals", "watchlist"] },
   { label: "Experimental", tabs: ["labs"] },
 ];
 
 /** `name` is the sidebar label; `title` the page heading; `blurb` one plain sentence under it. */
 export const PAGES: Record<Tab, { name: string; title: string; blurb: string }> = {
-  dashboard: { name: "Home", title: "Home", blurb: "What your strategies have actually done on paper, and what to do next." },
+  dashboard: { name: "Home", title: "Home", blurb: "Where you are on the path from idea to live trading, and what needs you." },
   strategies: { name: "Strategies", title: "Strategies", blurb: "Step 1. Build or pick a strategy: the rules for when to buy and sell." },
-  evidence: { name: "Test", title: "Test", blurb: "Step 2. Does it hold up on prices it has never seen?" },
-  paper: { name: "Paper", title: "Paper trading", blurb: "Step 3. Run it on live prices with practice money. No real order is ever sent." },
-  learning: { name: "Performance", title: "Performance", blurb: "Step 4. What actually happened, what it cost, and where the results came from." },
+  evidence: { name: "Test", title: "Test", blurb: "Step 2. Does it hold up on prices it has never seen? Only strategies that pass go on to paper trading." },
+  paper: { name: "Paper", title: "Paper trading", blurb: "Step 3. Run it on live prices with practice money for a few weeks before risking any." },
+  trading: { name: "Live", title: "Live trading", blurb: "Step 4. Your broker account, your limits and the kill switch." },
+  learning: { name: "Performance", title: "Performance", blurb: "Step 5. What actually happened, what it cost, and where the results came from." },
   markets: { name: "Markets", title: "Markets", blurb: "What the market is doing: mood, sectors, leaders, scans and charts." },
   signals: { name: "Signals", title: "Signals", blurb: "What your strategies are telling you to do right now." },
   watchlist: { name: "Watchlist", title: "Watchlist", blurb: "The stocks you follow, with live prices." },
@@ -54,7 +56,7 @@ export const SUBS: Partial<Record<Tab, SubPage[]>> = {
   ],
   signals: [
     { id: "today", label: "Today" },
-    { id: "queue", label: "Trade ideas" },
+    { id: "queue", label: "Trade queue" },
     { id: "alerts", label: "Alerts" },
     { id: "brief", label: "Morning brief" },
     { id: "context", label: "Signal quality" },
@@ -65,9 +67,9 @@ export const SUBS: Partial<Record<Tab, SubPage[]>> = {
     { id: "measured", label: "Results" },
     { id: "improve", label: "Improve" },
   ],
-  paper: [
-    { id: "runs", label: "Runs" },
-    { id: "risk", label: "Risk & limits" },
+  trading: [
+    { id: "portfolio", label: "Broker account" },
+    { id: "control-center", label: "Risk & limits" },
   ],
   learning: [
     { id: "review", label: "Trade review" },
@@ -101,10 +103,8 @@ const LEGACY: Record<string, { tab: Tab; sub?: string }> = {
   charts: { tab: "markets", sub: "charts" },
   alerts: { tab: "signals", sub: "alerts" },
   briefing: { tab: "signals", sub: "brief" },
-  // Live trading is not part of the product. Its old links land on the paper pages that remain.
-  trading: { tab: "paper", sub: "runs" },
-  portfolio: { tab: "paper", sub: "runs" },
-  risk: { tab: "paper", sub: "risk" },
+  portfolio: { tab: "trading", sub: "portfolio" },
+  risk: { tab: "trading", sub: "control-center" },
   research: { tab: "evidence", sub: "research" },
   backtest: { tab: "evidence", sub: "backtest" },
   optimization: { tab: "evidence", sub: "improve" },
@@ -117,8 +117,6 @@ const LEGACY: Record<string, { tab: Tab; sub?: string }> = {
 /** A sub-page that moved to another tab: `tab/sub` -> its new home. */
 const MOVED_SUBS: Record<string, { tab: Tab; sub: string }> = {
   "markets/custom": { tab: "labs", sub: "custom-scan" },
-  "trading/control-center": { tab: "paper", sub: "risk" },
-  "trading/portfolio": { tab: "paper", sub: "runs" },
 };
 
 /**

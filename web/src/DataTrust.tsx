@@ -1,4 +1,4 @@
-import { ArrowRight, Ban, Database, FlaskConical, Globe, LineChart, Plug, Scale, ShieldCheck } from "lucide-react";
+import { ArrowRight, Database, FlaskConical, Globe, Hand, LineChart, Plug, Scale, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import type { DataSource, DataStatus } from "./api";
 import { Tooltip } from "./components/motion/tooltip";
@@ -72,7 +72,7 @@ export function DataTrust({
       <ul className="grid gap-2 sm:grid-cols-3">
         <Limit icon={<FlaskConical className="size-4" />} short="Practice money" long="Paper results use simulated fills. They show how the rules behaved on past prices, not what a real order would have got." />
         <Limit icon={<Scale className="size-4" />} short="Not advice" long="This is a tool, not investment advice. Past results do not predict future results." />
-        <Limit icon={<Ban className="size-4" />} short="No real orders" long="This app only paper trades and shows information. It never sends an order to a broker. Anything you do in a real account is your own decision and responsibility." />
+        <Limit icon={<Hand className="size-4" />} short="You place live orders" long="Nothing trades live unless you connect a broker and switch it on. Any live order is your decision and your responsibility." />
       </ul>
     </Card>
   );

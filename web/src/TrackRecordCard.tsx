@@ -66,7 +66,7 @@ export function TrackRecordCard({
           <Chipish tone="warn" icon={<FlaskConical className="size-3" />} tip="Paper trading: fills are simulated, no real order was sent.">
             Simulated
           </Chipish>
-          {data?.provenance.demo ? (
+          {data?.provenance?.demo ? (
             <Chipish tone="warn" icon={<TriangleAlert className="size-3" />} tip="Synthetic data from the demo seeder. Nothing here is a real result.">
               Demo data
             </Chipish>

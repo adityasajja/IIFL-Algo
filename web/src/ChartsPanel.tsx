@@ -31,13 +31,14 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
-import { API_URL, getCandles, getTickCandles, type Candle } from "./api";
+import { API_URL, getCandles, getTickCandles, placeOrder, type Candle } from "./api";
 import { Tooltip } from "./components/motion/tooltip";
 import { Button } from "./components/ui/button";
 import { Chip } from "./components/ui/chip";
 import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { Select } from "./components/ui/select";
 import { useLiveTicks } from "./lib/useLiveTicks";
+import { useToast } from "./components/ui/toast-context";
 import { cn } from "./lib/utils";
 import { DrawingCanvas, type DrawingTool } from "./components/chart/DrawingCanvas";
 import { evaluatePineScript, parsePineInputs, PINE_PRESETS, type PineSeriesResult } from "./lib/pineScript";
@@ -147,6 +148,7 @@ function rsi(values: number[], window = 14): number[] {
 }
 
 export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "light" }) {
+  const { toast } = useToast();
   const [symbol, setSymbol] = useState("RELIANCE-EQ");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -937,6 +939,30 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
     };
   }, [candles, model, theme, showRibbon, showEMA200, showBB, showRSI, showVolume, timeframe, pineScript, pineInputs, pineStyles]);
 
+  // Quick Order Action
+  const handleQuickOrder = async (isBuy: boolean) => {
+    const lastPrice = hoverData?.close ?? candles[candles.length - 1]?.close ?? 0;
+    try {
+      await placeOrder({
+        symbol,
+        exchange: "NSEEQ",
+        quantity: isBuy ? 1 : -1,
+        order_type: "MARKET",
+        price: lastPrice,
+      });
+      toast({
+        title: `${isBuy ? "BUY" : "SELL"} Order Executed`,
+        description: `1 unit of ${symbol} @ ₹${lastPrice}`,
+        status: "success",
+      });
+    } catch (e) {
+      toast({
+        title: "Order Failed",
+        description: e instanceof Error ? e.message : String(e),
+        status: "error",
+      });
+    }
+  };
 
   const currentPrice = hoverData?.close ?? candles[candles.length - 1]?.close ?? 0;
   const currentChg = hoverData?.change ?? 0;
@@ -1003,6 +1029,30 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="h-4 w-px bg-border" />
+
+          {/* Quick Buy / Sell Execution Pills (Like TV Pro) */}
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="xs"
+              variant="outline"
+              className="border-loss/40 text-loss hover:border-loss hover:bg-loss/10"
+              onClick={() => void handleQuickOrder(false)}
+            >
+              <span>Sell</span>
+              <span className="tabular-nums font-mono">{currentPrice.toFixed(2)}</span>
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              className="border-gain/40 text-gain hover:border-gain hover:bg-gain/10"
+              onClick={() => void handleQuickOrder(true)}
+            >
+              <span>Buy</span>
+              <span className="tabular-nums font-mono">{currentPrice.toFixed(2)}</span>
+            </Button>
           </div>
 
           <div className="h-4 w-px bg-border" />
@@ -1705,6 +1755,26 @@ export default function ChartsPanel({ theme = "dark" }: { theme?: "dark" | "ligh
                 <span>Timeframe: </span>
                 <span className="text-white font-mono">{timeframe.toUpperCase()}</span>
               </div>
+            </div>
+
+            {/* Direct Order Actions */}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void handleQuickOrder(true)}
+                className="border-gain/40 text-gain hover:border-gain hover:bg-gain/10"
+              >
+                Buy
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void handleQuickOrder(false)}
+                className="border-loss/40 text-loss hover:border-loss hover:bg-loss/10"
+              >
+                Sell
+              </Button>
             </div>
           </div>
         </div>

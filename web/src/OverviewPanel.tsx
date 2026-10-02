@@ -3,7 +3,9 @@ import { RefreshCw } from "lucide-react";
 import { IconChevR } from "./icons";
 import { useCallback, useEffect, useState } from "react";
 import {
+  getDashboardSummary,
   getHealth,
+  getPositions,
   getRunnerStatus,
   getTradeSignals,
   listDeployments,
@@ -12,9 +14,11 @@ import {
   getResearchedStocks,
   createDeployment,
   startDeployment,
+  type DashboardSummary,
   type DataStatus,
   type Deployment,
   type Health,
+  type Position,
   type RunnerStatus,
   type SavedStrategy,
   type TradeSignalsResponse,
@@ -23,6 +27,7 @@ import { Button } from "./components/ui/button";
 import { Tooltip } from "./components/motion/tooltip";
 import { Card, Hint } from "./components/ui/card";
 import { AnimatedBadge } from "./components/motion/animated-badge";
+import { TiltCard } from "./components/motion/tilt-card";
 import { useLiveTicks } from "./lib/useLiveTicks";
 import { DataTrust } from "./DataTrust";
 import { JourneyCard } from "./JourneyCard";
@@ -32,7 +37,7 @@ import { journeySteps, nextStep } from "./lib/journey";
 import type { Tab } from "./lib/nav";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
-import { formatInr as inrFmt } from "./lib/theme";
+import { formatInr as inrFmt, TYPOGRAPHY } from "./lib/theme";
 
 interface Props {
   onNavigate: (tab: Tab, sub?: string) => void;
@@ -47,6 +52,8 @@ type StatusType = "HEALTHY" | "WARNING" | "STALE" | "ERROR" | "NOT_ACTIVE";
 export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [positions, setPositions] = useState<Position[] | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [signals, setSignals] = useState<TradeSignalsResponse | null>(null);
   const [strategies, setStrategies] = useState<SavedStrategy[]>([]);
@@ -70,6 +77,8 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
       await Promise.all([
         apply(getHealth(), setHealth),
         apply(getRunnerStatus(), setRunner),
+        apply(getDashboardSummary(), setSummary),
+        apply(getPositions(), setPositions),
         apply(listDeployments(), (v) => setDeployments(v?.deployments ?? [])),
         apply(getTradeSignals(), setSignals),
         apply(listSavedStrategies(), (v) => setStrategies(v?.strategies ?? [])),
@@ -122,6 +131,19 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
     return () => clearInterval(interval);
   }, [loadData]);
 
+  // Derived Values
+  const openPosCount = summary?.positions?.count ?? positions?.length ?? 0;
+  // `total_day_pnl` folds in whatever was already realized by closing a
+  // position earlier today — `day_pnl` alone only prices what is *still*
+  // open, so a trade opened and closed for a profit today used to vanish
+  // from "Today" the moment it was flattened.
+  const dayPnl = summary?.positions?.total_day_pnl ?? summary?.positions?.day_pnl ?? null;
+  // The backend's percentage is unrealized-P&L-over-invested-capital, which
+  // is meaningless once nothing is left open (it reads 0.00% next to a real
+  // non-zero rupee figure) — so it only makes sense to show alongside an
+  // actual open book.
+  const dayPnlPct = openPosCount > 0 ? (summary?.positions?.day_pnl_pct ?? null) : null;
+
   // Market hours determination
   const isMarketHours = runner?.in_market_hours ?? true;
   // A healthy socket only means our backend and the broker bridge are up. When
@@ -155,7 +177,7 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
   // The four things that decide whether the app can do its job, as lights.
   const lights: { key: string; label: string; status: StatusType; word: string }[] = [
     { key: "market", label: "Market", status: isMarketHours ? "HEALTHY" : "NOT_ACTIVE", word: isMarketHours ? "Open" : "Closed" },
-    { key: "broker", label: "Price feed", status: health ? brokerStatus : "NOT_ACTIVE", word: !health ? "Checking…" : health.session_active ? "On" : "Off" },
+    { key: "broker", label: "Broker", status: health ? brokerStatus : "NOT_ACTIVE", word: !health ? "Checking…" : health.session_active ? "Connected" : "Offline" },
     { key: "prices", label: "Live prices", status: feedStatus, word: !isMarketHours ? "Market closed" : feedStatus === "HEALTHY" ? "Streaming" : feedStatus === "WARNING" ? "Waiting" : "Off" },
     { key: "auto", label: "Strategies", status: auto.status, word: auto.word },
   ];
@@ -173,9 +195,12 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
     strategies: strategies.length,
     deployable: strategies.filter((x) => x.deployable).length,
     paperRuns: deployments.length,
+    executionMode: health ? (health.execution_mode === "live" ? "live" : "paper") : null,
+    brokerConnected: !!health?.session_active,
   });
   const next = nextStep(steps);
 
+  const pnlTone = dayPnl === null ? "text-muted-foreground" : dayPnl > 0 ? "text-gain" : dayPnl < 0 ? "text-loss" : "text-foreground";
 
   const toneOfStatus: Record<StatusType, Tone> = { HEALTHY: "good", WARNING: "warn", ERROR: "bad", STALE: "warn", NOT_ACTIVE: "flat" };
 
@@ -216,6 +241,34 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
       </Card>
 
       <DataTrust status={dataStatus ?? null} brokerConnected={!!health?.session_active} error={dataError} />
+
+      {/* Today, full width: the one answer the dashboard leads with. */}
+      <TiltCard
+          onClick={() => onNavigate("trading")}
+        className="cursor-pointer rounded-xl border border-border bg-white p-6 text-left shadow-[rgba(0,55,112,0.08)_0_1px_3px] transition-colors hover:border-primary/40 sm:p-7 dark:bg-card"
+        >
+        <div className="flex h-full flex-col justify-between gap-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className={TYPOGRAPHY.eyebrow}>Today</div>
+            <span className="flex items-center gap-0.5 text-xs font-medium text-primary dark:text-primary-subdued">Open trading <IconChevR size={12} /></span>
+          </div>
+          <div>
+            <div className={cn(TYPOGRAPHY.metricHero, pnlTone)}>
+            {dayPnl === null ? "—" : `${dayPnl > 0 ? "+" : ""}${inrFmt(dayPnl)}`}
+          </div>
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border/60 pt-4">
+              <div>
+              <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Day P&amp;L</div>
+              <div className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{dayPnlPct !== null ? `${dayPnlPct > 0 ? "+" : ""}${dayPnlPct.toFixed(2)}%` : "—"}</div>
+          </div>
+              <div>
+              <div className="text-caption font-normal uppercase tracking-[0.08em] text-muted-foreground">Open trades</div>
+              <div className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{openPosCount}</div>
+            </div>
+          </div>
+            </div>
+          </div>
+      </TiltCard>
 
       {/* Only when something needs a person. */}
       {todo.length > 0 ? (
@@ -309,8 +362,9 @@ export default function OverviewPanel({ onNavigate, dataStatus, dataError }: Pro
         </Card>
       </div>
 
-      <div className="grid gap-5">
+      <div className="grid gap-5 xl:grid-cols-2">
         <PnlCalendar scope="paper" title="Paper trades, all strategies" note="Some paper results are sized at ₹1,00,000 a trade." />
+        <PnlCalendar scope="real" title="My portfolio" note="Daily change in what you hold." />
       </div>
 
     </div>

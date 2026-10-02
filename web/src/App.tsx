@@ -18,6 +18,7 @@ import {
   type LucideIcon,
   Info,
   Bell,
+  Briefcase,
   ChartPie,
   Eye,
   FlaskConical,
@@ -50,6 +51,8 @@ import { CommandPalette, type CommandItem } from "./components/ui/command-palett
 import { EnvironmentBanner } from "./components/ui/environment-banner";
 import { ThemeToggle } from "./components/ui/theme-toggle";
 import LoginBanner from "./LoginBanner";
+import { ModeDetails, ModePill, useExecutionMode } from "./ModeSwitch";
+const PortfolioPanel = lazy(() => import("./PortfolioPanel"));
 const PortfolioControlCenter = lazy(() => import("./PortfolioControlCenter"));
 const BriefingPanel = lazy(() => import("./BriefingPanel"));
 const TodayPanel = lazy(() => import("./TodayPanel"));
@@ -95,6 +98,7 @@ const PALETTE_KEYWORDS: Record<Tab, string[]> = {
   strategies: ["build", "registry", "rules", "models", "create"],
   evidence: ["test", "backtest", "validate", "stress test", "out of sample", "deflated sharpe", "results", "walk-forward"],
   paper: ["deploy", "deployment", "paper trading", "simulate", "practice", "monitor", "pause", "stop", "reset", "capital"],
+  trading: ["live", "broker", "portfolio", "holdings", "positions", "order book", "trade book"],
   learning: ["performance", "review", "attribution", "learning", "trade history", "results"],
   markets: ["scanner", "momentum", "charts", "scan", "screener", "sectors"],
   signals: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning", "queue"],
@@ -107,6 +111,7 @@ const TAB_ICON: Record<Tab, LucideIcon> = {
   strategies: Layers,
   evidence: FlaskConical,
   paper: Radio,
+  trading: Briefcase,
   learning: ChartPie,
   markets: TrendingUp,
   signals: Bell,
@@ -189,21 +194,18 @@ function SignalsTabContainer({
   );
 }
 
-// ─── Paper: strategies running on practice money, and the limits that govern them ──
-function PaperTabContainer({
-  sub,
-  onSubChange,
-  onOpenStrategies,
-}: {
-  sub: string;
-  onSubChange: (s: string) => void;
-  onOpenStrategies: () => void;
-}) {
+// ─── Live: your broker account, your limits, the kill switch ──────────────────
+function TradingTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (s: string) => void }) {
+  const ex = useExecutionMode();
   return (
     <div className="space-y-4">
-      <SubTabs tab="paper" value={sub} onChange={onSubChange} />
-      {sub === "runs" && <PaperDeploymentPanel onOpenStrategies={onOpenStrategies} />}
-      {sub === "risk" && <PortfolioControlCenter />}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SubTabs tab="trading" value={sub} onChange={onSubChange} />
+        <ModePill ex={ex} />
+      </div>
+      <ModeDetails ex={ex} />
+      {sub === "control-center" && <PortfolioControlCenter />}
+      {sub === "portfolio" && <PortfolioPanel />}
     </div>
   );
 }
@@ -279,7 +281,7 @@ function LiveClock() {
   );
 }
 
-const PATH_STEPS: Tab[] = ["strategies", "evidence", "paper", "learning"];
+const PATH_STEPS: Tab[] = ["strategies", "evidence", "paper", "trading", "learning"];
 
 /** Where this page sits on the path, as five dots: shown on the path pages only. */
 function StepDots({ tab }: { tab: Tab }) {
@@ -398,7 +400,7 @@ export default function App() {
       await logoutSession();
     } catch {
       // Same reasoning as signOut above: refresh health regardless so the UI
-      // never keeps claiming the feed is on after the user asked to disconnect.
+      // never keeps claiming "Broker connected" after the user asked to disconnect.
     }
     void refreshHealth();
   }, [refreshHealth]);
@@ -501,7 +503,7 @@ export default function App() {
           onSelect: () => setTab(id),
         };
       }),
-      { id: "go-risk", label: "Go to Risk & limits (paper kill switch)", group: "Navigate", icon: ShieldAlert, keywords: ["kill switch", "limits", "exposure", "halt", "stop", "risk", "policy", "control center"], onSelect: () => setTab("paper", "risk") },
+      { id: "go-risk", label: "Go to Risk & limits (kill switch)", group: "Navigate", icon: ShieldAlert, keywords: ["kill switch", "limits", "exposure", "halt", "stop", "risk", "policy", "control center"], onSelect: () => setTab("trading", "control-center") },
       { id: "go-improve", label: "Go to Improve (optimization)", group: "Navigate", icon: SlidersHorizontal, keywords: ["optimization", "optimisation", "adaptive", "parameters", "walk-forward", "robustness", "recommendation", "experiment"], onSelect: () => setTab("evidence", "improve") },
       { id: "toggle-theme", label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", group: "View", icon: Palette, keywords: ["appearance"], onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
       { id: "login", label: "Log in with IIFL", group: "Session", icon: LogIn, keywords: ["auth", "session", "broker"], onSelect: () => setShowLogin(true) },
@@ -623,17 +625,17 @@ export default function App() {
                 )}
               />
               <span className="truncate text-sm text-muted-foreground">
-                {health?.session_active ? "Price feed on" : "Price feed off"}
+                {health?.session_active ? "Broker connected" : "Broker not connected"}
               </span>
             </span>
             {health?.session_active && (
-              <Tooltip content="Disconnect the price feed" side="right" delay={400}>
+              <Tooltip content="Disconnect broker" side="right" delay={400}>
                 <Button
                   size="icon-sm"
                   variant="plain"
                   className="hover:bg-destructive/10 hover:text-destructive shrink-0 group-data-[state=collapsed]/sidebar:hidden"
                   onClick={() => void disconnectBroker()}
-                  aria-label="Disconnect the price feed"
+                  aria-label="Disconnect broker"
                 >
                   <LogOut aria-hidden="true" />
                 </Button>
@@ -701,20 +703,26 @@ export default function App() {
                 </Tooltip>
               ) : null}
               {health?.execution_mode === "live" ? (
-                // This build never places real orders, but the server reports a mode that can.
-                // Say so loudly instead of showing a calm "paper" badge over a live backend.
-                <Tooltip content="The server is set to live mode. This app only does paper trading and information, and sends no orders." side="bottom" delay={200}>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/[0.08] px-2.5 py-1 text-caption font-semibold text-destructive">
+                <Tooltip content="System is transmitting live orders with real capital to IIFL" side="bottom" delay={400}>
+                  <button
+                    type="button"
+                    onClick={() => setTab("trading")}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/[0.08] px-2.5 py-1 text-caption font-semibold text-destructive animate-pulse"
+                  >
                     <span className="size-1.5 rounded-full bg-loss" />
-                    SERVER IN LIVE MODE
-                  </span>
+                    REAL / LIVE
+                  </button>
                 </Tooltip>
               ) : (
-                <Tooltip content="Paper trading and information only. No real order is ever sent." side="bottom" delay={400}>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-gain/20 bg-gain/[0.08] px-2.5 py-1 text-caption font-semibold text-gain">
+                <Tooltip content="Paper mode active: Signals and orders are simulated locally. No real money or broker orders are placed." side="bottom" delay={400}>
+                  <button
+                    type="button"
+                    onClick={() => setTab("trading")}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gain/20 bg-gain/[0.08] px-2.5 py-1 text-caption font-semibold text-gain"
+                  >
                     <FlaskConical className="size-3" />
-                    PAPER ONLY
-                  </span>
+                    PAPER MODE
+                  </button>
                 </Tooltip>
               )}
 
@@ -771,9 +779,10 @@ export default function App() {
         {tab === "signals" && (
           <SignalsTabContainer sub={sub ?? "today"} onSubChange={(s) => setTab("signals", s)} onOpenChart={openChart} />
         )}
-        {tab === "paper" && (
-          <PaperTabContainer sub={sub ?? "runs"} onSubChange={(s) => setTab("paper", s)} onOpenStrategies={() => setTab("strategies")} />
+        {tab === "trading" && (
+          <TradingTabContainer sub={sub ?? "portfolio"} onSubChange={(s) => setTab("trading", s)} />
         )}
+        {tab === "paper" && <PaperDeploymentPanel onOpenStrategies={() => setTab("strategies")} />}
         {tab === "evidence" && (
           <EvidenceTabContainer sub={sub ?? "backtest"} onSubChange={(s) => setTab("evidence", s)} />
         )}
