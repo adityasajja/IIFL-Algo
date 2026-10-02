@@ -184,8 +184,7 @@ export function LearningPanel() {
 
       {!empty.empty && nothingMeasured(overview) ? (
         <Callout>
-          There are trades, but nothing cleared the sample floor yet. Every figure
-          below is withheld rather than guessed — see the sample sizes.
+          <span title="Every figure below is withheld rather than guessed.">Small sample — figures withheld</span>
         </Callout>
       ) : null}
 
@@ -243,7 +242,7 @@ function ReadinessSection({
       <Card className="p-5">
         <h3 className="text-sm font-semibold tracking-tight">Learning Readiness</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Readiness is unavailable: {error}. The rest of this screen is unaffected.
+          Readiness unavailable: {error}
         </p>
       </Card>
     );
@@ -269,15 +268,14 @@ function ReadinessSection({
     <Card className="p-5">
       <div className="flex items-center gap-2">
         <FlaskConical className="size-4 text-muted-foreground" />
-        <h3 className="text-sm font-semibold tracking-tight">Learning Readiness</h3>
-        <Badge>research only — changes nothing</Badge>
+        <h3
+          className="text-sm font-semibold tracking-tight"
+          title={(readiness.limitations || []).join(" • ") || "Labels only: nothing here changes trading, strategies or risk."}
+        >
+          Learning Readiness
+        </h3>
+        <Badge>Research only</Badge>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Whether each strategy is accumulating enough genuine forward evidence for
-        analysis. States are labels, not actions: nothing here pauses trading,
-        edits a strategy, or touches risk.
-      </p>
-
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
         <div className="text-caption uppercase tracking-wide text-muted-foreground">Strategies tracked</div>
@@ -299,8 +297,7 @@ function ReadinessSection({
 
       {readiness.strategies.length === 0 ? (
         <div className="mt-4 rounded-md border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
-          No forward evidence yet. The first closed paper trade starts the count;
-          10 clears the minimum, 50 opens analysis.
+          <span title="The first closed paper trade starts the count; 10 clears the minimum, 50 opens analysis.">No forward trades yet</span>
         </div>
       ) : (
         <div className="mt-4 overflow-x-auto">
@@ -441,22 +438,14 @@ function ReadinessSection({
               className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/[0.08] px-3 py-2 text-xs text-warning"
             >
               <AlertTriangle className="size-4 shrink-0" />
-              <span>
-                <strong>{q.code}</strong> ×{q.count} ({q.severity}) — {q.explanation}{" "}
-                <span className="font-mono text-caption">{q.sample_refs.join(", ")}</span>
+              <span title={`${q.explanation} ${q.sample_refs.join(", ")}`}>
+                <strong>{q.code}</strong> ×{q.count} ({q.severity})
               </span>
             </div>
           ))}
         </div>
       ) : null}
 
-      {(readiness.limitations || []).length > 0 ? (
-        <div className="mt-3 text-caption text-muted-foreground">
-          {readiness.limitations.map((note, i) => (
-            <p key={i}>• {note}</p>
-          ))}
-        </div>
-      ) : null}
     </Card>
   );
 }
@@ -487,9 +476,6 @@ function Header({
             <FlaskConical className="size-4 text-muted-foreground" />
             <h2 className="text-base font-semibold tracking-tight">Learning</h2>
           </div>
-          <p className="mt-1.5 text-body text-muted-foreground">
-            What your past trades say about your strategies. Read only.
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <Select
@@ -567,10 +553,11 @@ function EvidenceStrip({ summary }: { summary: LearningDatasetSummary }) {
           <span className="text-caption uppercase tracking-wide text-muted-foreground">
             How much is proven
           </span>
-          <Badge>{evidence.gradeLabel}</Badge>
         </div>
       </div>
-      <p className={`mt-1.5 text-body ${TONE_CLASS[evidence.tone]}`}>{evidence.note}</p>
+      <p className={`mt-1.5 text-body ${TONE_CLASS[evidence.tone]}`} title={evidence.note}>
+        {evidence.gradeLabel}
+      </p>
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Figure label="Total" value={<NumberTicker value={evidence.total} locale />} />
         <Figure
@@ -621,11 +608,7 @@ function EmptyBook({ state }: { state: ReturnType<typeof emptyState> }) {
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div>
           <h3 className="text-sm font-medium">{state.title}</h3>
-          <p className="mt-1 text-body text-muted-foreground">{state.detail}</p>
-          <p className="mt-2 text-body text-muted-foreground">
-            Nothing on this screen is a zero. A figure that could not be measured
-            is left blank and named, because a printed zero reads as a result.
-          </p>
+          <p className="mt-1 text-body text-muted-foreground" title={state.detail}>Not enough trades yet</p>
         </div>
       </div>
     </Card>
@@ -665,18 +648,14 @@ function DriftSection({ drift }: { drift: LearningDrift }) {
     <Card className="p-5">
       <CardHeader
         title="Backtest vs live drift"
-        sub="Whether the strategy is doing live what it did in testing"
         action={<Badge>{drift.strategy}</Badge>}
       />
-      <p className={`mt-3 text-body ${TONE_CLASS[tone]}`}>{drift.headline}</p>
-
-      {isRefusal(drift.headline) ? (
-        <ul className="mt-3 space-y-1 text-body text-muted-foreground">
-          {drift.limitations.map((l) => (
-            <li key={l}>— {l}</li>
-          ))}
-        </ul>
-      ) : null}
+      <p
+        className={`mt-3 text-body ${TONE_CLASS[tone]}`}
+        title={isRefusal(drift.headline) ? drift.limitations.join(" — ") : undefined}
+      >
+        {drift.headline}
+      </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
         {Object.entries(drift.available_sources).map(([source, n]) => (
@@ -699,10 +678,7 @@ function DriftSection({ drift }: { drift: LearningDrift }) {
                 key={`${f.kind}-${i}`}
                 className="rounded-lg border border-border/60 px-3.5 py-2.5"
               >
-                <p className={`text-body ${TONE_CLASS[f.tone]}`}>{f.statement}</p>
-                {f.evidence ? (
-                  <p className="mt-0.5 text-xs text-muted-foreground">{f.evidence}</p>
-                ) : null}
+                <p className={`text-body ${TONE_CLASS[f.tone]}`} title={f.evidence || undefined}>{f.statement}</p>
                 {f.confidence ? (
                   <p className="text-caption text-muted-foreground">
                     confidence {f.confidence}
@@ -777,31 +753,26 @@ function PairTable({ pair }: { pair: DriftPair }) {
       </div>
 
       {blocked.length ? (
-        <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 px-3.5 py-2.5">
-          <p className="text-xs text-muted-foreground">
-            {blocked.length} metric(s) were recorded on both sides but the samples
-            are too small to score. These are <strong>not measured</strong>, which
-            is not the same as unchanged:
-          </p>
-          <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-            {blocked.map((m) => (
-              <li key={m.metric}>— {m.label}: {m.reason}</li>
-            ))}
-          </ul>
-        </div>
+        <p
+          className="mt-2 text-xs text-muted-foreground"
+          title={blocked.map((m) => `${m.label}: ${m.reason}`).join("\n")}
+        >
+          {blocked.length} too small to score
+        </p>
       ) : null}
 
       {unrecorded.length ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {unrecorded.length} metric(s) were never recorded by one of the sources:{" "}
-          {unrecorded.map((m) => m.label).join(", ")}. A missing column is a gap in
-          the record, not a null result.
+        <p
+          className="mt-2 text-xs text-muted-foreground"
+          title={unrecorded.map((m) => m.label).join(", ")}
+        >
+          {unrecorded.length} not recorded
         </p>
       ) : null}
 
       {typeof pair.regime?.summary === "string" ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          Regime mix: {String(pair.regime.summary)}
+          {String(pair.regime.summary)}
         </p>
       ) : null}
     </div>
@@ -819,26 +790,26 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
     <Card className="p-5">
       <CardHeader
         title="What the conditions say"
-        sub={`Sliced on ${analysis.breakdowns.length} axes, ranked on ${analysis.metric}`}
+        sub={analysis.metric}
         action={<Badge>{verdict.text}</Badge>}
       />
 
       {analysis.caveats.length ? (
-        <ul className="mt-3 space-y-1">
-          {analysis.caveats.map((c) => (
-            <li key={c} className="flex items-start gap-1.5 text-xs text-warning">
-              <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-              {c}
-            </li>
-          ))}
-        </ul>
+        <p
+          className="mt-3 flex items-center gap-1.5 text-xs text-warning"
+          title={analysis.caveats.join("\n")}
+        >
+          <AlertTriangle className="size-3 shrink-0" />
+          {analysis.caveats.length} caveat{analysis.caveats.length === 1 ? "" : "s"}
+        </p>
       ) : null}
 
       {analysis.notable.length === 0 ? (
-        <p className="mt-3 text-body text-muted-foreground">
-          No bucket separated from its baseline after the multiple-comparisons
-          correction. That is the expected result on a small sample, and it is
-          reported rather than filled with the best-looking bucket.
+        <p
+          className="mt-3 text-body text-muted-foreground"
+          title="No bucket separated from its baseline after multiple-comparisons correction."
+        >
+          No significant bucket
         </p>
       ) : null}
 
@@ -852,7 +823,7 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
           </div>
           {bd.buckets.length === 0 ? (
             <p className="mt-1 text-xs text-muted-foreground">
-              No trade in the sample carries a value for this axis.
+              No data
             </p>
           ) : (
             <div className="mt-2 overflow-x-auto">
@@ -927,9 +898,11 @@ function AnalysisSection({ analysis }: { analysis: LearningAnalysis }) {
       ))}
 
       {starved.length ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {starved.length} axis/axes produced no judgeable bucket:{" "}
-          {starved.map((s) => s.axis).join(", ")}.
+        <p
+          className="mt-3 text-xs text-muted-foreground"
+          title={starved.map((s) => s.axis).join(", ")}
+        >
+          {starved.length} not enough data
         </p>
       ) : null}
     </Card>
@@ -947,7 +920,7 @@ function BacktestVsForwardSection({
     <Card className="p-5">
       <CardHeader
         title="Backtest vs Paper Forward Comparison"
-        sub={`Strategy: ${comparison.strategy} · Objective drift detection without judging strategy as good or bad`}
+        sub={comparison.strategy}
         action={
           <div className="flex gap-2">
             <Badge>Backtest n={comparison.backtest_n}</Badge>
@@ -956,11 +929,13 @@ function BacktestVsForwardSection({
         }
       />
       {comparison.limitations.length ? (
-        <ul className="mt-3 space-y-1 text-body text-muted-foreground">
-          {comparison.limitations.map((l) => (
-            <li key={l}>— {l}</li>
-          ))}
-        </ul>
+        <p
+          className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"
+          title={comparison.limitations.join("\n")}
+        >
+          <Info className="size-3 shrink-0" />
+          {comparison.limitations.length} note{comparison.limitations.length === 1 ? "" : "s"}
+        </p>
       ) : null}
 
       <div className="mt-4">
@@ -976,10 +951,7 @@ function BacktestVsForwardSection({
                 key={`${f.kind}-${i}`}
                 className="rounded-lg border border-border/60 px-3.5 py-2.5"
               >
-                <p className={`text-body ${TONE_CLASS[f.tone]}`}>{f.statement}</p>
-                {f.evidence ? (
-                  <p className="mt-0.5 text-xs text-muted-foreground">{f.evidence}</p>
-                ) : null}
+                <p className={`text-body ${TONE_CLASS[f.tone]}`} title={f.evidence || undefined}>{f.statement}</p>
                 {f.confidence ? (
                   <p className="text-caption text-muted-foreground">
                     confidence {f.confidence}
@@ -1006,7 +978,6 @@ function ObservationHistorySection({
     <Card className="p-5">
       <CardHeader
         title="Learning Observation History"
-        sub="Persistent statistical observations extracted from genuine forward trade evidence"
         action={<Badge>{observations.length} findings</Badge>}
       />
       <div className="mt-4 overflow-x-auto">
@@ -1071,15 +1042,11 @@ function ReportSection({ report }: { report: LearningReport }) {
         <div className="mt-4">
           <h4 className="text-body font-medium">
             Observations
-            <span className="ml-2 text-caption font-normal text-muted-foreground">
-              advisory — no parameter value is proposed
-            </span>
           </h4>
           <ul className="mt-2 space-y-2">
             {report.observations.map((o, i) => (
               <li key={`${o.kind}-${i}`} className="rounded-lg border border-border/60 px-3.5 py-2.5">
-                <p className="text-body">{o.statement}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{o.evidence}</p>
+                <p className="text-body" title={o.evidence}>{o.statement}</p>
                 <p className="text-caption text-muted-foreground">
                   confidence {o.confidence} · n={o.sample_size}
                 </p>
@@ -1091,12 +1058,9 @@ function ReportSection({ report }: { report: LearningReport }) {
 
       {report.unusual.length ? (
         <div className="mt-4">
-          <h4 className="text-body font-medium">Unusual</h4>
-          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-            {report.unusual.map((u) => (
-              <li key={u}>— {u}</li>
-            ))}
-          </ul>
+          <h4 className="text-body font-medium" title={report.unusual.join("\n")}>
+            Unusual ({report.unusual.length})
+          </h4>
         </div>
       ) : null}
     </Card>
@@ -1106,19 +1070,13 @@ function ReportSection({ report }: { report: LearningReport }) {
 function Limitations({ limitations }: { limitations: string[] }) {
   if (!limitations.length) return null;
   return (
-    <Card className="p-5">
-      <CardHeader
-        title="What this screen could not measure"
-        sub="Every withheld figure has a reason, listed here rather than hidden"
-      />
-      <ul className="mt-3 space-y-1.5">
-        {limitations.map((l) => (
-          <li key={l} className="text-xs text-muted-foreground">
-            — {l}
-          </li>
-        ))}
-      </ul>
-    </Card>
+    <p
+      className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
+      title={limitations.join("\n")}
+    >
+      <Info className="size-3 shrink-0" />
+      {limitations.length} not measured
+    </p>
   );
 }
 
@@ -1156,9 +1114,6 @@ function DailyLearningCycleSection({
               <Badge>No run recorded</Badge>
             )}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Automated post-session learning cycle: collects genuine forward paper trades, generates hypotheses, and updates research queue.
-          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -1187,27 +1142,22 @@ function DailyLearningCycleSection({
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
             <div className="text-caption text-muted-foreground uppercase tracking-wide">Trades Processed</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.trades_processed}</div>
-              <div className="text-micro text-muted-foreground">Forward paper</div>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
             <div className="text-caption text-muted-foreground uppercase tracking-wide">New Observations</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.observations_generated}</div>
-              <div className="text-micro text-muted-foreground">n ≥ 10 & significant</div>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
             <div className="text-caption text-muted-foreground uppercase tracking-wide">Hypotheses</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.hypotheses_generated}</div>
-              <div className="text-micro text-muted-foreground">Research candidates</div>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
             <div className="text-caption text-muted-foreground uppercase tracking-wide">Optimization Candidates</div>
               <div className="mt-1 text-lg font-semibold tabular-nums">{cycle.candidates_generated}</div>
-              <div className="text-micro text-muted-foreground">Adaptive parameters</div>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
             <div className="text-caption text-muted-foreground uppercase tracking-wide">Recommendations</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-primary">{cycle.recommendations_generated}</div>
-              <div className="text-micro text-muted-foreground">PROPOSED / In queue</div>
             </div>
           </div>
 
@@ -1217,8 +1167,8 @@ function DailyLearningCycleSection({
               <div className="flex items-center gap-2 rounded-md border border-warning/20 bg-warning/[0.08] px-3 py-2 text-xs text-warning">
                 <AlertTriangle className="size-4 shrink-0" />
                 <span>
-                  <strong>Insufficient Forward Data (n &lt; 10):</strong>{" "}
-                  {cycle.insufficient_data_strategies.join(", ")} — withheld from candidate generation to prevent false learning.
+                  <strong>n &lt; 10:</strong>{" "}
+                  {cycle.insufficient_data_strategies.join(", ")}
                 </span>
               </div>
             ) : null}
@@ -1226,27 +1176,22 @@ function DailyLearningCycleSection({
             {cycle.drift_detected && Object.entries(cycle.drift_detected).some(([_, detected]) => detected) ? (
               <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/[0.08] px-3 py-2 text-xs text-destructive">
                 <AlertTriangle className="size-4 shrink-0" />
-                <span>
-                  <strong>Statistical Drift Detected:</strong>{" "}
+                <span title="Forward distributions deviate from historical baseline.">
+                  <strong>Drift:</strong>{" "}
                   {Object.entries(cycle.drift_detected)
                     .filter(([_, d]) => d)
                     .map(([s]) => s)
-                    .join(", ")} — forward distributions deviate from historical baseline.
+                    .join(", ")}
                 </span>
               </div>
             ) : null}
 
             {cycle.notes && cycle.notes.length > 0 ? (
-              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
-                <div className="font-medium text-foreground mb-1">Cycle Notes & Explanations:</div>
-                <ul className="space-y-1 text-muted-foreground">
-                  {cycle.notes.map((note, idx) => (
-                    <li key={idx} className="flex items-start gap-1.5">
-                      <span className="text-muted-foreground select-none">•</span>
-                      <span>{note}</span>
-                    </li>
-                  ))}
-                </ul>
+              <div
+                className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                title={cycle.notes.join("\n")}
+              >
+                {cycle.notes.length} note{cycle.notes.length === 1 ? "" : "s"}
               </div>
             ) : null}
 
@@ -1267,7 +1212,7 @@ function DailyLearningCycleSection({
         </>
       ) : (
         <div className="mt-3 rounded-md border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
-          No automated cycle has executed yet. Click &quot;Run Daily Cycle&quot; to process available forward paper trades.
+          No cycle run yet
         </div>
       )}
     </Card>

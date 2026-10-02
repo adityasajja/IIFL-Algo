@@ -170,11 +170,11 @@ function BucketTable({
   const max = views.reduce((m, v) => Math.max(m, v.n), 0);
   return (
     <Card className="px-5 py-4">
-      <CardHeader title={title} sub={sub} />
+      <CardHeader title={sub ? <span title={sub}>{title}</span> : title} />
       <div className="mt-2 px-0">
         {views.length === 0 ? (
           <div className="py-3 text-body text-muted-foreground">
-            No attributed trade falls into any bucket on this dimension yet.
+            No data yet
           </div>
         ) : (
           views.map((v) => <BucketRow key={v.key} view={v} max={max} />)
@@ -199,7 +199,7 @@ function OverviewTab({ summary }: { summary: AnalyticsSummary }) {
   if (empty) {
     return (
       <div className="py-10 text-center text-sm text-muted-foreground">
-        No closed trades yet. They appear here once a paper or live strategy has traded and closed.
+        No closed trades yet
       </div>
     );
   }
@@ -210,7 +210,7 @@ function OverviewTab({ summary }: { summary: AnalyticsSummary }) {
     <div className="space-y-4">
       {coverage.warning ? (
         <Callout tone="warn" title="Partial attribution">
-          {coverage.warning}
+          <span title={coverage.warning}>Some trades unattributed</span>
         </Callout>
       ) : null}
 
@@ -261,54 +261,43 @@ function OverviewTab({ summary }: { summary: AnalyticsSummary }) {
 
       <Card className="px-5 py-4">
         <CardHeader
-          title="The number beside the headline"
-          sub="One trade carrying a book is the most common way a small sample lies about itself."
+          title={<span title="One trade carrying a book is the most common way a small sample lies about itself.">Concentration</span>}
         />
         <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-3">
             <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
-              Best trade as a share of gross profit
+              Best trade / gross profit
             </div>
             <div className={`mt-1 text-xl font-semibold tabular-nums ${bestShare != null && bestShare > 0.5 ? TONE_TEXT.warn : ""}`}>
               {bestShare == null ? EM_DASH : `${(bestShare * 100).toFixed(0)}%`}
             </div>
             <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-              {bestShare == null
-                ? "undefined — the book has no gross profit"
-                : bestShare > 0.5
-                  ? "Over half the book's gross profit came from a single trade. Treat the mean with suspicion."
-                  : "No single trade dominates the gross profit."}
+              {bestShare == null ? "n/a" : bestShare > 0.5 ? "One trade dominates" : "Spread out"}
             </div>
           </div>
           <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-3">
             <div className="text-caption font-medium uppercase tracking-[0.05em] text-muted-foreground">
-              Net P&L without the best trade
+              Net without best trade
             </div>
             <div className={`mt-1 text-xl font-semibold tabular-nums ${summary.net_without_best == null ? "" : summary.net_without_best > 0 ? TONE_TEXT.good : TONE_TEXT.bad}`}>
               {money(summary.net_without_best)}
             </div>
             <div className="mt-0.5 text-[11.5px] text-muted-foreground">
               {summary.net_without_best != null && summary.net_without_best <= 0
-                ? "The book is not profitable without its single best trade."
-                : "The book stands up without its single best trade."}
+                ? "Not profitable without it"
+                : "Holds up"}
             </div>
           </div>
         </div>
       </Card>
 
       <Card className="px-5 py-4">
-        <CardHeader title="What this describes" sub="Scope, stated rather than implied." />
+        <CardHeader title="Scope" />
         <div className="mt-2 space-y-1.5 text-[12.5px] text-muted-foreground">
-          <div>
-            <span className="font-medium text-foreground">{ev.label}</span> — grade counts for
-            every figure above.
-          </div>
-          <div>{coverage.text}.</div>
-          <div>
-            Costs and slippage: mean total slippage {bps(summary.total_slippage_bps_mean)}; sum{" "}
-            {bps(summary.total_slippage_bps_sum)}. Slippage is averaged over measurable legs
-            only — a trade with no recorded reference price has no slippage measurement, which
-            is not the same as zero.
+          <div className="font-medium text-foreground">{ev.label}</div>
+          <div>{coverage.text}</div>
+          <div title="Averaged over measurable legs only; a trade with no reference price has no slippage measurement, which is not zero.">
+            Slippage: mean {bps(summary.total_slippage_bps_mean)} · sum {bps(summary.total_slippage_bps_sum)}
           </div>
         </div>
       </Card>
@@ -353,22 +342,12 @@ function AttributionTab({ summary, filters }: { summary: AnalyticsSummary; filte
   const total = summary.n_trades;
   if (total === 0) {
     return (
-      <Callout tone="info" title="No attributed trades">
-        There is nothing to attribute yet. The branches below describe how trades
-        classify, and there are none.
-      </Callout>
+      <div className="py-10 text-center text-sm text-muted-foreground">No attributed trades</div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <Callout tone="info" title="Each bucket is a classification, not a share of the P&L">
-        A trade's rupees cannot be split into "signal rupees" and "execution
-        rupees" — the signal earned nothing without an execution. What these
-        tables say is how trades *classified* a given way performed, with the
-        counts attached.
-      </Callout>
-
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {BRANCH_SPECS.map((spec) => (
           <BucketTable
@@ -396,9 +375,7 @@ function ScatterChart({
   if (points.length === 0) {
     return (
       <div className="py-6 text-center text-body text-muted-foreground">
-        No trade has both a measured{" "}
-        {axis === "mfe" ? "favourable" : "adverse"} excursion and a recorded outcome,
-        so there is no relationship to plot.
+        No {axis === "mfe" ? "favourable" : "adverse"} excursion data
       </div>
     );
   }
@@ -489,10 +466,7 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
   if (error) return <ErrorBox>{error}</ErrorBox>;
   if (!loaded || loaded.n === 0) {
     return (
-      <Callout tone="info" title="No excursions measured">
-        No attributed trade has a usable price series between entry and exit, so
-        there is nothing to plot. An unmeasured excursion is not a flat one.
-      </Callout>
+      <div className="py-10 text-center text-sm text-muted-foreground">No excursions measured</div>
     );
   }
 
@@ -528,17 +502,9 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
         />
       </div>
 
-      <Callout tone="info" title="Reading the gap between MFE and realized R">
-        A mean MFE well above the mean realized R is a management problem, not a
-        signal problem: the trades reached a profit the exits did not keep. A mean
-        MFE barely above zero is a signal problem — the trades never went anywhere.
-        These are different diagnoses and the two figures above separate them.
-      </Callout>
-
       <Card className="px-5 py-4">
         <CardHeader
-          title="Favourable excursion vs outcome"
-          sub="Each point is one trade. Hollow red points were stopped out — their adverse excursion reached the risk the position was sized for."
+          title={<span title="Each point is one trade. Hollow red points were stopped out.">Favourable excursion vs outcome</span>}
           action={
             <Button size="xs" variant="quiet" onClick={() => setIncludePoints((v) => !v)}>
               {includePoints ? "Summarise only" : "Show trades"}
@@ -551,7 +517,7 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
       </Card>
 
       <Card className="px-5 py-4">
-        <CardHeader title="Adverse excursion vs outcome" sub="The same trades, against how far they went against the position." />
+        <CardHeader title="Adverse excursion vs outcome" />
         <div className="mt-3">
           {includePoints ? <ScatterChart points={maePoints} axis="mae" /> : null}
         </div>
@@ -559,7 +525,7 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card className="px-5 py-4">
-          <CardHeader title="MFE distribution" sub="Bucketed by R multiple." />
+          <CardHeader title="MFE distribution" />
           <div className="mt-2 space-y-1.5">
             {loaded.mfe_over_risk.buckets.map((b) => (
               <div key={b.key} className="flex items-center justify-between text-[12.5px]">
@@ -570,7 +536,7 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
           </div>
         </Card>
         <Card className="px-5 py-4">
-          <CardHeader title="MAE distribution" sub="Bucketed by R multiple." />
+          <CardHeader title="MAE distribution" />
           <div className="mt-2 space-y-1.5">
             {loaded.mae_over_risk.buckets.map((b) => (
               <div key={b.key} className="flex items-center justify-between text-[12.5px]">
@@ -584,8 +550,7 @@ function MaeMfeTab({ data, filters }: { data: MaeMfeAnalytics | null; filters: A
 
       <Card className="px-5 py-4">
         <CardHeader
-          title="How these figures were produced"
-          sub="An excursion is only interpretable alongside the window it was measured over."
+          title="Method"
         />
         <div className="mt-2 space-y-1.5">
           {method.map((m) => (
@@ -617,10 +582,7 @@ function ExecutionTab({
 }) {
   if (!distribution) {
     return (
-      <Callout tone="info" title="No execution measurements">
-        No attributed trade has a recorded fill reference, so slippage and delay
-        are unmeasurable. That is different from a cost of zero.
-      </Callout>
+      <div className="py-10 text-center text-sm text-muted-foreground">No execution data</div>
     );
   }
 
@@ -630,12 +592,6 @@ function ExecutionTab({
 
   return (
     <div className="space-y-4">
-      <Callout tone="warn" title="Execution is its own dimension">
-        A profitable strategy with poor execution reads differently from a strong
-        execution of a weak signal. Nothing on this tab is folded into a single
-        score, so the two cannot be confused.
-      </Callout>
-
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat
           label="Mean slippage"
@@ -649,8 +605,8 @@ function ExecutionTab({
           value={num(slip?.measured, 0)}
           sub={
             slip?.unmeasurable
-              ? `${num(slip.unmeasurable, 0)} unmeasurable — no reference price`
-              : "every leg measured"
+              ? `${num(slip.unmeasurable, 0)} unmeasurable`
+              : "all measured"
           }
         />
         <Stat label="Total slippage cost" value={money(slip?.total_amount)} tone="bad" sub="on filled quantity" />
@@ -672,19 +628,16 @@ function ExecutionTab({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <BucketTable
           title="By execution quality"
-          sub="The overall classification of how the round trip was executed."
           buckets={buckets?.by_quality ?? []}
           total={total}
         />
         <BucketTable
           title="By entry quality"
-          sub="Entry fills only."
           buckets={buckets?.by_entry_quality ?? []}
           total={total}
         />
         <BucketTable
           title="By slippage band"
-          sub="Adverse-positive basis points across measurable legs."
           buckets={buckets?.by_slippage_bucket ?? []}
           total={total}
         />
@@ -693,13 +646,11 @@ function ExecutionTab({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <BucketTable
           title="By symbol"
-          sub="Where the friction actually lives. A symbol-level pattern is a venue or liquidity finding, not a strategy finding."
           buckets={distribution.by_symbol ?? []}
           total={total}
         />
         <BucketTable
           title="By time of day"
-          sub="The same reading, against the clock."
           buckets={distribution.by_time_of_day ?? []}
           total={total}
         />
@@ -707,7 +658,7 @@ function ExecutionTab({
 
       {distribution.partial_fills ? (
         <Card className="px-5 py-4">
-          <CardHeader title="Partial fills" sub="A partial fill is a sizing discovery, not an execution failure by itself." />
+          <CardHeader title="Partial fills" />
           <div className="mt-2 flex flex-wrap gap-4">
             {Object.entries(distribution.partial_fills).map(([k, v]) => (
               <div key={k} className="text-[12.5px]">
@@ -733,18 +684,15 @@ function StrategiesTab({
 }) {
   if (strategies.length === 0) {
     return (
-      <Callout tone="info" title="No attributed trades">
-        No strategy has an attributed trade yet, so there is nothing to compare.
-      </Callout>
+      <div className="py-10 text-center text-sm text-muted-foreground">No attributed trades</div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <Callout tone="warn" title="This is a comparison, not a ranking">
-        {note} A strategy missing from this list has no attributed trades, which is
-        different from having performed badly.
-      </Callout>
+      <p className="text-xs text-muted-foreground" title={note}>
+        Comparison, not ranking
+      </p>
 
       {strategies.map((s) => {
         const ev = evidenceCountsView(s.summary.counts);
@@ -832,7 +780,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
         {detail.simulated ? (
           <Badge tone="info">Simulated fills</Badge>
         ) : null}
-        <span className="text-[11.5px] text-muted-foreground">{grade.hint}</span>
+        <span className="sr-only">{grade.hint}</span>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -842,7 +790,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
               {b.label}
             </div>
             <div className={`mt-1 text-sm font-semibold tabular-nums ${TONE_TEXT[b.tone]}`}>{b.headline}</div>
-            <div className="mt-1 text-[11.5px] leading-snug text-muted-foreground">{b.reading}</div>
+            <div className="sr-only">{b.reading}</div>
           </div>
         ))}
       </div>
@@ -865,7 +813,7 @@ function TradeDetail({ tradeId, onClose }: { tradeId: string; onClose: () => voi
                     return (
                       <div key={c} className="text-[12.5px]">
                         <span className="font-medium">{c}</span>
-                        {basis ? <span className="text-muted-foreground"> — {basis}</span> : null}
+                        {basis ? <span className="sr-only"> — {basis}</span> : null}
                       </div>
                     );
                   })}
@@ -915,11 +863,7 @@ function TradesTab({
 
   if (total === 0) {
     return (
-      <Callout tone="info" title="No attributed trades">
-        No trade has been attributed for these filters. An attribution is written
-        for a closed trade with a journal episode — nothing has closed under this
-        scope yet.
-      </Callout>
+      <div className="py-10 text-center text-sm text-muted-foreground">No attributed trades</div>
     );
   }
 
@@ -930,7 +874,7 @@ function TradesTab({
       <Card className="overflow-hidden">
         <CardHeader
           title="Attributed trades"
-          sub={`${total} trade${total === 1 ? "" : "s"} under the current filters. Select a row for the full attribution tree.`}
+          sub={`${total} trade${total === 1 ? "" : "s"}`}
         />
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[12.5px]">
@@ -1140,8 +1084,11 @@ export default function AnalyticsPanel() {
           }
         />
 
-        <div className="mt-3 rounded-md bg-muted/40 px-3.5 py-2.5 text-[12.5px] text-muted-foreground">
-          {scopeNote(counts, summary?.attribution_coverage)}
+        <div
+          className="mt-3 rounded-md bg-muted/40 px-3.5 py-2 text-[12.5px] text-muted-foreground"
+          title={scopeNote(counts, summary?.attribution_coverage)}
+        >
+          {summary?.n_trades ?? 0} trades
         </div>
 
         {showFilters ? (
@@ -1282,12 +1229,6 @@ export default function AnalyticsPanel() {
 
             <TabsContent value="context">
               <div className="space-y-4">
-                <Callout tone="info" title="The recorded context, never a re-score">
-                  The context below is the classification the signal engine made at
-                  signal time, under the model version recorded with the trade. It
-                  is not recomputed here, so this screen cannot silently restate
-                  history under a newer model.
-                </Callout>
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   <BucketTable
                     title="By market regime"
