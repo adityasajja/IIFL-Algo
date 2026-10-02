@@ -7,19 +7,19 @@
  * table is not a table of numbers with a hidden detail pane — every row expands
  * to the actual comparisons that were tested, with the measured values in them:
  *
- *     ✓ Close > EMA 50          Close > EMA 50 = 419.00, satisfies > EMA 50 403.03
- *     ✓ RSI 14 < 70.00          RSI 14 < 70.00 = 59.84, satisfies < 70.00
+ * ✓ Close > EMA 50 Close > EMA 50 = 419.00, satisfies > EMA 50 403.03
+ * ✓ RSI 14 < 70.00 RSI 14 < 70.00 = 59.84, satisfies < 70.00
  *
  * Three things this panel deliberately does differently from the legacy custom
  * scanner:
  *
- *  1. **Nested groups.** `(A AND B) OR (C AND D)` is buildable, because the
- *     backend evaluates a real tree. The legacy panel had one global AND/OR.
- *  2. **Unavailable indicators are shown and disabled.** `market_cap` is in the
- *     dropdown, greyed, with the reason ("requires the fundamentals service").
- *     Hiding it would leave a user wondering if they imagined the field.
- *  3. **"Could not be measured" is never rendered as a failure.** The backend
- *     distinguishes the two; collapsing them here would throw that away.
+ * 1. **Nested groups.** `(A AND B) OR (C AND D)` is buildable, because the
+ * backend evaluates a real tree. The legacy panel had one global AND/OR.
+ * 2. **Unavailable indicators are shown and disabled.** `market_cap` is in the
+ * dropdown, greyed, with the reason ("requires the fundamentals service").
+ * Hiding it would leave a user wondering if they imagined the field.
+ * 3. **"Could not be measured" is never rendered as a failure.** The backend
+ * distinguishes the two; collapsing them here would throw that away.
  */
 import { AlertTriangle, ChevronDown, ChevronRight, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -44,7 +44,7 @@ import {
 import { Button } from "./components/ui/button";
 import { Card, CardHeader, ErrorBox, Hint } from "./components/ui/card";
 import { ButtonLoader } from "./components/ui/loading";
-import { Input } from "./components/ui/input";
+import { Input } from "./components/motion/input";
 import { Select } from "./components/ui/select";
 import { cn } from "./lib/utils";
 
@@ -90,7 +90,7 @@ interface LeafDraft {
   rhsPeriod: string;
 }
 /** A nested group. The backend supports arbitrary depth; two is what a human
- *  reads comfortably, which is why the UI offers exactly that. */
+ * reads comfortably, which is why the UI offers exactly that. */
 interface GroupDraft {
   kind: "group";
   match: "all" | "any";
@@ -239,7 +239,7 @@ function ConditionRow({
           value={draft.period}
           onChange={(e) => onChange({ ...draft, period: e.target.value.replace(/[^0-9]/g, "") })}
           placeholder={String(spec.default_period ?? "")}
-          className="w-16 rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
+            className="w-16 rounded-xl border border-border bg-card px-2 py-1.5 text-body outline-none focus:border-primary"
           aria-label="period"
         />
       ) : null}
@@ -259,14 +259,14 @@ function ConditionRow({
             value={draft.value}
             onChange={(e) => onChange({ ...draft, value: e.target.value })}
             placeholder="lower"
-            className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
+              className="w-20 rounded-xl border border-border bg-card px-2 py-1.5 text-body outline-none focus:border-primary"
           />
           <span className="text-xs text-muted-foreground">to</span>
           <input
             value={draft.upper}
             onChange={(e) => onChange({ ...draft, upper: e.target.value })}
             placeholder="upper"
-            className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
+              className="w-20 rounded-xl border border-border bg-card px-2 py-1.5 text-body outline-none focus:border-primary"
           />
         </>
       ) : (
@@ -294,7 +294,7 @@ function ConditionRow({
                   value={draft.rhsPeriod}
                   onChange={(e) => onChange({ ...draft, rhsPeriod: e.target.value.replace(/[^0-9]/g, "") })}
                   placeholder={String(byKey.get(draft.rhsIndicator)?.default_period ?? "")}
-                  className="w-16 rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
+                    className="w-16 rounded-xl border border-border bg-card px-2 py-1.5 text-body outline-none focus:border-primary"
                   aria-label="rhs period"
                 />
               ) : null}
@@ -304,21 +304,21 @@ function ConditionRow({
               value={draft.value}
               onChange={(e) => onChange({ ...draft, value: e.target.value })}
               placeholder="value"
-              className="w-24 rounded-lg border border-border bg-card px-2 py-1.5 text-[13px] outline-none focus:border-primary"
+                className="w-24 rounded-xl border border-border bg-card px-2 py-1.5 text-body outline-none focus:border-primary"
             />
           )}
         </>
       )}
 
       {unavailable ? (
-        <span className="text-[11px] text-muted-foreground">requires {spec?.requires}</span>
+          <span className="text-caption text-muted-foreground">requires {spec?.requires}</span>
       ) : null}
       </div>
 
       <button
         type="button"
         onClick={onRemove}
-        className="ml-auto rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+        className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
         aria-label="remove condition"
       >
         <X className="h-3.5 w-3.5" />
@@ -352,7 +352,7 @@ function GroupEditor({
   return (
     <div
       className={cn(
-        "rounded-xl border p-3",
+        "rounded-md border p-3",
         depth === 0 ? "border-border bg-muted/20" : "border-primary/30 bg-primary/5",
       )}
     >
@@ -367,11 +367,11 @@ function GroupEditor({
           ]}
         />
         {depth > 0 ? (
-          <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+          <span className="rounded-full bg-primary/15 px-2 py-0.5 text-micro font-medium text-primary">
             nested group
           </span>
         ) : null}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {group.children.length} condition{group.children.length === 1 ? "" : "s"}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -418,7 +418,7 @@ function GroupEditor({
             <button
               type="button"
               onClick={onRemove}
-              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
               aria-label="remove group"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -468,12 +468,12 @@ function EvidenceLine({ item, muted }: { item: ScreenerEvidence; muted?: boolean
       ? "text-success"
       : "text-destructive";
   return (
-    <div className={cn("flex items-start gap-2 py-0.5 text-[12px]", muted && "opacity-70")}>
-      <span className={cn("mt-[1px] w-3 shrink-0 font-bold", tone)}>{mark}</span>
+    <div className={cn("flex items-start gap-2 py-0.5 text-xs", muted && "opacity-70")}>
+      <span className={cn("mt-[1px] w-3 shrink-0 font-semibold", tone)}>{mark}</span>
       <span className="shrink-0 font-medium">{item.label}</span>
       <span className="text-muted-foreground">{item.reason}</span>
       {item.unmeasurable ? (
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+        <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
           no data
         </span>
       ) : null}
@@ -491,7 +491,19 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
   const [sort, setSort] = useState("rel_volume");
   const [limit, setLimit] = useState(50);
 
-  const [root, setRoot] = useState<GroupDraft>(() => draftFromNode(STARTER) as GroupDraft);
+  const [root, setRoot] = useState<GroupDraft>(() => {
+    // A preset handed over from the Markets page is used once, then cleared.
+    try {
+      const raw = sessionStorage.getItem("atr.screener.preset");
+      if (raw) {
+        sessionStorage.removeItem("atr.screener.preset");
+        return draftFromNode(JSON.parse(raw) as ScreenerNode) as GroupDraft;
+      }
+    } catch {
+      /* fall through to the starter */
+    }
+    return draftFromNode(STARTER) as GroupDraft;
+  });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [result, setResult] = useState<ScreenerRunResponse | null>(null);
@@ -609,7 +621,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
         <div className="space-y-3 p-5 pt-3">
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-muted-foreground">Universe</span>
+              <span className="text-caption font-medium text-muted-foreground">Universe</span>
               <Select
                 size="sm"
                 value={universe}
@@ -623,7 +635,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-muted-foreground">Rank by</span>
+              <span className="text-caption font-medium text-muted-foreground">Rank by</span>
               <Select
                 size="sm"
                 value={sort}
@@ -635,7 +647,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-muted-foreground">Max rows</span>
+              <span className="text-caption font-medium text-muted-foreground">Max rows</span>
               <Select
                 size="sm"
                 value={String(limit)}
@@ -671,7 +683,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
         <Card>
           <div className="flex flex-wrap items-end gap-3 p-5">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-muted-foreground">Name this scan</span>
+              <span className="text-caption font-medium text-muted-foreground">Name this scan</span>
               <Input
                 value={saveName}
                 onChange={setSaveName}
@@ -713,7 +725,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
               >
                 <button
                   type="button"
-                  className="text-[13px] font-medium hover:text-primary"
+                  className="text-body font-medium hover:text-primary"
                   onClick={async () => {
                     setRunning(true);
                     setError(null);
@@ -739,7 +751,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                 <button
                   type="button"
                   aria-label={`delete ${scan.name}`}
-                  className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                  className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
                   onClick={async () => {
                     try {
                       await screenerDeleteSaved(scan.scan_id);
@@ -768,7 +780,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
           />
 
           {result.warnings?.length ? (
-            <div className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
+            <div className="mx-5 mt-3 flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <div>{result.warnings.join(" · ")}</div>
             </div>
@@ -783,9 +795,9 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
             </div>
           ) : (
             <div className="overflow-x-auto p-5 pt-3">
-              <table className="w-full text-[13px]">
+              <table className="w-full text-body">
                 <thead>
-                  <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <tr className="border-b border-border text-left text-caption uppercase tracking-wide text-muted-foreground">
                     <th className="w-6 py-2" />
                     {visibleColumns.map((col) => (
                       <th key={col} className="whitespace-nowrap px-2 py-2 font-medium">
@@ -825,7 +837,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                                   {row.symbol}
                                 </button>
                               ) : col === "setup" ? (
-                                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-caption font-medium text-primary">
                                   {String(row[col] ?? "—")}
                                 </span>
                               ) : col === "change_pct" ? (
@@ -846,8 +858,8 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                           <tr key={`${row.symbol}-why`} className="border-b border-border/50">
                             <td />
                             <td colSpan={visibleColumns.length} className="px-2 pb-3 pt-1">
-                              <div className="rounded-xl border border-border bg-muted/30 p-3">
-                                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                <div className="mb-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                                   Why {row.symbol} matched
                                 </div>
                                 {(row.why ?? []).map((item, i) => (
@@ -859,7 +871,7 @@ export default function ScreenerPanel({ onOpenChart }: { onOpenChart?: (symbol: 
                                 {(row.evidence ?? []).some((e) => !e.passed) &&
                                 (row.evidence ?? []).length > (row.why ?? []).length ? (
                                   <div className="mt-2 border-t border-border pt-2">
-                                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    <div className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                                       Also tested
                                     </div>
                                     {(row.evidence ?? [])

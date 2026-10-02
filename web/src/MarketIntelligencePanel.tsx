@@ -4,15 +4,15 @@
  * MARKET → SECTOR → STOCK → STRATEGY → TRADE → LEARNING
  *
  * Four sub-panels:
- *   1. Market Overview  — regime badge, NIFTY trend, A/D ratio, breadth, 52w H/L, volatility
- *   2. Sector Rankings  — sortable table of all sectors with RS, breadth, RVOL, breakouts
- *   3. Stock Leaders    — sortable leaderboard: top RS, breakouts, near 52w highs
- *   4. Strategy Context — select strategy + axis → empirical performance per market condition
+ * 1. Market Overview — regime badge, NIFTY trend, A/D ratio, breadth, 52w H/L, volatility
+ * 2. Sector Rankings — sortable table of all sectors with RS, breadth, RVOL, breakouts
+ * 3. Stock Leaders — sortable leaderboard: top RS, breakouts, near 52w highs
+ * 4. Strategy Context — select strategy + axis → empirical performance per market condition
  *
  * Strictly Indian cash-equity. No F&O.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getMarketIntelSummary,
   getMarketIntelSectors,
@@ -31,9 +31,15 @@ import { Select } from "./components/ui/select";
 import { PageLoader } from "./components/ui/loading";
 import { Ring } from "./components/ui/ring";
 import { Sparkline } from "./components/ui/sparkline";
-import { Switch } from "./components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Switch } from "./components/motion/switch";
+import { Tooltip } from "./components/motion/tooltip";
+import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { cn } from "./lib/utils";
+import { Card } from "./components/ui/card";
+import { fieldInput, fieldLabel, toolbarButton } from "./components/ui/form-styles";
+import { Badge } from "./components/ui/stat";
+import { toneText, toneOf, type Tone } from "./lib/tone";
+import { MoodGauge, WhatChanged, ScreenerJumps, SectorHeatmap, VixCard, LiveTag, useLiveIndices, type ScreenPreset } from "./MarketMood";
 import { RefreshCw } from "lucide-react";
 
 // ─── Colour / theme helpers ───────────────────────────────────────────────────
@@ -47,10 +53,6 @@ const REGIME_PLAIN: Record<string, { word: string; tone: "good" | "bad" | "warn"
   LOW_VOLATILITY: { word: "Calm", tone: "flat" },
 };
 
-const trend = (v: number | null | undefined): string => {
-  if (v == null) return "var(--text-secondary, #94a3b8)";
-  return v > 0 ? "#10b981" : v < 0 ? "#ef4444" : "#94a3b8";
-};
 
 // ─── Shared sub-components ───────────────────────────────────────────────────
 
@@ -72,39 +74,16 @@ function CompactErrorNotice({
 
   return (
     <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.5rem",
-        fontSize: 11,
-        color: "#fca5a5",
-        background: "rgba(239, 68, 68, 0.12)",
-        border: "1px solid rgba(239, 68, 68, 0.25)",
-        borderRadius: 6,
-        padding: "0.25rem 0.65rem",
-      }}
+    className="inline-flex items-center gap-2 text-caption text-loss bg-loss/12 border border-loss/25 rounded-md py-1 px-2.5"
     >
-      <span style={{ fontSize: 12 }}>⚠</span>
+      <span className="text-xs">⚠</span>
       <span>
         {isNetworkOrThrottle || !msg
           ? `Market data delayed${lastUpdated ? ` · Last updated ${lastUpdated}` : ""}`
           : `Service notice: ${msg.slice(0, 45)}`}
       </span>
       {onRetry && (
-        <button
-          onClick={onRetry}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#818cf8",
-            textDecoration: "underline",
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 600,
-            padding: 0,
-            marginLeft: "0.15rem",
-          }}
-        >
+        <button onClick={onRetry} className="ml-0.5 text-caption font-semibold text-primary-soft underline underline-offset-2 hover:text-primary">
           Retry
         </button>
       )}
@@ -112,25 +91,9 @@ function CompactErrorNotice({
   );
 }
 
-function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div
-      style={{
-        background: "rgba(30,41,59,0.7)",
-        border: "1px solid rgba(99,102,241,0.15)",
-        borderRadius: 12,
-        padding: "1rem 1.25rem",
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 // ─── Sub-panel 1: Market Overview ────────────────────────────────────────────
 
-function MarketOverviewPanel() {
+function MarketOverviewPanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset) => void }) {
   const [data, setData] = useState<MarketSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -166,9 +129,17 @@ function MarketOverviewPanel() {
     load();
   }, [load]);
 
+  // Hooks stay above the early returns below.
+  const live = useLiveIndices();
+
   if (loading && !data) return <PageLoader label="Loading market data" />;
-  if (error && !data) return <div style={{ padding: "1rem" }}><CompactErrorNotice msg={error} onRetry={() => load(true)} /></div>;
+  if (error && !data) return <div className="p-4"><CompactErrorNotice msg={error} onRetry={() => load(true)} /></div>;
   if (!data) return null;
+
+  // The live Nifty replaces the daily close and day move; the month's return stays daily.
+  const liveNifty = live?.available ? live.nifty : null;
+  const niftyPrice = liveNifty ? liveNifty.ltp : data.nifty_close;
+  const niftyDayChg = liveNifty && liveNifty.chg_pct != null ? liveNifty.chg_pct : data.nifty_change_1d_pct;
 
   const isBullish = data.regime.regime === "BULLISH_TREND";
   const isBearish = data.regime.regime === "BEARISH_TREND";
@@ -188,22 +159,22 @@ function MarketOverviewPanel() {
     tone: "flat" as const,
   };
   const tone = {
-    good: "bg-emerald-500/10 text-emerald-500",
-    bad: "bg-rose-500/10 text-rose-500",
-    warn: "bg-amber-500/10 text-amber-500",
-    flat: "bg-muted text-muted-foreground",
+    good: "border border-gain/20 bg-gain/[0.08] text-gain",
+    bad: "border border-destructive/20 bg-destructive/[0.08] text-destructive",
+    warn: "border border-warning/20 bg-warning/[0.08] text-warning",
+    flat: "border border-border/60 bg-muted/50 text-muted-foreground",
   };
   const fit = (v: string) =>
     v === "STRONG" ? { word: "Good fit", cls: tone.good } : v === "NEUTRAL" ? { word: "Okay", cls: tone.flat } : { word: "Poor fit", cls: tone.bad };
-  const barTone = (pct: number) => (pct >= 55 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-rose-500");
-  const changeCls = (v: number | null | undefined) => (v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-rose-500" : "text-muted-foreground");
+  const barTone = (pct: number) => (pct >= 55 ? "bg-gain" : pct >= 40 ? "bg-warning" : "bg-loss");
+  const changeCls = (v: number | null | undefined) => (v == null ? "text-muted-foreground" : v > 0 ? "text-gain" : v < 0 ? "text-loss" : "text-muted-foreground");
   const signed = (v: number | null | undefined) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
 
   const up = data.advancing_stocks;
   const down = data.declining_stocks;
   const flat = data.unchanged_stocks;
   const total = Math.max(up + down + flat, 1);
-  const scoreTone = contextScore >= 65 ? "stroke-emerald-500" : contextScore <= 35 ? "stroke-rose-500" : "stroke-amber-500";
+  const scoreTone = contextScore >= 65 ? "stroke-gain" : contextScore <= 35 ? "stroke-loss" : "stroke-warning";
   const scoreWord = contextScore >= 65 ? "Favourable" : contextScore <= 35 ? "Defensive" : "Neutral";
   const volWord = atr >= 1.5 ? "Choppy" : atr <= 0.9 ? "Calm" : "Normal";
 
@@ -264,7 +235,7 @@ function MarketOverviewPanel() {
   return (
     <div className="space-y-4">
       {/* Verdict + the index, in plain words. */}
-      <div className="flex flex-wrap items-center justify-between gap-6 rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-6 rounded-xl border border-border bg-card p-5">
         <div>
           <div className="text-xs text-muted-foreground">Market direction</div>
           <div className="mt-2 flex items-center gap-3">
@@ -286,41 +257,49 @@ function MarketOverviewPanel() {
               )}
             </div>
             <div className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
-              {data.nifty_close != null ? `₹${data.nifty_close.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+            {niftyPrice != null ? `₹${niftyPrice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
             </div>
             <div className="mt-1 flex justify-end gap-3 text-xs tabular-nums">
-              <span className={changeCls(data.nifty_change_1d_pct)}>{signed(data.nifty_change_1d_pct)} today</span>
+              {liveNifty ? <LiveTag live={live} /> : null}
+              <span className={changeCls(niftyDayChg)}>{signed(niftyDayChg)} {live?.available && !live.market_open ? "last session" : "today"}</span>
               <span className={changeCls(data.nifty_1m_return_pct)}>{signed(data.nifty_1m_return_pct)} this month</span>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5">
             {error && <CompactErrorNotice msg={error} lastUpdated={lastUpdated ?? undefined} onRetry={() => load(true)} />}
+            <Tooltip content={lastUpdated ? `Updated ${lastUpdated}` : "Refresh"} side="bottom" delay={400}>
             <button
               id="market-intel-refresh"
               onClick={() => load(true)}
               disabled={refreshing}
-              title={lastUpdated ? `Updated ${lastUpdated}` : "Refresh"}
               aria-label="Refresh"
               className="grid size-8 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:text-foreground"
             >
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
             </button>
+            </Tooltip>
           </div>
         </div>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <MoodGauge data={data} />
+        <WhatChanged data={data} />
+      </div>
+      <VixCard data={data} live={live} />
+
       {series.length > 1 ? (
-        <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="text-xs text-muted-foreground">Nifty 50, last 6 months</div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
               {vs50 !== null ? (
-                <span className={vs50 >= 0 ? "text-emerald-500" : "text-rose-500"}>
+                <span className={vs50 >= 0 ? "text-gain" : "text-loss"}>
                   {Math.abs(vs50).toFixed(1)}% {vs50 >= 0 ? "above" : "below"} 50-day average
                 </span>
               ) : null}
               {vs200 !== null ? (
-                <span className={vs200 >= 0 ? "text-emerald-500" : "text-rose-500"}>
+                <span className={vs200 >= 0 ? "text-gain" : "text-loss"}>
                   {Math.abs(vs200).toFixed(1)}% {vs200 >= 0 ? "above" : "below"} 200-day average
                 </span>
               ) : null}
@@ -342,12 +321,12 @@ function MarketOverviewPanel() {
                       <div
                         key={x.d}
                         title={`${dateLabel(x.d)}: ${signed(x.pct)}`}
-                        className={cn("flex-1 rounded-sm", x.pct >= 0 ? "bg-emerald-500" : "bg-rose-500")}
+                        className={cn("flex-1 rounded-sm", x.pct >= 0 ? "bg-gain" : "bg-loss")}
                         style={{ height: `${Math.max((Math.abs(x.pct) / maxMove) * 100, 8)}%` }}
                       />
                     ))}
                   </div>
-                  <div className="mt-1.5 flex gap-2 text-[10px] text-muted-foreground">
+                  <div className="mt-1.5 flex gap-2 text-micro text-muted-foreground">
                     {last5.map((x) => (
                       <span key={x.d} className="flex-1 text-center">
                         {new Date(`${x.d}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" })}
@@ -362,13 +341,13 @@ function MarketOverviewPanel() {
                     <span>52-week range</span>
                     <span>{belowHigh >= -0.05 ? "At its yearly high" : `${Math.abs(belowHigh).toFixed(1)}% below yearly high`}</span>
                   </div>
-                  <div className="relative mt-6 h-2 rounded-full bg-gradient-to-r from-rose-500/40 via-amber-500/40 to-emerald-500/40">
+                  <div className="relative mt-6 h-2 rounded-full bg-gradient-to-r from-loss/40 via-warning/40 to-gain/40">
                     <div
                       className="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary"
                       style={{ left: `${rangePos * 100}%` }}
                     />
                   </div>
-                  <div className="mt-2 flex justify-between text-[11px] tabular-nums text-muted-foreground">
+                  <div className="mt-2 flex justify-between text-caption tabular-nums text-muted-foreground">
                     <span>{lo52!.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
                     <span>{hi52!.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
                   </div>
@@ -381,16 +360,16 @@ function MarketOverviewPanel() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* Rising vs falling, as one bar. */}
-        <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="rounded-xl border border-border bg-card p-5">
           <div className="text-xs text-muted-foreground">Stocks today</div>
           <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-muted">
-            <div className="bg-emerald-500" style={{ width: `${(up / total) * 100}%` }} title={`${up} rising`} />
+          <div className="bg-gain" style={{ width: `${(up / total) * 100}%` }} title={`${up} rising`} />
             <div className="bg-muted-foreground/30" style={{ width: `${(flat / total) * 100}%` }} title={`${flat} unchanged`} />
-            <div className="bg-rose-500" style={{ width: `${(down / total) * 100}%` }} title={`${down} falling`} />
+            <div className="bg-loss" style={{ width: `${(down / total) * 100}%` }} title={`${down} falling`} />
           </div>
           <div className="mt-2 flex justify-between text-sm tabular-nums">
-            <span className="text-emerald-500">{up} rising</span>
-            <span className="text-rose-500">{down} falling</span>
+            <span className="text-gain">{up} rising</span>
+            <span className="text-loss">{down} falling</span>
           </div>
 
           <div className="mt-5 text-xs text-muted-foreground">Above their average price</div>
@@ -414,26 +393,26 @@ function MarketOverviewPanel() {
               <div>
                 <div className="text-xs text-muted-foreground">Above 50-day average, over 30 days</div>
                 {breadthMove !== null ? (
-                  <div className={cn("mt-1 text-sm tabular-nums", breadthMove >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                  <div className={cn("mt-1 text-sm tabular-nums", breadthMove >= 0 ? "text-gain" : "text-loss")}>
                     {breadthMove >= 0 ? "Up" : "Down"} {Math.abs(breadthMove).toFixed(0)} points
                   </div>
                 ) : null}
-                {extreme ? <div className="mt-0.5 text-[11px] text-muted-foreground">{extreme}</div> : null}
+                {extreme ? <div className="mt-0.5 text-caption text-muted-foreground">{extreme}</div> : null}
               </div>
               <Sparkline data={history.slice(-30).map((h) => h.pct)} width={140} height={40} ariaLabel="Share of stocks above their 50-day average" />
             </div>
           ) : null}
-          <div className="mt-4 text-[11px] text-muted-foreground" title={data.survivorship_safeguard}>
+          <div className="mt-4 text-caption text-muted-foreground" title={data.survivorship_safeguard}>
             Based on {data.total_stocks_analyzed} stocks
             {stockDataBehind ? (
-              <span className="text-amber-500"> · stock data to {dateLabel(data.stocks_as_of!)}, index to {dateLabel(lastPoint.d)}</span>
+              <span className="text-warning"> · stock data to {dateLabel(data.stocks_as_of!)}, index to {dateLabel(lastPoint.d)}</span>
             ) : null}
           </div>
         </div>
 
         <div className="grid content-start gap-4">
           {/* One number, one word. */}
-          <div className="flex items-center gap-5 rounded-2xl border border-border bg-card p-5">
+          <div className="flex items-center gap-5 rounded-xl border border-border bg-card p-5">
             <Ring value={contextScore} size={88} toneClass={scoreTone}>
               <span className="text-xl font-semibold tabular-nums">{contextScore}</span>
             </Ring>
@@ -445,19 +424,19 @@ function MarketOverviewPanel() {
           </div>
 
           <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-border bg-card p-4">
+            <div className="rounded-xl border border-border bg-card p-4">
               <div className="text-xs text-muted-foreground">Yearly high / low</div>
               <div className="mt-2 flex items-baseline gap-2 tabular-nums">
-                <span className="text-xl font-semibold text-emerald-500">{data.highs_52w_count}</span>
+                <span className="text-xl font-semibold text-gain">{data.highs_52w_count}</span>
                 <span className="text-muted-foreground">/</span>
-                <span className="text-xl font-semibold text-rose-500">{data.lows_52w_count}</span>
+                <span className="text-xl font-semibold text-loss">{data.lows_52w_count}</span>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4">
+            <div className="rounded-xl border border-border bg-card p-4">
               <div className="text-xs text-muted-foreground">Swings</div>
               <div className="mt-2 text-xl font-semibold">{volWord}</div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4">
+            <div className="rounded-xl border border-border bg-card p-4">
               <div className="text-xs text-muted-foreground">Sectors rising</div>
               <div className="mt-2 text-xl font-semibold tabular-nums">{secPart.toFixed(0)}%</div>
             </div>
@@ -466,7 +445,7 @@ function MarketOverviewPanel() {
       </div>
 
       {/* Which approaches suit today, as chips rather than two tables. */}
-      <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <div className="text-xs text-muted-foreground">What suits this market</div>
         <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
@@ -477,9 +456,9 @@ function MarketOverviewPanel() {
           ].map((s) => {
             const f = fit(s.v);
             return (
-              <div key={s.label} className="flex items-center justify-between gap-2 rounded-xl border border-border px-3.5 py-2.5">
+              <div key={s.label} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3.5 py-2.5">
                 <span className="text-sm">{s.label}</span>
-                <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", f.cls)}>{f.word}</span>
+                <span className={cn("rounded-full px-2 py-0.5 text-caption font-medium", f.cls)}>{f.word}</span>
               </div>
             );
           })}
@@ -487,14 +466,14 @@ function MarketOverviewPanel() {
       </div>
 
       {data.strongest_sectors?.length || data.weakest_sectors?.length || data.sectors_turning_up?.length || data.sectors_fading?.length ? (
-        <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="rounded-xl border border-border bg-card p-5">
           <div className="text-xs text-muted-foreground">Sectors</div>
           <div className="mt-3 space-y-3">
             {[
               { label: "Leading", items: data.strongest_sectors, cls: tone.good },
               { label: "Lagging", items: data.weakest_sectors, cls: tone.bad },
-              { label: "Turning up", items: data.sectors_turning_up, cls: "bg-emerald-500/5 text-emerald-500 ring-1 ring-emerald-500/30" },
-              { label: "Fading", items: data.sectors_fading, cls: "bg-amber-500/5 text-amber-500 ring-1 ring-amber-500/30" },
+              { label: "Turning up", items: data.sectors_turning_up, cls: "bg-gain/5 text-gain ring-1 ring-gain/30" },
+              { label: "Fading", items: data.sectors_fading, cls: "bg-warning/5 text-warning ring-1 ring-warning/30" },
             ].map((row) =>
               row.items?.length ? (
                 <div key={row.label} className="flex flex-wrap items-center gap-2">
@@ -533,17 +512,17 @@ function MarketOverviewPanel() {
               })),
             },
           ].map((card) => (
-            <div key={card.title} className="rounded-2xl border border-border bg-card p-5">
+            <div key={card.title} className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs text-muted-foreground">{card.title}</span>
-                <span className="text-[11px] text-muted-foreground/70">{card.hint}</span>
+                <span className="text-caption text-muted-foreground/70">{card.hint}</span>
               </div>
               {card.rows.length ? (
                 <div className="mt-3 divide-y divide-border">
                   {card.rows.map((r) => (
                     <div key={r.symbol} className="flex items-center justify-between py-2 text-sm">
                       <span className="font-medium">{r.symbol}</span>
-                      <span className={cn("tabular-nums", r.good ? "text-emerald-500" : "text-rose-500")}>{r.value}</span>
+                      <span className={cn("tabular-nums", r.good ? "text-gain" : "text-loss")}>{r.value}</span>
                     </div>
                   ))}
                 </div>
@@ -554,6 +533,8 @@ function MarketOverviewPanel() {
           ))}
         </div>
       ) : null}
+
+      {onOpenScreen ? <ScreenerJumps onOpen={onOpenScreen} /> : null}
     </div>
   );
 }
@@ -606,7 +587,7 @@ function TrendChart({
           </defs>
           <path d={`${line("c")}L${W},${H} L0,${H} Z`} fill="url(#nifty-fill)" />
           <path d={line("s200")} fill="none" stroke="var(--muted-foreground)" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" opacity="0.7" />
-          <path d={line("s50")} fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          <path d={line("s50")} fill="none" className="stroke-warning" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
           <path d={line("c")} fill="none" stroke="var(--primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           {hover !== null ? (
             <line x1={x(hover)} x2={x(hover)} y1={0} y2={H} stroke="var(--muted-foreground)" strokeWidth="1" vectorEffect="non-scaling-stroke" opacity="0.5" />
@@ -614,7 +595,7 @@ function TrendChart({
         </svg>
         {point ? (
           <div
-            className="pointer-events-none absolute top-1 -translate-x-1/2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs shadow-lg"
+            className="pointer-events-none absolute top-1 -translate-x-1/2 rounded-xl border border-border bg-card px-2.5 py-1.5 text-xs "
             style={{ left: `${Math.min(88, Math.max(12, (hover! / (series.length - 1)) * 100))}%` }}
           >
             <div className="text-muted-foreground">{dateLabel(point.d)}</div>
@@ -622,11 +603,11 @@ function TrendChart({
           </div>
         ) : null}
       </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+      <div className="mt-2 flex items-center justify-between text-caption text-muted-foreground">
         <span>{dateLabel(series[0].d)}</span>
         <span className="flex items-center gap-4">
           <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-primary" /> Nifty</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-amber-500" /> 50-day</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-warning" /> 50-day</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-muted-foreground" /> 200-day</span>
         </span>
         <span>{dateLabel(series[series.length - 1].d)}</span>
@@ -671,11 +652,11 @@ function SectorRankingsPanel() {
   useEffect(() => { load(); }, [load]);
 
   if (loading && sectors.length === 0) return <PageLoader label="Loading sectors" />;
-  if (error && sectors.length === 0) return <div style={{ padding: "1rem" }}><CompactErrorNotice msg={error} onRetry={() => load()} /></div>;
+  if (error && sectors.length === 0) return <div className="p-4"><CompactErrorNotice msg={error} onRetry={() => load()} /></div>;
 
   const value = SECTOR_PERIODS[period].pick;
   const maxAbs = Math.max(...sectors.map((s) => Math.abs(value(s))), 0.01);
-  const barTone = (pct: number) => (pct >= 55 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-rose-500");
+  const barTone = (pct: number) => (pct >= 55 ? "bg-gain" : pct >= 40 ? "bg-warning" : "bg-loss");
 
   return (
     <div className="space-y-4">
@@ -690,7 +671,9 @@ function SectorRankingsPanel() {
         {error ? <CompactErrorNotice msg={error} onRetry={() => load()} /> : null}
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+      <SectorHeatmap sectors={sectors} pick={value} periodLabel={SECTOR_PERIODS[period].label} />
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_84px] gap-4 border-b border-border px-5 py-3 text-xs text-muted-foreground">
           <span>Sector</span>
           <span>Return {SECTOR_PERIODS[period].label.toLowerCase()}</span>
@@ -704,18 +687,18 @@ function SectorRankingsPanel() {
               <div key={s.sector} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_84px] items-center gap-4 px-5 py-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{s.sector}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 text-caption text-muted-foreground">
                     {s.stock_count} stocks
                     <span className="ml-2 inline-flex gap-0.5 align-middle" title="Today, this week, this month">
                       {[s.return_1d_pct, s.return_1w_pct, s.return_1m_pct].map((v, i) => (
-                        <span key={i} className={cn("size-1.5 rounded-full", v > 0 ? "bg-emerald-500" : v < 0 ? "bg-rose-500" : "bg-muted-foreground/40")} />
+                        <span key={i} className={cn("size-1.5 rounded-full", v > 0 ? "bg-gain" : v < 0 ? "bg-loss" : "bg-muted-foreground/40")} />
                       ))}
                     </span>
                     {s.stock_count >= 5 && s.return_1w_pct > 0 && s.return_1m_pct < 0 ? (
-                      <span className="ml-2 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-emerald-500">Turning up</span>
+                      <span className="ml-2 rounded-full border border-gain/20 bg-gain/[0.08] px-1.5 py-0.5 text-gain">Turning up</span>
                     ) : null}
                     {s.stock_count >= 5 && s.return_1w_pct < 0 && s.return_1m_pct > 0 ? (
-                      <span className="ml-2 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-500">Fading</span>
+                      <span className="ml-2 rounded-full border border-warning/20 bg-warning/[0.08] px-1.5 py-0.5 text-warning">Fading</span>
                     ) : null}
                     {s.breakout_count > 0 ? (
                       <span className="ml-2 rounded-full bg-primary/10 px-1.5 py-0.5 text-primary">
@@ -728,11 +711,11 @@ function SectorRankingsPanel() {
                   <div className="relative h-2.5 flex-1 rounded-full bg-muted/60">
                     <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
                     <div
-                      className={cn("absolute inset-y-0 rounded-full transition-all duration-500", v >= 0 ? "bg-emerald-500" : "bg-rose-500")}
+                    className={cn("absolute inset-y-0 rounded-full transition-all duration-500", v >= 0 ? "bg-gain" : "bg-loss")}
                       style={v >= 0 ? { left: "50%", width: `${width}%` } : { right: "50%", width: `${width}%` }}
                     />
                   </div>
-                  <span className={cn("w-16 shrink-0 text-right text-sm tabular-nums", v > 0 ? "text-emerald-500" : v < 0 ? "text-rose-500" : "text-muted-foreground")}>
+                  <span className={cn("w-16 shrink-0 text-right text-sm tabular-nums", v > 0 ? "text-gain" : v < 0 ? "text-loss" : "text-muted-foreground")}>
                     {v > 0 ? "+" : ""}{v.toFixed(2)}%
                   </span>
                 </div>
@@ -790,9 +773,9 @@ function StockLeadersPanel() {
   useEffect(() => { load(); }, [load]);
 
   if (loading && stocks.length === 0) return <PageLoader label="Loading stocks" />;
-  if (error && stocks.length === 0) return <div style={{ padding: "1rem" }}><CompactErrorNotice msg={error} onRetry={() => load()} /></div>;
+  if (error && stocks.length === 0) return <div className="p-4"><CompactErrorNotice msg={error} onRetry={() => load()} /></div>;
 
-  const signedCls = (v: number) => (v > 0 ? "text-emerald-500" : v < 0 ? "text-rose-500" : "text-muted-foreground");
+  const signedCls = (v: number) => (v > 0 ? "text-gain" : v < 0 ? "text-loss" : "text-muted-foreground");
   const pct = (v: number, digits = 1) => `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`;
 
   // The three facts every row shows, plus the one you sorted by if it is not among them.
@@ -800,7 +783,7 @@ function StockLeadersPanel() {
     const all: { key: StockSortKey; label: string; text: string; cls: string }[] = [
       { key: "relative_strength_nifty_20d", label: "vs Nifty", text: pct(s.relative_strength_nifty_20d, 0), cls: signedCls(s.relative_strength_nifty_20d) },
       { key: "relative_volume", label: "Volume", text: `${s.relative_volume.toFixed(1)}x`, cls: s.relative_volume >= 1.5 ? "text-primary" : "" },
-      { key: "from_52w_high_pct", label: "Yearly high", text: pct(s.from_52w_high_pct, 1), cls: s.from_52w_high_pct > -3 ? "text-amber-500" : "" },
+      { key: "from_52w_high_pct", label: "Yearly high", text: pct(s.from_52w_high_pct, 1), cls: s.from_52w_high_pct > -3 ? "text-warning" : "" },
       { key: "trend_pct", label: "Trend", text: pct(s.trend_pct, 1), cls: signedCls(s.trend_pct) },
       { key: "atr_pct", label: "Swings", text: `${s.atr_pct.toFixed(1)}%`, cls: "" },
     ];
@@ -860,11 +843,11 @@ function StockLeadersPanel() {
       ) : null}
 
       {stocks.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-xl border border-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
           Nothing matches right now.
         </div>
       ) : (
-        <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
           {stocks.map((s, i) => (
             <div key={s.symbol} className="flex items-start gap-3 px-5 py-3">
               <span className="w-6 pt-0.5 text-xs tabular-nums text-muted-foreground">{i + 1}</span>
@@ -872,7 +855,7 @@ function StockLeadersPanel() {
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="font-semibold">{s.symbol.replace("-EQ", "")}</span>
                   {s.is_breakout ? (
-                    <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">Breakout</span>
+                    <span className="rounded-full border border-warning/20 bg-warning/[0.08] px-2 py-0.5 text-micro font-medium text-warning">Breakout</span>
                   ) : null}
                   <span className="truncate text-xs text-muted-foreground">{s.sector ?? ""}</span>
                 </div>
@@ -934,32 +917,9 @@ const AXIS_OPTIONS: { key: MarketContextAxis; label: string; description: string
 ];
 
 function EvidencePip({ note }: { note: MarketContextBucket["evidence_note"] }) {
-  const colour =
-    note === "forward"
-      ? "#10b981"
-      : note === "insufficient_forward_observations"
-      ? "#eab308"
-      : "#64748b";
-  const label =
-    note === "forward"
-      ? "Forward"
-      : note === "insufficient_forward_observations"
-      ? "Thin"
-      : "In-sample";
-  return (
-    <span
-      style={{
-        background: `${colour}20`,
-        color: colour,
-        borderRadius: 4,
-        padding: "0.1rem 0.4rem",
-        fontSize: 10,
-        fontWeight: 700,
-      }}
-    >
-      {label}
-    </span>
-  );
+  const tone: Tone = note === "forward" ? "good" : note === "insufficient_forward_observations" ? "warn" : "flat";
+  const label = note === "forward" ? "Forward" : note === "insufficient_forward_observations" ? "Thin" : "In-sample";
+  return <Badge tone={tone}>{label}</Badge>;
 }
 
 function StrategyContextPanel() {
@@ -984,31 +944,23 @@ function StrategyContextPanel() {
   const axisDesc = AXIS_OPTIONS.find((o) => o.key === axis)?.description ?? "";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+    <div className="flex flex-col gap-4">
       {/* Controls */}
-      <Card>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 10, color: "#64748b", fontWeight: 600 }}>STRATEGY (optional)</label>
+      <Card padding="md">
+        <div className="flex gap-4 flex-wrap items-end">
+          <div className="flex flex-col gap-1">
+            <label className={fieldLabel}>STRATEGY (optional)</label>
             <input
               id="strategy-context-strategy"
               value={strategy}
               onChange={(e) => setStrategy(e.target.value)}
               placeholder="e.g. MOMENTUM_BREAKOUT"
-              style={{
-                background: "rgba(15,23,42,0.5)",
-                border: "1px solid rgba(99,102,241,0.2)",
-                borderRadius: 6,
-                color: "#e2e8f0",
-                padding: "0.4rem 0.6rem",
-                fontSize: 12,
-                width: 200,
-              }}
+              className={cn(fieldInput, "w-[200px]")}
             />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 10, color: "#64748b", fontWeight: 600 }}>CONDITION AXIS</label>
+          <div className="flex flex-col gap-1">
+            <label className={fieldLabel}>CONDITION AXIS</label>
             <Select
               size="sm"
               className="w-[220px]"
@@ -1022,85 +974,67 @@ function StrategyContextPanel() {
             id="strategy-context-run"
             onClick={run}
             disabled={loading}
-            style={{
-              background: "rgba(99,102,241,0.2)",
-              border: "1px solid rgba(99,102,241,0.4)",
-              borderRadius: 8,
-              color: "#818cf8",
-              padding: "0.5rem 1rem",
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: loading ? "wait" : "pointer",
-            }}
+            className={toolbarButton}
           >
             {loading ? "Analyzing…" : "Analyze"}
           </button>
         </div>
-        <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>{axisDesc}</div>
+        <div className="mt-1.5 text-caption text-muted-foreground">{axisDesc}</div>
       </Card>
 
-      {error && <div style={{ padding: "0.5rem 0" }}><CompactErrorNotice msg={error} onRetry={() => run()} /></div>}
+      {error && <div className="py-2 px-0"><CompactErrorNotice msg={error} onRetry={() => run()} /></div>}
 
       {result && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div className="flex flex-col gap-4">
           {/* Baseline */}
-          <Card>
-            <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
+          <Card padding="md">
+            <div className="flex gap-8 flex-wrap">
               <div>
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 2 }}>STRATEGY</div>
-                <div style={{ fontWeight: 700, color: "#818cf8" }}>{result.strategy}</div>
+                <div className="text-micro text-muted-foreground mb-0.5">STRATEGY</div>
+                <div className="font-semibold text-primary-soft">{result.strategy}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 2 }}>AXIS</div>
-                <div style={{ fontWeight: 600, color: "#e2e8f0" }}>{result.condition_axis}</div>
+                <div className="text-micro text-muted-foreground mb-0.5">AXIS</div>
+                <div className="font-semibold text-foreground">{result.condition_axis}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 2 }}>METRIC</div>
-                <div style={{ fontWeight: 600, color: "#e2e8f0" }}>{result.metric}</div>
+                <div className="text-micro text-muted-foreground mb-0.5">METRIC</div>
+                <div className="font-semibold text-foreground">{result.metric}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 2 }}>TOTAL ROWS</div>
-                <div style={{ fontWeight: 600, color: "#94a3b8" }}>{result.total_rows_scanned}</div>
+                <div className="text-micro text-muted-foreground mb-0.5">TOTAL ROWS</div>
+                <div className="font-semibold text-muted-foreground">{result.total_rows_scanned}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 2 }}>BASELINE WIN RATE</div>
-                <div style={{ fontWeight: 600, color: "#94a3b8" }}>
+                <div className="text-micro text-muted-foreground mb-0.5">BASELINE WIN RATE</div>
+                <div className="font-semibold text-muted-foreground">
                   {result.baseline.win_rate != null ? `${result.baseline.win_rate.toFixed(1)}%` : "—"}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 2 }}>BASELINE MEAN</div>
-                <div style={{ fontWeight: 600, color: trend(result.baseline.mean) }}>
+                <div className="text-micro text-muted-foreground mb-0.5">BASELINE MEAN</div>
+                <div className={cn("font-semibold", toneText[toneOf(result.baseline.mean)])}>
                   {result.baseline.mean != null ? result.baseline.mean.toFixed(2) : "—"}
                 </div>
               </div>
             </div>
             {result.caveats.length > 0 && (
-              <div style={{ marginTop: "0.5rem", fontSize: 11, color: "#eab308" }}>
+              <div className="mt-2 text-caption text-warning">
                 ⚠ {result.caveats.join(" · ")}
               </div>
             )}
           </Card>
 
           {/* Bucket table */}
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(99,102,241,0.15)" }}>
+                <tr className="border-b border-b-primary/15">
                   {["Condition", "Evidence", "N", "Fwd", "Mean", "Median", "Win Rate", "Profit Factor", "CI (95%)"].map(
                     (h) => (
                       <th
                         key={h}
-                        style={{
-                          padding: "0.4rem 0.75rem",
-                          textAlign: "left",
-                          fontWeight: 700,
-                          color: "#64748b",
-                          fontSize: 10,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                          whiteSpace: "nowrap",
-                        }}
+                      className="py-1.5 px-3 text-left font-semibold text-muted-foreground text-micro uppercase tracking-wider whitespace-nowrap"
                       >
                         {h}
                       </th>
@@ -1112,40 +1046,35 @@ function StrategyContextPanel() {
                 {result.all_buckets.map((b, i) => (
                   <tr
                     key={b.label}
-                    style={{
-                      borderBottom: "1px solid rgba(99,102,241,0.07)",
-                      background: b.suppressed
-                        ? "rgba(15,23,42,0.3)"
-                        : i % 2 === 0
-                        ? "transparent"
-                        : "rgba(30,41,59,0.2)",
-                      opacity: b.suppressed ? 0.5 : 1,
-                    }}
+                    className={cn(
+                      "border-b border-border/50",
+                      b.suppressed ? "bg-muted/30 opacity-50" : i % 2 === 1 && "bg-muted/20",
+                    )}
                   >
-                    <td style={{ padding: "0.4rem 0.75rem", fontWeight: 700, color: "#e2e8f0" }}>
+                    <td className="py-1.5 px-3 font-semibold text-foreground">
                       {b.label.replace(/_/g, " ")}
                       {b.suppressed && (
-                        <span style={{ marginLeft: 6, fontSize: 10, color: "#475569" }}>(too few)</span>
+                        <span className="ml-1.5 text-micro text-muted-foreground">(too few)</span>
                       )}
                     </td>
-                    <td style={{ padding: "0.4rem 0.75rem" }}>
+                    <td className="py-1.5 px-3">
                       <EvidencePip note={b.evidence_note} />
                     </td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: "#94a3b8" }}>{b.n}</td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: "#64748b" }}>{b.n_forward}</td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: trend(b.mean), fontWeight: 600 }}>
+                    <td className="py-1.5 px-3 text-muted-foreground">{b.n}</td>
+                    <td className="py-1.5 px-3 text-muted-foreground">{b.n_forward}</td>
+                    <td className={cn("px-3 py-1.5 font-semibold", toneText[toneOf(b.mean)])}>
                       {b.mean != null ? b.mean.toFixed(2) : "—"}
                     </td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: trend(b.median) }}>
+                    <td className={cn("px-3 py-1.5", toneText[toneOf(b.median)])}>
                       {b.median != null ? b.median.toFixed(2) : "—"}
                     </td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: b.win_rate != null && b.win_rate > 50 ? "#10b981" : "#ef4444" }}>
+                    <td className={cn("px-3 py-1.5", toneText[b.win_rate != null && b.win_rate > 50 ? "good" : "bad"])}>
                       {b.win_rate != null ? `${b.win_rate.toFixed(1)}%` : "—"}
                     </td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: b.profit_factor != null && b.profit_factor > 1 ? "#10b981" : "#ef4444" }}>
+                    <td className={cn("px-3 py-1.5", toneText[b.profit_factor != null && b.profit_factor > 1 ? "good" : "bad"])}>
                       {b.profit_factor != null ? b.profit_factor.toFixed(2) : "—"}
                     </td>
-                    <td style={{ padding: "0.4rem 0.75rem", color: "#475569", fontSize: 11 }}>
+                    <td className="py-1.5 px-3 text-muted-foreground text-caption">
                       {b.ci_low != null && b.ci_high != null
                         ? `[${b.ci_low.toFixed(2)}, ${b.ci_high.toFixed(2)}]`
                         : "—"}
@@ -1157,15 +1086,15 @@ function StrategyContextPanel() {
           </div>
 
           {/* Evidence legend */}
-          <div style={{ display: "flex", gap: "1rem", fontSize: 10, color: "#475569" }}>
+          <div className="flex gap-4 text-micro text-muted-foreground">
             <span>
-              <span style={{ color: "#10b981" }}>● Forward</span> — enough out-of-sample observations
+              <span className="text-gain">● Forward</span> — enough out-of-sample observations
             </span>
             <span>
-              <span style={{ color: "#eab308" }}>● Thin</span> — forward evidence exists but below floor
+              <span className="text-warning">● Thin</span> — forward evidence exists but below floor
             </span>
             <span>
-              <span style={{ color: "#64748b" }}>● In-sample</span> — selection-history only
+              <span className="text-muted-foreground">● In-sample</span> — selection-history only
             </span>
           </div>
         </div>
@@ -1185,48 +1114,36 @@ const SUB_TABS: { id: IntelSub; label: string }[] = [
   { id: "context", label: "Strategy Context" },
 ];
 
-export default function MarketIntelligencePanel() {
+export default function MarketIntelligencePanel({ onOpenScreen }: { onOpenScreen?: (p: ScreenPreset) => void } = {}) {
   const [sub, setSub] = useState<IntelSub>("overview");
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      {/* Sub-tab bar */}
-      <div style={{ display: "flex", gap: "0.25rem", borderBottom: "1px solid rgba(99,102,241,0.15)", paddingBottom: "0.5rem" }}>
+    <div className="flex flex-col gap-4">
+      {/* Sub-tab bar: the same beui Tabs as the Markets row above, in the segment style. */}
+      <div>
+        <Tabs value={sub} onValueChange={(v) => setSub(v as IntelSub)} variant="segment">
+          <TabsList>
         {SUB_TABS.map((t) => (
-          <button
-            key={t.id}
-            id={`intel-sub-${t.id}`}
-            onClick={() => setSub(t.id)}
-            style={{
-              padding: "0.4rem 0.9rem",
-              fontSize: 12,
-              fontWeight: 600,
-              borderRadius: "6px 6px 0 0",
-              cursor: "pointer",
-              background: sub === t.id ? "rgba(99,102,241,0.15)" : "transparent",
-              border: "none",
-              borderBottom: sub === t.id ? "2px solid #6366f1" : "2px solid transparent",
-              color: sub === t.id ? "#818cf8" : "#64748b",
-              transition: "all 0.15s",
-            }}
-          >
+              <TabsTrigger key={t.id} value={t.id}>
             {t.label}
-          </button>
+              </TabsTrigger>
         ))}
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* Panel content: Keep sub-panels mounted to prevent re-fetching and flickering when switching tabs */}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <div style={{ display: sub === "overview" ? "block" : "none" }}>
-        <MarketOverviewPanel />
+      <div className={sub === "overview" ? "block" : "hidden"}>
+        <MarketOverviewPanel onOpenScreen={onOpenScreen} />
       </div>
-      <div style={{ display: sub === "sectors" ? "block" : "none" }}>
+      <div className={sub === "sectors" ? "block" : "hidden"}>
         <SectorRankingsPanel />
       </div>
-      <div style={{ display: sub === "stocks" ? "block" : "none" }}>
+      <div className={sub === "stocks" ? "block" : "hidden"}>
         <StockLeadersPanel />
       </div>
-      <div style={{ display: sub === "context" ? "block" : "none" }}>
+      <div className={sub === "context" ? "block" : "hidden"}>
         <StrategyContextPanel />
       </div>
     </div>

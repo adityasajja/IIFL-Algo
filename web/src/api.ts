@@ -3842,6 +3842,16 @@ export interface MarketSummary {
   nifty_52w_low?: number | null;
   sectors_turning_up?: string[];
   sectors_fading?: string[];
+  /** India VIX from its own cached series; absent until it has been downloaded. */
+  vix?: {
+    close: number;
+    change_1d_pct: number | null;
+    percentile_1y: number;
+    low_1y: number;
+    high_1y: number;
+    as_of: string;
+    series: number[];
+  } | null;
 }
 
 // ─── Insights: the day's read ────────────────────────────────────────────────
@@ -4002,6 +4012,25 @@ export const getMarketIntelSummary = (forceRefresh = false) =>
   v1<{ ok: boolean; data: MarketSummary }>(
     `/market-intel/summary${forceRefresh ? "?force_refresh=true" : ""}`
   );
+
+export interface LiveIndexQuote {
+  ltp: number;
+  prev_close: number | null;
+  chg: number | null;
+  chg_pct: number | null;
+  /** Seconds since the broker last sent this quote. */
+  age_s: number;
+}
+
+export interface MarketLive {
+  /** False when there is no broker session: the page keeps the daily numbers. */
+  available: boolean;
+  market_open: boolean;
+  nifty: LiveIndexQuote | null;
+  vix: LiveIndexQuote | null;
+}
+
+export const getMarketLive = () => v1<MarketLive>("/market-intel/live");
 
 export type SectorSortKey =
   | "relative_strength_1d"
