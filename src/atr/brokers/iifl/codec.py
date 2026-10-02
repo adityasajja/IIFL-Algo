@@ -125,6 +125,57 @@ def decode_market_feed(data: bytes | bytearray) -> MarketFeed:
     )
 
 
+INDEX_PACKET_BYTES = 20
+
+
+@dataclass(slots=True)
+class IndexTick:
+    """An index quote. Quacks like the parts of ``MarketFeed`` an index has.
+
+    Indices publish a 20-byte packet, not the 186-byte market-watch frame, and have
+    no depth, volume or best bid/ask: those read as zero.
+    """
+
+    ltp: float
+    close: float  # the previous session's close
+    last_traded_time: datetime
+    open: float = 0.0
+    high: float = 0.0
+    low: float = 0.0
+    last_traded_quantity: int = 0
+    traded_volume: int = 0
+    best_bid_price: float = 0.0
+    best_ask_price: float = 0.0
+
+
+_INDEX_DIVISORS = {1, 10, 100, 1000, 10000}
+
+
+def decode_index_packet(data: bytes | bytearray) -> IndexTick:
+    """Decode the 20-byte index packet.
+
+    Layout, worked out against live packets and the exchange's own closes::
+
+        0..2   header (not decoded)
+        3..6   last price, int32 LE
+        7..10  (zero in every packet seen)
+        11..14 previous close, int32 LE
+        15..18 price divisor, int32 LE (100 for Nifty, 10000 for India VIX)
+        19     trailer
+
+    Verified on 1 Oct 2026: Nifty 50 gave 2242195 / 2262045 with divisor 100
+    (22,421.95 = that session's close, 22,620.45 = the one before), India VIX gave
+    144550 / 135924 with divisor 10000 (14.4550 and 13.5924).
+    """
+    raw = bytes(data)
+    if len(raw) < INDEX_PACKET_BYTES:
+        raise ValueError(f"index packet too short: {len(raw)} < {INDEX_PACKET_BYTES}")
+    ltp, prev, div = struct.unpack_from("<iii", raw, 3)[0], struct.unpack_from("<i", raw, 11)[0], struct.unpack_from("<i", raw, 15)[0]
+    if div not in _INDEX_DIVISORS or ltp <= 0:
+        raise ValueError(f"unrecognised index packet (divisor {div}, ltp {ltp}): {raw.hex()}")
+    return IndexTick(ltp=ltp / div, close=prev / div, last_traded_time=datetime.now(UTC))
+
+
 def decode_open_interest(data: bytes | bytearray) -> dict[str, int]:
     oi, day_high, day_low, prev = struct.unpack("iiii", bytes(data)[:16])
     return {

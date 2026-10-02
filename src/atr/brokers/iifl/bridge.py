@@ -39,7 +39,9 @@ from loguru import logger
 from atr.brokers.iifl.auth import Session
 from atr.config.settings import get_settings
 from atr.brokers.iifl.codec import (
+    FEED_PACKET_BYTES,
     decode_circuit,
+    decode_index_packet,
     decode_lpp,
     decode_market_feed,
     decode_market_status,
@@ -238,7 +240,13 @@ class BridgeClient:
             elif topic.startswith(TOPIC_INDEX):
                 if self.on_index:
                     _, suffix = _TOPIC_RE.split(topic, 1)
-                    self.on_index(suffix, decode_market_feed(payload))
+                    # Indices send a short 20-byte packet; the full frame is for stocks.
+                    decoded = (
+                        decode_index_packet(payload)
+                        if len(payload) < FEED_PACKET_BYTES
+                        else decode_market_feed(payload)
+                    )
+                    self.on_index(suffix, decoded)
             elif topic.startswith(TOPIC_OI):
                 if self.on_open_interest:
                     _, suffix = _TOPIC_RE.split(topic, 1)

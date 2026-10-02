@@ -112,6 +112,9 @@ class TickBroadcaster:
         # O(1) appends, zero disk I/O, ultra-low sub-millisecond memory footprint
         self._ring_buffer: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=5000))
 
+        #: Latest index quote by name ("NIFTY 50", "INDIA VIX"), from the index feed.
+        self._latest_index: dict[str, dict[str, Any]] = {}
+        self._index_topics: dict[str, str] = {}  # "nseeq/999920000" -> "NIFTY 50"
         self._bridge = None
         self._lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -149,6 +152,7 @@ class TickBroadcaster:
                 logger.info("Initializing IIFL BridgeClient for live ticks...")
                 bridge = BridgeClient(session)
                 bridge.on_feed = self._on_bridge_feed
+                bridge.on_index = self._on_bridge_index
                 bridge.on_error = lambda code, msg: logger.warning("Bridge tick error {}: {}", code, msg)
                 bridge.connect(timeout=8.0)
                 self._bridge = bridge
@@ -170,11 +174,61 @@ class TickBroadcaster:
                 if all_topics:
                     self._bridge.subscribe_feed(list(all_topics))
                     logger.info("BridgeClient subscribed {} active topics on init", len(all_topics))
+                if self._index_topics:  # a rebuilt bridge must get the live indices back
+                    self._bridge.subscribe_index(list(self._index_topics))
                 return True
             except Exception as exc:
                 logger.warning("Could not connect IIFL BridgeClient: {}", exc)
                 self._bridge = None
                 return False
+
+    #: The indices the Markets page shows live, as (name, topic). The topic is
+    #: ``<exchange>/<instrument id>`` from the broker's index contract file; India VIX
+    #: is filed under NSEFO, the cash indices under NSEEQ.
+    LIVE_INDICES: tuple[tuple[str, str], ...] = (
+        ("NIFTY 50", "nseeq/999920000"),
+        ("INDIA VIX", "nsefo/999920019"),
+    )
+
+    def ensure_indices(self) -> bool:
+        """Subscribe the live indices on the bridge. Safe to call repeatedly.
+
+        Returns False when there is no broker session. The bridge replays the last
+        value on subscribe, so a quote is available at once even outside market hours.
+        """
+        if not self._ensure_bridge():
+            return False
+        with self._lock:
+            fresh = [(n, t) for n, t in self.LIVE_INDICES if t not in self._index_topics]
+            for name, topic in fresh:
+                self._index_topics[topic] = name
+            bridge = self._bridge
+        if fresh and bridge is not None:
+            bridge.subscribe_index([t for _, t in fresh])
+        return True
+
+    def _on_bridge_index(self, suffix: str, feed) -> None:
+        """Callback from the bridge thread for a 20-byte index packet."""
+        name = self._index_topics.get(suffix)
+        if name is None:
+            return
+        ltp = float(feed.ltp)
+        prev = float(feed.close or 0)
+        with self._lock:
+            self._latest_index[name] = {
+                "name": name,
+                "ltp": ltp,
+                "prev_close": prev or None,
+                "chg": round(ltp - prev, 4) if prev else None,
+                "chg_pct": round((ltp / prev - 1) * 100, 2) if prev else None,
+                "recv": time.time(),
+            }
+
+    def latest_indices(self) -> dict[str, dict[str, Any]]:
+        """Latest quote per index, with the seconds since it was received."""
+        now = time.time()
+        with self._lock:
+            return {n: {**q, "age_s": round(now - q["recv"], 1)} for n, q in self._latest_index.items()}
 
     def _resolve_symbol(self, symbol: str, exchange: str = "NSEEQ") -> str | None:
         """Resolve a trading symbol (e.g. RELIANCE-EQ) to topic like 'nseeq/2885'."""

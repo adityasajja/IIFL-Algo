@@ -106,6 +106,41 @@ def market_intel_summary(
         raise _abort(500, f"market intelligence summary failed: {exc}") from exc
 
 
+@router.get("/live")
+def market_intel_live(principal: Principal = Depends(_READ)) -> dict[str, Any]:
+    """Live Nifty 50 and India VIX from the broker's index feed.
+
+    The rest of this API reads daily candles that finish at the close. This is the one
+    part that moves during the session: the page polls it every few seconds. Outside
+    market hours (and on holidays) the feed still answers with the last session's
+    values, flagged ``market_open: false``, so the page can say so instead of
+    presenting them as live. ``available: false`` means no broker session.
+    """
+    from atr.api.stream import get_broadcaster
+    from atr.market_calendar import is_market_open
+
+    try:
+        broadcaster = get_broadcaster()
+        available = broadcaster.ensure_indices()
+        quotes = broadcaster.latest_indices() if available else {}
+    except Exception as exc:  # noqa: BLE001 - the page falls back to the daily numbers
+        logger.warning("live index quotes unavailable: %s", exc)
+        available, quotes = False, {}
+
+    def pick(name: str) -> dict[str, Any] | None:
+        q = quotes.get(name)
+        if not q:
+            return None
+        return {k: q[k] for k in ("ltp", "prev_close", "chg", "chg_pct", "age_s")}
+
+    return {
+        "available": available,
+        "market_open": bool(is_market_open()),
+        "nifty": pick("NIFTY 50"),
+        "vix": pick("INDIA VIX"),
+    }
+
+
 @router.get("/sectors")
 def market_intel_sectors(
     sort_by: str = Query(
