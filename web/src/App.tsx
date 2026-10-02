@@ -5,6 +5,7 @@ import {
   AnimatedSidebarFooter,
   AnimatedSidebarGroup,
   AnimatedSidebarGroupContent,
+  AnimatedSidebarGroupLabel,
   AnimatedSidebarHeader,
   AnimatedSidebarInset,
   AnimatedSidebarMenu,
@@ -14,17 +15,15 @@ import {
   AnimatedSidebarTrigger,
 } from "./components/motion/animated-sidebar";
 import {
-  BarChart3,
+  type LucideIcon,
   Bell,
-  Brain,
   Briefcase,
   ChartPie,
-  Ellipsis,
   Eye,
   FlaskConical,
-  Home,
   House,
   Layers,
+  Beaker,
   LogIn,
   LogOut,
   Palette,
@@ -35,7 +34,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
 } from "lucide-react";
-import { useCallback, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 const AlertsPanel = lazy(() => import("./AlertsPanel"));
 import { PageLoader } from "./components/ui/loading";
 import AuthGate from "./AuthGate";
@@ -68,6 +67,8 @@ const ScreenerPanel = lazy(() => import("./ScreenerPanel"));
 import { SCREEN_PRESET_KEY } from "./MarketMood";
 const MarketIntelligencePanel = lazy(() => import("./MarketIntelligencePanel"));
 const SignalExplorerPanel = lazy(() => import("./SignalExplorerPanel"));
+const AlphaHuntPanel = lazy(() => import("./AlphaHuntPanel"));
+const EpisodicPivotPanel = lazy(() => import("./EpisodicPivotPanel"));
 import {
   appLogout,
   getHealth,
@@ -76,86 +77,42 @@ import {
   type Health,
   type LoginStatus,
 } from "./api";
+import { Callout } from "./components/ui/stat";
+import { NAV_GROUPS, PAGES, SUBS, normaliseSub, parseRoute, type Tab } from "./lib/nav";
 import { useSession } from "./lib/useSession";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
 
-export type Tab =
-  | "dashboard"
-  | "watchlist"
-  | "markets"
-  | "strategies"
-  | "signals"
-  | "trading"
-  | "paper"
-  | "evidence"
-  | "learning"
-  | "analytics"
-  | "optimization";
-
-export type MarketsSub = "intelligence" | "scanner" | "custom" | "screener" | "charts";
-export type SignalsSub = "today" | "brief" | "alerts" | "queue" | "context";
-export type EvidenceSub = "backtest" | "research" | "measured";
-export type TradingSub = "portfolio" | "control-center";
-
 /**
- * Navigation follows the trader's loop, not the codebase's module list:
- * see the world → decide → act → track → learn → improve → maintain.
- *
- * Dashboard = where am I
- * Markets = what is happening
- * Strategies = what I would do about it, and whether it works
- * Signals = what it is telling me right now
- * Trading = what I have done (positions, control center & risk policies, execution mode)
- * Paper = what the system is doing on its own, with my money as paper
- * Evidence = proof, out of sample
- * Learning = what the trade history says
- * Optimization = controlled parameter adaptation with user approval
- *
- * Paper sits beside Trading under "Act" rather than inside it, because it is a
- * different activity: Trading is you placing orders, Paper is a deployed
- * strategy placing them itself. The two have separate books — a paper
- * deployment has its own capital allocation and its own P&L — so nesting one
- * under the other would present one account as the other.
+ * The sidebar follows the product's one story, "prove a strategy, then trade it":
+ * Home, Strategies, Test, Paper, Live, Performance. Markets, Signals and Watchlist are the
+ * world around that path, and Labs holds experimental tools that are not part of it.
+ * The map itself (names, groups, sub-pages, old links) lives in lib/nav.ts.
  */
-type NavItem = { id: Tab; name: string; icon: (p: { size?: number }) => ReactNode };
+const PALETTE_KEYWORDS: Record<Tab, string[]> = {
+  dashboard: ["home", "overview", "status", "start", "next step"],
+  strategies: ["build", "registry", "rules", "models", "create"],
+  evidence: ["test", "backtest", "validate", "stress test", "out of sample", "deflated sharpe", "results", "walk-forward"],
+  paper: ["deploy", "deployment", "paper trading", "simulate", "practice", "monitor", "pause", "stop", "reset", "capital"],
+  trading: ["live", "broker", "portfolio", "holdings", "positions", "order book", "trade book"],
+  learning: ["performance", "review", "attribution", "learning", "trade history", "results"],
+  markets: ["scanner", "momentum", "charts", "scan", "screener", "sectors"],
+  signals: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning", "queue"],
+  watchlist: ["watchlist", "my symbols", "columns", "favourites", "track"],
+  labs: ["experimental", "custom scan", "alpha hunt", "episodic pivot"],
+};
 
-/**
- * Five pages carry the daily loop: how am I, what should I look at, what is the market
- * doing, what am I following, what do I hold. Everything else is the machinery behind
- * that (building and proving strategies, running them on paper, reviewing, limits,
- * plumbing) and lives under "More" so the rail is not thirteen items long. The command
- * palette still reaches every page.
- */
-const PRIMARY: NavItem[] = [
-  { id: "dashboard", name: "Dashboard", icon: House },
-  { id: "signals", name: "Signals", icon: Bell },
-  { id: "markets", name: "Markets", icon: TrendingUp },
-  { id: "watchlist", name: "Watchlist", icon: Eye },
-  { id: "trading", name: "Trading", icon: Briefcase },
-];
-
-const MORE: NavItem[] = [
-  { id: "strategies", name: "Strategies", icon: Layers },
-  { id: "paper", name: "Paper", icon: Radio },
-  { id: "evidence", name: "Evidence", icon: FlaskConical },
-  { id: "learning", name: "Learning", icon: Brain },
-  { id: "analytics", name: "Attribution", icon: ChartPie },
-  { id: "optimization", name: "Optimization", icon: SlidersHorizontal },
-];
-
-const TITLES: Record<Tab, { title: string }> = {
-  dashboard: { title: "Dashboard" },
-  watchlist: { title: "Watchlist" },
-  markets: { title: "Markets" },
-  strategies: { title: "Strategies" },
-  signals: { title: "Signals" },
-  trading: { title: "Trading" },
-  paper: { title: "Paper" },
-  evidence: { title: "Evidence" },
-  learning: { title: "Learning" },
-  analytics: { title: "Attribution" },
-  optimization: { title: "Optimization" },
+const TAB_ICON: Record<Tab, LucideIcon> = {
+  dashboard: House,
+  strategies: Layers,
+  evidence: FlaskConical,
+  paper: Radio,
+  trading: Briefcase,
+  learning: ChartPie,
+  markets: TrendingUp,
+  signals: Bell,
+  watchlist: Eye,
+  labs: Beaker,
 };
 
 /** Avatar tint per role, so authority is legible at a glance in the sidebar. */
@@ -167,99 +124,31 @@ const ROLE_TONE: Record<string, string> = {
   viewer: "bg-muted text-muted-foreground",
 };
 
-const VALID_TABS = new Set<Tab>([
-  "dashboard",
-  "watchlist",
-  "markets",
-  "strategies",
-  "signals",
-  "trading",
-  "paper",
-  "evidence",
-  "learning",
-  "analytics",
-  "optimization",
-]);
-
-/** Old tab ids → their new home. Keeps saved links and bookmarks working. */
-const LEGACY_TABS: Record<string, Tab> = {
-  overview: "dashboard",
-  watchlists: "watchlist",
-  scanner: "markets",
-  charts: "markets",
-  alerts: "signals",
-  signals: "signals",
-  briefing: "signals",
-  portfolio: "trading",
-  risk: "trading",
-  research: "evidence",
-  backtest: "evidence",
-  // Anything that used to mean "a strategy running by itself" now belongs to
-  // Paper rather than to Trading, which is a different book.
-  deployments: "paper",
-  deployment: "paper",
-  live: "paper",
-};
-
-/**
- * Deep links look like `#markets/charts` or `#signals/queue`. A bare `#charts`
- * still arrives from the ticker bar and scanners, so legacy ids are mapped to
- * the right tab *and* the right sub-tab — otherwise "open chart" lands on the
- * Markets tab showing the scanner, which is not what the user clicked.
- */
-const LEGACY_SUB: Partial<Record<string, string>> = {
-  scanner: "scanner",
-  charts: "charts",
-  alerts: "alerts",
-  signals: "queue",
-  briefing: "brief",
-  research: "research",
-  backtest: "backtest",
-  risk: "control-center",
-};
-
-function parseHash(raw: string): { tab: Tab; sub?: string } | null {
-  const [head, sub] = raw.replace(/^#\/?/, "").toLowerCase().split("/");
-  const tab = LEGACY_TABS[head] ?? (head as Tab);
-  if (!VALID_TABS.has(tab)) return null;
-  return { tab, sub: sub || LEGACY_SUB[head] };
-}
-
 function getInitialRoute(): { tab: Tab; sub?: string } {
   if (typeof window !== "undefined") {
-    const fromHash = parseHash(window.location.hash);
+    const fromHash = parseRoute(window.location.hash);
     if (fromHash) return fromHash;
-    const fromStore = parseHash(localStorage.getItem("atr.tab") ?? "");
+    const fromStore = parseRoute(localStorage.getItem("atr.tab") ?? "");
     if (fromStore) return fromStore;
   }
   return { tab: "dashboard" };
 }
 
-// ─── Markets: scanner + charts under one roof ─────────────────────────────────
+// ─── Markets: what is happening ───────────────────────────────────────────────
 function MarketsTabContainer({
   sub,
   onSubChange,
   onOpenChart,
   theme,
 }: {
-  sub: MarketsSub;
-  onSubChange: (s: MarketsSub) => void;
+  sub: string;
+  onSubChange: (s: string) => void;
   onOpenChart: (symbol: string) => void;
   theme: "dark" | "light";
 }) {
   return (
     <div className="space-y-4">
-      <SubTabs
-        value={sub}
-        onChange={onSubChange}
-        options={[
-          { id: "intelligence" as MarketsSub, label: "Intelligence" },
-          { id: "scanner" as MarketsSub, label: "Momentum scan" },
-          { id: "custom" as MarketsSub, label: "Custom scan" },
-          { id: "screener" as MarketsSub, label: "Screener" },
-          { id: "charts" as MarketsSub, label: "Charts" },
-        ]}
-      />
+      <SubTabs tab="markets" value={sub} onChange={onSubChange} />
       {sub === "intelligence" && (
         <MarketIntelligencePanel
           onOpenScreen={(p) => {
@@ -268,12 +157,11 @@ function MarketsTabContainer({
             } catch {
               /* private mode: the screener just opens with its default */
             }
-            onSubChange("screener" as MarketsSub);
+            onSubChange("screener");
           }}
         />
       )}
       {sub === "scanner" && <ScannerPanel onOpenChart={onOpenChart} />}
-      {sub === "custom" && <CustomScannerPanel onOpenChart={onOpenChart} />}
       {sub === "screener" && <ScreenerPanel onOpenChart={onOpenChart} />}
       {sub === "charts" && <ChartsPanel theme={theme} />}
     </div>
@@ -286,23 +174,13 @@ function SignalsTabContainer({
   onSubChange,
   onOpenChart,
 }: {
-  sub: SignalsSub;
-  onSubChange: (s: SignalsSub) => void;
+  sub: string;
+  onSubChange: (s: string) => void;
   onOpenChart: (symbol: string) => void;
 }) {
   return (
     <div className="space-y-4">
-      <SubTabs
-        value={sub}
-        onChange={onSubChange}
-        options={[
-          { id: "today" as SignalsSub, label: "Today" },
-          { id: "queue" as SignalsSub, label: "Trade queue" },
-          { id: "alerts" as SignalsSub, label: "Alerts" },
-          { id: "brief" as SignalsSub, label: "Morning brief" },
-          { id: "context" as SignalsSub, label: "Signal context" },
-        ]}
-      />
+      <SubTabs tab="signals" value={sub} onChange={onSubChange} />
       {sub === "today" && <TodayPanel onOpenChart={onOpenChart} />}
       {sub === "brief" && <BriefingPanel />}
       {sub === "alerts" && <AlertsPanel onOpenChart={onOpenChart} />}
@@ -312,64 +190,66 @@ function SignalsTabContainer({
   );
 }
 
-// ─── Trading: what I have done, plus the mode switch in the header row ─────
-// "mode" used to be a third tab; stale #trading/mode links fall back to portfolio.
-function asTradingSub(s?: string): TradingSub {
-  return s === "control-center" || s === "portfolio" ? s : "portfolio";
-}
-function TradingTabContainer({
-  sub,
-  onSubChange,
-}: {
-  sub: TradingSub;
-  onSubChange: (s: TradingSub) => void;
-}) {
-  const safe = asTradingSub(sub);
+// ─── Live: your broker account, your limits, the kill switch ──────────────────
+function TradingTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (s: string) => void }) {
   const ex = useExecutionMode();
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-      <SubTabs
-          value={safe}
-        onChange={onSubChange}
-        options={[
-            { id: "control-center" as TradingSub, label: "Paper trading" },
-            { id: "portfolio" as TradingSub, label: "Broker account" },
-        ]}
-      />
+        <SubTabs tab="trading" value={sub} onChange={onSubChange} />
         <ModePill ex={ex} />
       </div>
       <ModeDetails ex={ex} />
-      {safe === "control-center" && <PortfolioControlCenter />}
-      {safe === "portfolio" && <PortfolioPanel />}
+      {sub === "control-center" && <PortfolioControlCenter />}
+      {sub === "portfolio" && <PortfolioPanel />}
     </div>
   );
 }
 
-// ─── Evidence: proof on prices the strategy has never seen ────────────────────
-function EvidenceTabContainer({
-  sub,
-  onSubChange,
-}: {
-  sub: EvidenceSub;
-  onSubChange: (s: EvidenceSub) => void;
-}) {
+// ─── Test: proof on prices the strategy has never seen ────────────────────────
+function EvidenceTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (s: string) => void }) {
   const [researchTab, setResearchTab] = useState<"harness" | "measured">("harness");
-  const safe: EvidenceSub = sub === "backtest" || sub === "research" || sub === "measured" ? sub : "backtest";
   return (
     <div className="space-y-4">
-      <SubTabs
-        value={safe}
-        onChange={onSubChange}
-        options={[
-          { id: "backtest" as EvidenceSub, label: "Backtest" },
-          { id: "research" as EvidenceSub, label: "Validate" },
-          { id: "measured" as EvidenceSub, label: "Results" },
-        ]}
-      />
-      {safe === "backtest" && <BacktestWorkflowPanel />}
-      {safe === "research" && <ResearchPanel forcedTab={researchTab} onTabChange={setResearchTab} />}
-      {safe === "measured" && <ResearchPanel forcedTab="measured" onTabChange={setResearchTab} />}
+      <SubTabs tab="evidence" value={sub} onChange={onSubChange} />
+      {sub === "backtest" && <BacktestWorkflowPanel />}
+      {sub === "research" && <ResearchPanel forcedTab={researchTab} onTabChange={setResearchTab} />}
+      {sub === "measured" && <ResearchPanel forcedTab="measured" onTabChange={setResearchTab} />}
+      {sub === "improve" && <OptimizationPanel />}
+    </div>
+  );
+}
+
+// ─── Performance: what happened, and why ──────────────────────────────────────
+function PerformanceTabContainer({ sub, onSubChange }: { sub: string; onSubChange: (s: string) => void }) {
+  return (
+    <div className="space-y-4">
+      <SubTabs tab="learning" value={sub} onChange={onSubChange} />
+      {sub === "review" && <LearningPanel />}
+      {sub === "attribution" && <AnalyticsPanel />}
+    </div>
+  );
+}
+
+// ─── Labs: experimental, outside the tested path ──────────────────────────────
+function LabsTabContainer({
+  sub,
+  onSubChange,
+  onOpenChart,
+}: {
+  sub: string;
+  onSubChange: (s: string) => void;
+  onOpenChart: (symbol: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <Callout tone="warn">
+        These tools are experimental and not part of the tested path. Their results are ideas to check in Test, not evidence.
+      </Callout>
+      <SubTabs tab="labs" value={sub} onChange={onSubChange} />
+      {sub === "custom-scan" && <CustomScannerPanel onOpenChart={onOpenChart} />}
+      {sub === "alpha-hunt" && <AlphaHuntPanel />}
+      {sub === "episodic-pivot" && <EpisodicPivotPanel />}
     </div>
   );
 }
@@ -397,23 +277,16 @@ function LiveClock() {
   );
 }
 
-function SubTabs<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { id: T; label: string }[];
-}) {
+/** The second row of a page, built from the page's sub-pages in lib/nav.ts. */
+function SubTabs({ tab, value, onChange }: { tab: Tab; value: string; onChange: (v: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onChange(v as T)} variant="pill">
+    <Tabs value={value} onValueChange={onChange} variant="pill">
       <TabsList>
-      {options.map((o) => (
+        {(SUBS[tab] ?? []).map((o) => (
           <TabsTrigger key={o.id} value={o.id}>
-          {o.label}
+            {o.label}
           </TabsTrigger>
-      ))}
+        ))}
       </TabsList>
     </Tabs>
   );
@@ -421,17 +294,9 @@ function SubTabs<T extends string>({
 
 export default function App() {
   const initial = getInitialRoute();
-  const [tab, setTabState] = useState<Tab>(initial.tab);
-  const [marketsSub, setMarketsSub] = useState<MarketsSub>(
-    (initial.sub as MarketsSub) ?? "intelligence",
-  );
-  const [signalsSub, setSignalsSub] = useState<SignalsSub>(
-    (initial.sub as SignalsSub) ?? "today",
-  );
-  const [evidenceSub, setEvidenceSub] = useState<EvidenceSub>(
-    initial.sub === "backtest" || initial.sub === "research" || initial.sub === "measured" ? initial.sub : "backtest",
-  );
-  const [tradingSub, setTradingSub] = useState<TradingSub>(asTradingSub(initial.sub));
+  const [route, setRoute] = useState<{ tab: Tab; sub?: string }>(initial);
+  const tab = route.tab;
+  const sub = route.sub;
 
   // Who is using the dashboard, and what they may do. This is the *platform*
   // account; the IIFL broker session below is a separate credential.
@@ -454,11 +319,13 @@ export default function App() {
     clearSession();
   }, [clearSession]);
 
-  const setTab = useCallback((nextTab: Tab, sub?: string) => {
-    setTabState(nextTab);
+  const setTab = useCallback((nextTab: Tab, nextSub?: string) => {
+    const safeSub = normaliseSub(nextTab, nextSub);
+    setRoute({ tab: nextTab, sub: safeSub });
     if (typeof window !== "undefined") {
-      localStorage.setItem("atr.tab", sub ? `${nextTab}/${sub}` : nextTab);
-      window.location.hash = sub ? `${nextTab}/${sub}` : nextTab;
+      const target = safeSub ? `${nextTab}/${safeSub}` : nextTab;
+      localStorage.setItem("atr.tab", target);
+      window.location.hash = target;
     }
   }, []);
 
@@ -472,7 +339,6 @@ export default function App() {
           /* ignore */
         }
       }
-      setMarketsSub("charts");
       setTab("markets", "charts");
     },
     [setTab],
@@ -480,14 +346,10 @@ export default function App() {
 
   useEffect(() => {
     const handleHashChange = () => {
-      const route = parseHash(window.location.hash);
-      if (!route) return;
-      setTabState(route.tab);
-      localStorage.setItem("atr.tab", route.sub ? `${route.tab}/${route.sub}` : route.tab);
-      if (route.tab === "markets" && route.sub) setMarketsSub(route.sub as MarketsSub);
-      if (route.tab === "signals" && route.sub) setSignalsSub(route.sub as SignalsSub);
-      if (route.tab === "evidence" && route.sub) setEvidenceSub(route.sub === "backtest" || route.sub === "research" || route.sub === "measured" ? route.sub : "backtest");
-      if (route.tab === "trading" && route.sub) setTradingSub(asTradingSub(route.sub));
+      const next = parseRoute(window.location.hash);
+      if (!next) return;
+      setRoute(next);
+      localStorage.setItem("atr.tab", next.sub ? `${next.tab}/${next.sub}` : next.tab);
     };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
@@ -546,29 +408,26 @@ export default function App() {
     return () => clearInterval(t);
   }, [refreshHealth, refreshAuth]);
 
-  const meta = TITLES[tab];
+  const meta = PAGES[tab];
   const accountInitials = (principal?.display_name || principal?.username || "?").slice(0, 2);
   const [showLogin, setShowLogin] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(() => {
+  // Open by default: a first-time user needs the labels (the path, then the market) more than
+  // the extra width. Whatever they choose afterwards is remembered.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
     try {
-      return localStorage.getItem("atr.sidebar.more") === "1";
+      return localStorage.getItem("atr.sidebar.open") !== "0";
     } catch {
-      return false;
+      return true;
     }
   });
-  // The list is open or closed as the person chose. The old rule also held it open whenever
-  // the current page belonged to it, so "Less" did nothing while you were on, say, System.
-  // Folded, it still shows the page you are on, so you can tell where you are.
-  const shownMore = moreOpen ? MORE : MORE.filter((i) => i.id === tab);
-  const toggleMore = () => {
-    const next = !moreOpen;
-    setMoreOpen(next);
+  const changeSidebar = useCallback((next: boolean) => {
+    setSidebarOpen(next);
     try {
-      localStorage.setItem("atr.sidebar.more", next ? "1" : "0");
+      localStorage.setItem("atr.sidebar.open", next ? "1" : "0");
     } catch {
       // remembering the choice is a convenience
     }
-  };
+  }, []);
   const prompted = useRef(false);
 
   useEffect(() => {
@@ -592,16 +451,19 @@ export default function App() {
 
   const paletteItems: CommandItem[] = useMemo(
     () => [
-      { id: "go-dashboard", label: "Go to Dashboard", group: "Navigate", icon: Home, hint: "1", keywords: ["overview", "home", "status"], onSelect: () => setTab("dashboard") },
-      { id: "go-watchlist", label: "Go to Watchlist", group: "Navigate", icon: Eye, hint: "2", keywords: ["watchlist", "my symbols", "columns", "favourites", "track"], onSelect: () => setTab("watchlist") },
-      { id: "go-markets", label: "Go to Markets", group: "Navigate", icon: Search, hint: "3", keywords: ["scanner", "momentum", "charts", "scan"], onSelect: () => setTab("markets") },
-      { id: "go-strategies", label: "Go to Strategies", group: "Navigate", icon: BarChart3, hint: "4", keywords: ["registry", "validated", "paper", "models"], onSelect: () => setTab("strategies") },
-      { id: "go-signals", label: "Go to Signals", group: "Navigate", icon: Bell, hint: "5", keywords: ["alerts", "buy", "sell", "rules", "notify", "briefing", "morning"], onSelect: () => setTab("signals") },
-      { id: "go-trading", label: "Go to Trading", group: "Navigate", icon: Briefcase, hint: "6", keywords: ["portfolio", "holdings", "positions", "limits", "order book", "trade book"], onSelect: () => setTab("trading") },
-      { id: "go-paper", label: "Go to Paper", group: "Navigate", icon: Radio, hint: "7", keywords: ["deploy", "deployment", "paper trading", "simulate", "monitor", "strategy running", "pause", "stop", "reset", "capital"], onSelect: () => setTab("paper") },
-      { id: "go-evidence", label: "Go to Evidence (walk-forward)", group: "Navigate", icon: FlaskConical, hint: "8", keywords: ["research", "validate", "out of sample", "deflated sharpe", "backtest", "measured"], onSelect: () => setTab("evidence") },
-      { id: "go-optimization", label: "Go to Strategy Optimization", group: "Navigate", icon: SlidersHorizontal, hint: "opt", keywords: ["optimization", "adaptive", "parameters", "walk-forward", "robustness", "recommendation"], onSelect: () => setTab("optimization") },
-      { id: "go-risk", label: "Go to Portfolio Controls & Risk", group: "Navigate", icon: ShieldAlert, hint: "9", keywords: ["kill switch", "limits", "exposure", "halt", "stop", "risk", "policy"], onSelect: () => { setTradingSub("control-center"); setTab("trading", "control-center"); } },
+      ...NAV_GROUPS.flatMap((g) => g.tabs).map((id): CommandItem => {
+        const Icon = TAB_ICON[id];
+        return {
+          id: `go-${id}`,
+          label: `Go to ${PAGES[id].name}`,
+          group: "Navigate",
+          icon: Icon,
+          keywords: PALETTE_KEYWORDS[id],
+          onSelect: () => setTab(id),
+        };
+      }),
+      { id: "go-risk", label: "Go to Risk & limits (kill switch)", group: "Navigate", icon: ShieldAlert, keywords: ["kill switch", "limits", "exposure", "halt", "stop", "risk", "policy", "control center"], onSelect: () => setTab("trading", "control-center") },
+      { id: "go-improve", label: "Go to Improve (optimization)", group: "Navigate", icon: SlidersHorizontal, keywords: ["optimization", "optimisation", "adaptive", "parameters", "walk-forward", "robustness", "recommendation", "experiment"], onSelect: () => setTab("evidence", "improve") },
       { id: "toggle-theme", label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", group: "View", icon: Palette, keywords: ["appearance"], onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
       { id: "login", label: "Log in with IIFL", group: "Session", icon: LogIn, keywords: ["auth", "session", "broker"], onSelect: () => setShowLogin(true) },
       { id: "sign-out", label: "Sign out", group: "Session", icon: LogOut, keywords: ["logout", "account", "leave", "end session"], onSelect: () => void signOut() },
@@ -640,7 +502,7 @@ export default function App() {
   }
 
   return (
-    <AnimatedSidebarProvider defaultOpen={false}>
+    <AnimatedSidebarProvider open={sidebarOpen} onOpenChange={changeSidebar}>
       <AnimatedSidebar ariaLabel="Forward navigation" collapsible="icon">
         <AnimatedSidebarHeader className="p-3 pb-2">
           <div className="flex min-h-11 items-center gap-3 overflow-hidden px-2">
@@ -652,45 +514,29 @@ export default function App() {
         </AnimatedSidebarHeader>
 
         <AnimatedSidebarContent className="px-2 pt-1">
-          <AnimatedSidebarGroup className="pb-2">
-            <AnimatedSidebarGroupContent>
-              <AnimatedSidebarMenu>
-                {[...PRIMARY].map((it) => {
-                  const Icon = it.icon;
-                  return (
-                    <AnimatedSidebarMenuItem key={it.id}>
-                      <AnimatedSidebarMenuButton
-                        isActive={tab === it.id}
-                        icon={<Icon size={18} />}
-                        onSelect={() => setTab(it.id)}
-                      >
-                        {it.name}
-                      </AnimatedSidebarMenuButton>
-                    </AnimatedSidebarMenuItem>
-                  );
-                })}
-                <AnimatedSidebarMenuItem>
-                  <AnimatedSidebarMenuButton icon={<Ellipsis size={18} />} onSelect={toggleMore}>
-                    {moreOpen ? "Less" : "More"}
-                  </AnimatedSidebarMenuButton>
-                </AnimatedSidebarMenuItem>
-                {shownMore.map((it) => {
-                  const Icon = it.icon;
-                  return (
-                    <AnimatedSidebarMenuItem key={it.id}>
-                      <AnimatedSidebarMenuButton
-                        isActive={tab === it.id}
-                        icon={<Icon size={18} />}
-                        onSelect={() => setTab(it.id)}
-                      >
-                        {it.name}
-                      </AnimatedSidebarMenuButton>
-                    </AnimatedSidebarMenuItem>
-                  );
-                })}
-              </AnimatedSidebarMenu>
-            </AnimatedSidebarGroupContent>
-          </AnimatedSidebarGroup>
+          {NAV_GROUPS.map((group) => (
+            <AnimatedSidebarGroup key={group.label ?? "main"} className="pb-2">
+              {group.label ? <AnimatedSidebarGroupLabel>{group.label}</AnimatedSidebarGroupLabel> : null}
+              <AnimatedSidebarGroupContent>
+                <AnimatedSidebarMenu>
+                  {group.tabs.map((id) => {
+                    const Icon = TAB_ICON[id];
+                    return (
+                      <AnimatedSidebarMenuItem key={id}>
+                        <AnimatedSidebarMenuButton
+                          isActive={tab === id}
+                          icon={<Icon size={18} />}
+                          onSelect={() => setTab(id)}
+                        >
+                          {PAGES[id].name}
+                        </AnimatedSidebarMenuButton>
+                      </AnimatedSidebarMenuItem>
+                    );
+                  })}
+                </AnimatedSidebarMenu>
+              </AnimatedSidebarGroupContent>
+            </AnimatedSidebarGroup>
+          ))}
         </AnimatedSidebarContent>
 
         <AnimatedSidebarFooter className="gap-3 border-none p-3">
@@ -777,7 +623,7 @@ export default function App() {
         <main
           className={cn(
             "mx-auto min-w-0 w-full max-w-[1200px] px-6 pb-16",
-            tab === "markets" && marketsSub === "charts"
+            tab === "markets" && sub === "charts"
             ? "max-md:px-4 pb-8"
             : "max-md:px-4",
           )}
@@ -797,6 +643,7 @@ export default function App() {
               </Tooltip>
             <div className="min-w-0">
                 <div className="truncate text-heading text-foreground">{meta.title}</div>
+                <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{meta.blurb}</div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -859,40 +706,35 @@ export default function App() {
         </div>
 
         <Suspense fallback={<PageLoader />}>
-        {tab === "dashboard" && <OverviewPanel onNavigate={(t) => setTab(t as Tab)} />}
+        {tab === "dashboard" && <OverviewPanel onNavigate={(t, s) => setTab(t, s)} />}
         {tab === "watchlist" && (
           <WatchlistPanel permissions={principal?.permissions ?? []} onOpenChart={openChart} />
         )}
         {tab === "markets" && (
           <MarketsTabContainer
-            sub={marketsSub}
+            sub={sub ?? "intelligence"}
             onSubChange={(s) => setTab("markets", s)}
             onOpenChart={openChart}
             theme={theme}
           />
         )}
-        {tab === "strategies" && (
-          <StrategiesPanel
-            onOpenPaper={() => setTab("paper")}
-          />
-        )}
+        {tab === "strategies" && <StrategiesPanel onOpenPaper={() => setTab("paper")} />}
         {tab === "signals" && (
-          <SignalsTabContainer
-            sub={signalsSub}
-            onSubChange={(s) => setTab("signals", s)}
-            onOpenChart={openChart}
-          />
+          <SignalsTabContainer sub={sub ?? "today"} onSubChange={(s) => setTab("signals", s)} onOpenChart={openChart} />
         )}
         {tab === "trading" && (
-          <TradingTabContainer sub={tradingSub} onSubChange={(s) => setTab("trading", s)} />
+          <TradingTabContainer sub={sub ?? "portfolio"} onSubChange={(s) => setTab("trading", s)} />
         )}
         {tab === "paper" && <PaperDeploymentPanel onOpenStrategies={() => setTab("strategies")} />}
         {tab === "evidence" && (
-          <EvidenceTabContainer sub={evidenceSub} onSubChange={(s) => setTab("evidence", s)} />
+          <EvidenceTabContainer sub={sub ?? "backtest"} onSubChange={(s) => setTab("evidence", s)} />
         )}
-        {tab === "learning" && <LearningPanel />}
-        {tab === "analytics" && <AnalyticsPanel />}
-        {tab === "optimization" && <OptimizationPanel />}
+        {tab === "learning" && (
+          <PerformanceTabContainer sub={sub ?? "review"} onSubChange={(s) => setTab("learning", s)} />
+        )}
+        {tab === "labs" && (
+          <LabsTabContainer sub={sub ?? "custom-scan"} onSubChange={(s) => setTab("labs", s)} onOpenChart={openChart} />
+        )}
         </Suspense>
         </main>
       </AnimatedSidebarInset>

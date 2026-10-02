@@ -9,11 +9,13 @@ import {
   getRunnerStatus,
   getTradeSignals,
   listDeployments,
+  listSavedStrategies,
   type DashboardSummary,
   type Deployment,
   type Health,
   type Position,
   type RunnerStatus,
+  type SavedStrategy,
   type TradeSignalsResponse,
 } from "./api";
 import { Button } from "./components/ui/button";
@@ -22,12 +24,15 @@ import { Card, Hint } from "./components/ui/card";
 import { AnimatedBadge } from "./components/motion/animated-badge";
 import { TiltCard } from "./components/motion/tilt-card";
 import { useLiveTicks } from "./lib/useLiveTicks";
+import { JourneyCard } from "./JourneyCard";
+import { journeySteps, nextStep } from "./lib/journey";
+import type { Tab } from "./lib/nav";
 import { cn } from "./lib/utils";
 import { setVisibleInterval } from "./lib/visibleInterval";
 import { formatInr as inrFmt, TYPOGRAPHY } from "./lib/theme";
 
 interface Props {
-  onNavigate: (tab: string) => void;
+  onNavigate: (tab: Tab, sub?: string) => void;
 }
 
 // ─── Status Badges ────────────────────────────────────────────────────────────
@@ -41,6 +46,7 @@ export default function OverviewPanel({ onNavigate }: Props) {
   const [positions, setPositions] = useState<Position[] | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [signals, setSignals] = useState<TradeSignalsResponse | null>(null);
+  const [strategies, setStrategies] = useState<SavedStrategy[]>([]);
 
   const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -63,6 +69,7 @@ export default function OverviewPanel({ onNavigate }: Props) {
         apply(getPositions(), setPositions),
         apply(listDeployments(), (v) => setDeployments(v?.deployments ?? [])),
         apply(getTradeSignals(), setSignals),
+        apply(listSavedStrategies(), (v) => setStrategies(v?.strategies ?? [])),
       ]);
 
       const now = new Date();
@@ -137,13 +144,22 @@ export default function OverviewPanel({ onNavigate }: Props) {
   ];
 
   // Plain-language things that need the person, most important first.
-  const todo: { id: string; tone: "bad" | "warn"; text: string; action?: { label: string; tab: string } }[] = [];
+  const todo: { id: string; tone: "bad" | "warn"; text: string; action?: { label: string; tab: Tab } }[] = [];
   // The safety switch is already on the app-wide banner and the Trading tile
   // (which links to Risk), and a disconnected broker is in the status strip
   // with Log in in the app bar, so neither gets its own row here.
   if (health?.session_active && feedStatus === "ERROR") {
     todo.push({ id: "prices", tone: "warn", text: "Live prices are off right now." });
   }
+
+  const steps = journeySteps({
+    strategies: strategies.length,
+    deployable: strategies.filter((x) => x.deployable).length,
+    paperRuns: deployments.length,
+    executionMode: health ? (health.execution_mode === "live" ? "live" : "paper") : null,
+    brokerConnected: !!health?.session_active,
+  });
+  const next = nextStep(steps);
 
   const pnlTone = dayPnl === null ? "text-muted-foreground" : dayPnl > 0 ? "text-gain" : dayPnl < 0 ? "text-loss" : "text-foreground";
 
@@ -169,11 +185,11 @@ export default function OverviewPanel({ onNavigate }: Props) {
       </div>
           <div className="flex flex-col gap-5 pb-7 pt-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-[600px]">
-            <h1 className="max-w-[640px] text-display text-foreground sm:text-5xl sm:leading-[1.15] sm:tracking-[-0.96px]">How am I doing today?</h1>
-            <p className="mt-2 max-w-[520px] text-base font-light leading-[1.4] text-muted-foreground">Live prices, open trades, and proof on prices the strategy has never seen &mdash; in one quiet ledger.</p>
+            <h1 className="max-w-[640px] text-display text-foreground sm:text-5xl sm:leading-[1.15] sm:tracking-[-0.96px]">{next ? "Prove it before you risk it." : "How am I doing today?"}</h1>
+            <p className="mt-2 max-w-[520px] text-base font-light leading-[1.4] text-muted-foreground">{next ? "Build a strategy, test it on prices it has never seen, run it on paper, and only then trade it live." : "Live prices, open trades, and proof on prices the strategy has never seen, in one quiet ledger."}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:pb-1">
-            <Button variant="primary" size="md" onClick={() => onNavigate("strategies")}>Start a strategy</Button>
+            <Button variant="primary" size="md" onClick={() => (next ? onNavigate(next.tab, next.sub) : onNavigate("learning"))}>{next ? next.action : "Open performance"}</Button>
             </div>
           </div>
         </div>
@@ -209,6 +225,8 @@ export default function OverviewPanel({ onNavigate }: Props) {
         ))}
       </div>
       </section>
+
+      <JourneyCard steps={steps} next={next} onNavigate={onNavigate} />
 
       {/* Today, full width: the one answer the dashboard leads with. */}
       <TiltCard

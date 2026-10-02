@@ -315,6 +315,27 @@ gap-4 stack of cards
 One title, at most two tab rows, then a `gap-4` stack. Content is never wider than the page
 container; do not add your own max-width.
 
+### 4.1a Navigation: one story
+
+The product tells one story, **prove a strategy, then trade it**, and the sidebar is that story:
+
+```
+PROVE, THEN TRADE   Home -> Strategies -> Test -> Paper -> Live -> Performance
+MARKET              Markets, Signals, Watchlist
+EXPERIMENTAL        Labs
+```
+
+- The map (names, groups, sub-pages, old links) lives in `src/lib/nav.ts` and is tested. Add a page
+  there first; the sidebar, command palette and routing follow from it.
+- Every page has a **name** (sidebar, one word where possible), a **title** and **one plain sentence**
+  under it saying what it is for. The path pages start with "Step N".
+- Sidebar names are what the user would say, not what the code calls it: Test, not Evidence or
+  Validate; Live, not Trading; Performance, not Learning.
+- A tool that is not part of the tested path goes in **Labs**, and Labs says so. Do not add a top-level page
+  for an experiment.
+- Home always shows where the user is on the path and the one next step (`lib/journey.ts`).
+- Renaming or moving a page means adding the old id to `LEGACY` in `nav.ts`, so bookmarks keep working.
+
 ### 4.2 Showing market numbers
 
 | Thing | Format | Example |

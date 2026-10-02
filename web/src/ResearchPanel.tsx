@@ -27,8 +27,6 @@ import { Tabs, TabsList, TabsTrigger } from "./components/motion/tabs";
 import { Tooltip } from "./components/motion/tooltip";
 import { cn } from "./lib/utils";
 import ValidationPanel from "./ValidationPanel";
-import EpisodicPivotPanel from "./EpisodicPivotPanel";
-import AlphaHuntPanel from "./AlphaHuntPanel";
 import EvidencePanel from "./EvidencePanel";
 import { humanizeSentence, strategyLabel } from "./lib/format";
 
@@ -282,8 +280,6 @@ export default function ResearchPanel({
         <>
           <EvidencePanel />
           <ValidationPanel />
-          <EpisodicPivotPanel />
-          <AlphaHuntPanel />
         </>
       ) : (
         <>
